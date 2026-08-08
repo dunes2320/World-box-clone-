@@ -1,4 +1,7 @@
-node_modules/
-dist/
-.DS_Store
-*.log
+target/
+dependency-reduced-pom.xml
+*.class
+hs_err_pid*.log
+.idea/
+*.iml
+.vscode/

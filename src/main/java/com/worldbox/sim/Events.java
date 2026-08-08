@@ -1,0 +1,233 @@
+package com.worldbox.sim;
+
+import com.worldbox.config.Config;
+import com.worldbox.world.WorldGrid;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** Fire/vegetation ambient dynamics, plus every one-shot "weird stuff" god
+ * tool: meteor, nuke, earthquake, blessing, zombie outbreak, tornado and
+ * the rampaging kaiju monster. */
+public class Events {
+
+  // ---- fire + vegetation: always running ----
+  public static void igniteCell(WorldGrid grid, int x, int y, int life) {
+    if (!grid.inBounds(x, y)) return;
+    int i = grid.idx(x, y);
+    if (grid.terrain[i] == Config.WATER || grid.terrain[i] == Config.STONE) return;
+    if (!grid.burning[i] && (grid.terrain[i] == Config.GRASS || grid.resource[i] == Config.RES_FOREST)) {
+      grid.burning[i] = true;
+      grid.burnTimer[i] = life > 0 ? life : (int) (20 + Math.random() * 25);
+      grid.markDirtyIdx(i);
+    }
+  }
+
+  public static void igniteCell(WorldGrid grid, int x, int y) { igniteCell(grid, x, y, 0); }
+
+  private static void updateFire(GameState state) {
+    WorldGrid grid = state.grid;
+    List<Integer> burningCells = new ArrayList<>();
+    for (int i = 0; i < grid.cols * grid.rows; i++) if (grid.burning[i]) burningCells.add(i);
+
+    int[][] dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    for (int i : burningCells) {
+      grid.burnTimer[i]--;
+      if (grid.burnTimer[i] <= 0) {
+        grid.burning[i] = false;
+        grid.resource[i] = Config.RES_NONE;
+        if (grid.terrain[i] == Config.GRASS) grid.terrain[i] = Config.DIRT;
+        grid.markDirtyIdx(i);
+        continue;
+      }
+      int x = i % grid.cols, y = i / grid.cols;
+      for (int[] d : dirs) {
+        int nx = x + d[0], ny = y + d[1];
+        if (!grid.inBounds(nx, ny)) continue;
+        int ni = grid.idx(nx, ny);
+        if (grid.burning[ni]) continue;
+        boolean flammable = grid.terrain[ni] == Config.GRASS || grid.resource[ni] == Config.RES_FOREST;
+        if (flammable && Math.random() < 0.1) igniteCell(grid, nx, ny, (int) (20 + Math.random() * 25));
+      }
+    }
+  }
+
+  private static void updateVegetation(GameState state) {
+    WorldGrid grid = state.grid;
+    int samples = 250;
+    for (int s = 0; s < samples; s++) {
+      int x = (int) (Math.random() * grid.cols);
+      int y = (int) (Math.random() * grid.rows);
+      int i = grid.idx(x, y);
+      if (grid.terrain[i] != Config.GRASS) continue;
+      if (grid.resource[i] == Config.RES_FOREST) {
+        if (grid.resourceAmount[i] < Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 8 && Math.random() < 0.05) {
+          grid.resourceAmount[i] += 1;
+        }
+      } else if (grid.resource[i] == Config.RES_NONE && Math.random() < 0.004) {
+        grid.resource[i] = Config.RES_FOREST;
+        grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 2;
+        grid.markDirtyIdx(i);
+      }
+    }
+  }
+
+  // ---- disaster / god-tool triggers (one-shot) ----
+  public static void explode(GameState state, double cx, double cy, double radius, boolean crater) {
+    WorldGrid grid = state.grid;
+    grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
+      int i = grid.idx(x, y);
+      if (d < radius * 0.55) {
+        if (crater) grid.terrain[i] = Config.STONE;
+        grid.resource[i] = Config.RES_NONE;
+        grid.burning[i] = false;
+      } else {
+        igniteCell(grid, x, y, (int) (25 + Math.random() * 25));
+      }
+      grid.markDirtyIdx(i);
+    });
+    double r = radius;
+    state.humans.removeIf(h -> Math.hypot(h.x - cx, h.z - cy) < r * 0.7);
+    for (Settlement settlement : state.settlements.values()) {
+      double d = Math.hypot(settlement.x - cx, settlement.z - cy);
+      if (d < radius) {
+        int loss = (int) Math.round((1 - d / radius) * settlement.populationCount * 0.4);
+        settlement.stock.put("food", Math.max(0, settlement.stock.get("food") - loss * 5));
+      }
+    }
+  }
+
+  public static void earthquake(GameState state, double cx, double cy, double radius) {
+    WorldGrid grid = state.grid;
+    grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
+      int i = grid.idx(x, y);
+      if (grid.terrain[i] == Config.WATER) return;
+      grid.height[i] += (float) ((Math.random() - 0.5) * 3 * (1 - d / radius));
+      if (Math.random() < 0.08) grid.terrain[i] = Config.STONE;
+      grid.markDirtyIdx(i);
+    });
+    for (Settlement s : state.settlements.values()) {
+      if (Math.hypot(s.x - cx, s.z - cy) < radius) s.siegeProgress = 0;
+    }
+    state.humans.removeIf(h -> {
+      double d = Math.hypot(h.x - cx, h.z - cy);
+      return d < radius * 0.5 && Math.random() < 0.3;
+    });
+  }
+
+  public static void blessing(GameState state, double cx, double cy, double radius) {
+    WorldGrid grid = state.grid;
+    grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
+      int i = grid.idx(x, y);
+      if (grid.burning[i]) { grid.burning[i] = false; grid.markDirtyIdx(i); }
+    });
+    for (Settlement s : state.settlements.values()) {
+      if (Math.hypot(s.x - cx, s.z - cy) <= radius) {
+        s.stock.merge("food", 60.0, Double::sum);
+        Nation n = state.nations.get(s.nationId);
+        if (n != null) n.treasury += 70;
+      }
+    }
+  }
+
+  public static void zombieOutbreak(GameState state, double cx, double cy, double radius, int count) {
+    int converted = 0;
+    for (Human h : state.humans) {
+      if (converted >= count) break;
+      if (h.nationId == Config.UNDEAD_NATION_ID) continue;
+      if (Math.hypot(h.x - cx, h.z - cy) <= radius) {
+        h.nationId = Config.UNDEAD_NATION_ID;
+        h.settlementId = -1;
+        h.job = null;
+        h.carryingType = null;
+        h.state = "wander";
+        converted++;
+      }
+    }
+  }
+
+  public static void spawnTornado(GameState state, double x, double z) {
+    state.tornadoes.add(new Tornado(x, z, Math.random() * Math.PI * 2, Config.TORNADO_LIFETIME));
+  }
+
+  private static void updateTornadoes(GameState state) {
+    WorldGrid grid = state.grid;
+    List<Tornado> keep = new ArrayList<>();
+    for (Tornado t : state.tornadoes) {
+      t.angle += (Math.random() - 0.5) * 0.6;
+      t.x += Math.cos(t.angle) * Config.TORNADO_SPEED * 0.1;
+      t.z += Math.sin(t.angle) * Config.TORNADO_SPEED * 0.1;
+      t.life--;
+      state.humans.removeIf(h -> {
+        double d = Math.hypot(h.x - t.x, h.z - t.z);
+        return d < 1.6 && Math.random() < 0.12;
+      });
+      grid.forEachInRadius(t.x, t.z, 1.3, (x, y, d) -> {
+        int i = grid.idx(x, y);
+        if (grid.resource[i] == Config.RES_FOREST && Math.random() < 0.2) {
+          grid.resource[i] = Config.RES_NONE;
+          grid.markDirtyIdx(i);
+        }
+      });
+      if (t.life > 0 && grid.inBounds((int) Math.floor(t.x), (int) Math.floor(t.z))) keep.add(t);
+    }
+    state.tornadoes = keep;
+  }
+
+  public static boolean spawnMonster(GameState state, double x, double z) {
+    if (state.monster != null) return false;
+    state.monster = new Monster(x, z, Config.MONSTER_HP, Config.MONSTER_LIFETIME);
+    return true;
+  }
+
+  private static void updateMonster(GameState state) {
+    Monster m = state.monster;
+    if (m == null) return;
+    m.life--;
+
+    Settlement target = null;
+    double bestD = Double.MAX_VALUE;
+    for (Settlement s : state.settlements.values()) {
+      double d = Math.hypot(s.x - m.x, s.z - m.z);
+      if (d < bestD) { bestD = d; target = s; }
+    }
+    if (target != null) {
+      double dx = target.x - m.x, dz = target.z - m.z;
+      double dist = Math.hypot(dx, dz);
+      if (dist > 1.4) {
+        m.x += (dx / dist) * Config.MONSTER_SPEED;
+        m.z += (dz / dist) * Config.MONSTER_SPEED;
+      } else {
+        List<Human> victims = new ArrayList<>();
+        for (Human h : state.humans) if (h.settlementId == target.id) victims.add(h);
+        for (int i = 0; i < 2 && !victims.isEmpty(); i++) {
+          victims.get((int) (Math.random() * victims.size())).dead = true;
+        }
+        target.stock.put("food", Math.max(0, target.stock.get("food") - 15));
+        target.stock.put("wood", Math.max(0, target.stock.get("wood") - 8));
+        m.hp -= target.populationCount * 0.06;
+      }
+    }
+
+    for (Army army : state.armies.values()) {
+      if (army.dead) continue;
+      double d = Math.hypot(army.x - m.x, army.z - m.z);
+      if (d < 1.7) {
+        m.hp -= Military.armyStrength(army) * 0.22;
+        Military.damageArmy(state, army, Config.MONSTER_POWER * 0.4);
+        Nation n = state.nations.get(army.nationId);
+        if (n != null && m.hp <= 0) n.treasury += 200;
+      }
+    }
+
+    state.humans.removeIf(h -> h.dead);
+    if (m.hp <= 0 || m.life <= 0) state.monster = null;
+  }
+
+  public static void update(GameState state) {
+    updateFire(state);
+    updateVegetation(state);
+    updateTornadoes(state);
+    updateMonster(state);
+  }
+}
