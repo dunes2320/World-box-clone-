@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WorldBox Clone</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <h1>🌍 World Box <span>clone</span></h1>
+      <div id="stats">
+        <span>👤 <b id="statHumans">0</b></span>
+        <span>🌳 <b id="statTrees">0</b></span>
+        <span>⏱ <b id="statTick">0</b></span>
+      </div>
+      <div id="speedControls">
+        <button data-speed="0" class="speedBtn">⏸</button>
+        <button data-speed="1" class="speedBtn active">▶</button>
+        <button data-speed="2" class="speedBtn">▶▶</button>
+        <button data-speed="4" class="speedBtn">▶▶▶</button>
+      </div>
+    </header>
+
+    <div id="main">
+      <aside id="toolbar">
+        <div class="toolGroup">
+          <h2>Terrain</h2>
+          <button class="tool" data-tool="water" title="Water">💧<span>Water</span></button>
+          <button class="tool" data-tool="sand" title="Sand">🏖️<span>Sand</span></button>
+          <button class="tool" data-tool="grass" title="Grass">🌱<span>Grass</span></button>
+          <button class="tool" data-tool="dirt" title="Dirt">🟤<span>Dirt</span></button>
+          <button class="tool" data-tool="stone" title="Mountain">⛰️<span>Mountain</span></button>
+        </div>
+
+        <div class="toolGroup">
+          <h2>Life</h2>
+          <button class="tool" data-tool="tree" title="Plant Tree">🌳<span>Tree</span></button>
+          <button class="tool" data-tool="human" title="Spawn Human">🧍<span>Human</span></button>
+        </div>
+
+        <div class="toolGroup">
+          <h2>Disasters</h2>
+          <button class="tool" data-tool="fire" title="Fire">🔥<span>Fire</span></button>
+          <button class="tool" data-tool="lightning" title="Lightning">⚡<span>Lightning</span></button>
+          <button class="tool" data-tool="meteor" title="Meteor">☄️<span>Meteor</span></button>
+          <button class="tool" data-tool="nuke" title="Nuke">☢️<span>Nuke</span></button>
+        </div>
+
+        <div class="toolGroup">
+          <h2>Brush size</h2>
+          <input type="range" id="brushSize" min="1" max="10" value="3" />
+          <div id="brushSizeLabel">3</div>
+        </div>
+
+        <div class="toolGroup">
+          <button id="resetBtn" class="wideBtn">🔄 Reset World</button>
+        </div>
+      </aside>
+
+      <div id="canvasWrap">
+        <canvas id="world"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/game.js"></script>
+</body>
+</html>

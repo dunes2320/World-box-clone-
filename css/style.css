@@ -1,0 +1,189 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #14181f;
+  --panel: #1c222c;
+  --panel-alt: #232a36;
+  --border: #313a48;
+  --text: #e7ecf3;
+  --muted: #8b96a8;
+  --accent: #4fa3ff;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#topbar h1 {
+  font-size: 18px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+#topbar h1 span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+#stats {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#stats b {
+  color: var(--text);
+}
+
+#speedControls {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.speedBtn {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.speedBtn:hover {
+  background: #2c3644;
+}
+
+.speedBtn.active {
+  background: var(--accent);
+  color: #08131f;
+  border-color: var(--accent);
+}
+
+#main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+#toolbar {
+  width: 170px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.toolGroup {
+  margin-bottom: 18px;
+}
+
+.toolGroup h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  text-align: left;
+}
+
+.tool span {
+  font-size: 13px;
+}
+
+.tool:hover {
+  background: #2c3644;
+}
+
+.tool.active {
+  background: var(--accent);
+  color: #08131f;
+  border-color: var(--accent);
+}
+
+#brushSize {
+  width: 100%;
+}
+
+#brushSizeLabel {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.wideBtn {
+  width: 100%;
+  background: #4a2323;
+  border: 1px solid #6b3232;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.wideBtn:hover {
+  background: #602c2c;
+}
+
+#canvasWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #0a0d12;
+  padding: 10px;
+  min-width: 0;
+}
+
+#world {
+  background: #000;
+  cursor: crosshair;
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
