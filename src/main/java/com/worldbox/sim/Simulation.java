@@ -5,9 +5,6 @@ import com.worldbox.util.Rng;
 import com.worldbox.world.WorldGen;
 import com.worldbox.world.WorldGrid;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class Simulation {
 
   public static GameState createInitialState() {
@@ -22,30 +19,23 @@ public class Simulation {
     state.grid = grid;
     state.rng = new Rng(seed + 99);
 
-    seedStartingNations(state, 6);
-    Settlement.recomputeTerritory(state);
+    seedWanderers(state, 30);
     return state;
   }
 
-  private static void seedStartingNations(GameState state, int count) {
+  // The world starts with no nations at all - just people. Nations only
+  // come into existence when an isolated wanderer (see Population.java)
+  // gives up looking for a settlement to join and founds one.
+  private static void seedWanderers(GameState state, int count) {
     WorldGrid grid = state.grid;
-    List<WorldGen.Spot> spots = new ArrayList<>();
-    int attempts = 0;
-    while (spots.size() < count && attempts < 400) {
+    int spawned = 0, attempts = 0;
+    while (spawned < count && attempts < 3000) {
       attempts++;
-      double cx = state.rng.range(grid.cols * 0.15, grid.cols * 0.85);
-      double cy = state.rng.range(grid.rows * 0.15, grid.rows * 0.85);
-      WorldGen.Spot spot = WorldGen.findLandSpot(grid, cx, cy, 3, state.rng);
-      if (spot == null) continue;
-      boolean tooClose = false;
-      for (WorldGen.Spot s : spots) {
-        if (Math.hypot(s.x - spot.x, s.y - spot.y) < grid.cols * 0.16) { tooClose = true; break; }
-      }
-      if (tooClose) continue;
-      spots.add(spot);
-    }
-    for (WorldGen.Spot spot : spots) {
-      Nation.foundNewNation(state, spot.x, spot.y, Nation.randomNationName(state.rng));
+      int x = (int) state.rng.range(0, grid.cols);
+      int y = (int) state.rng.range(0, grid.rows);
+      if (!grid.inBounds(x, y) || grid.terrain[grid.idx(x, y)] == Config.WATER) continue;
+      state.humans.add(Population.createHuman(x + 0.5, y + 0.5, -1, -1));
+      spawned++;
     }
   }
 

@@ -13,6 +13,7 @@ import com.simsilica.lemur.Slider;
 import com.simsilica.lemur.component.QuadBackgroundComponent;
 import com.simsilica.lemur.component.SpringGridLayout;
 import com.worldbox.config.Config;
+import com.worldbox.sim.Business;
 import com.worldbox.sim.Diplomacy;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.GlobalMarket;
@@ -290,6 +291,33 @@ public class GameHud {
     gift.setColor(GOOD);
     gift.addClickCommands(src -> Diplomacy.divineGift(state, id, 200));
 
+    Label econHeader = sidePanel.addChild(new Label("ECONOMY"));
+    econHeader.setColor(MUTED); econHeader.setFontSize(12);
+    statRow("Ideology", n.ideology);
+    Button toggleIdeology = sidePanel.addChild(new Button(
+        n.ideology.equals("capitalism") ? "Switch to Communism" : "Switch to Capitalism"));
+    toggleIdeology.addClickCommands(src -> {
+      n.ideology = n.ideology.equals("capitalism") ? "communism" : "capitalism";
+      refreshSidePanel();
+    });
+
+    statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + "g");
+    statRow("Bank loans", (int) Math.floor(n.bank.loans) + "g");
+    if (n.bank.justCrashed) {
+      Label crashLabel = sidePanel.addChild(new Label("BANK RUN! Reserves wiped out."));
+      crashLabel.setColor(DANGER);
+    }
+
+    int bizCount = 0;
+    double bizCapital = 0;
+    for (Business b : state.businesses.values()) {
+      if (b.nationId != id) continue;
+      bizCount++;
+      bizCapital += b.capital;
+    }
+    statRow("Businesses", String.valueOf(bizCount));
+    statRow("Business capital", (int) Math.floor(bizCapital) + "g");
+
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
     relHeader.setColor(MUTED); relHeader.setFontSize(12);
     for (Nation other : state.nations.values()) {
@@ -346,16 +374,27 @@ public class GameHud {
     Label title = sidePanel.addChild(new Label("World Market"));
     title.setFontSize(17);
     closeButton();
+    if (state.market.crashedThisTick) {
+      Label crash = sidePanel.addChild(new Label("MARKET CRASH just hit a resource!"));
+      crash.setColor(DANGER);
+    }
     GlobalMarket market = state.market;
     for (String key : GlobalMarket.keys()) {
       ArrayDeque<Double> hist = (ArrayDeque<Double>) market.history.get(key);
       double price = market.prices.get(key);
+      double base = Config.BASE_PRICES.get(key);
       double prev = hist.size() > 1 ? (Double) hist.toArray()[hist.size() - 2] : price;
+      double greed = market.greed.getOrDefault(key, 0.0);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label l = row.addChild(new Label(key));
-      l.setPreferredSize(new Vector3f(120, 20, 0));
+      l.setPreferredSize(new Vector3f(110, 20, 0));
       Label v = row.addChild(new Label(String.format("%.2fg %s", price, price >= prev ? "↑" : "↓")));
       v.setColor(price >= prev ? GOOD : DANGER);
+      v.setPreferredSize(new Vector3f(80, 20, 0));
+      if (price > base * 1.8) {
+        Label bubble = row.addChild(new Label(greed > 0.5 ? "BUBBLE" : "high"));
+        bubble.setColor(greed > 0.5 ? DANGER : ACTIVE);
+      }
     }
   }
 }

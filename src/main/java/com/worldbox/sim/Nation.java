@@ -31,6 +31,8 @@ public class Nation {
   public final Set<Integer> armyIds = new LinkedHashSet<>();
   public final int founded;
   public boolean alive = true;
+  public String ideology; // "capitalism" | "communism"
+  public final Bank bank = new Bank();
 
   private Nation(int founded, String name) {
     this.id = nextId++;
@@ -38,6 +40,7 @@ public class Nation {
     this.color = Config.NATION_COLORS[this.colorIndex];
     this.name = name;
     this.founded = founded;
+    this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
   }
 
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {

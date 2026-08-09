@@ -114,6 +114,9 @@ public class Population {
   public static void update(GameState state) {
     WorldGrid grid = state.grid;
     List<Human> next = new ArrayList<>(state.humans.size());
+    // founding a nation adds fresh settlers to state.humans, which we can't
+    // do mid-iteration over that same list - so queue it and do it after.
+    List<int[]> pendingFoundings = new ArrayList<>();
     for (Human h : state.humans) {
       if (h.dead) continue;
       h.prevX = h.x; h.prevZ = h.z;
@@ -140,6 +143,12 @@ public class Population {
         moveToward(grid, h, SPEED * 1.4);
         h.fleeTimer--;
         if (h.fleeTimer <= 0) h.state = "wander";
+        next.add(h);
+        continue;
+      }
+
+      if (h.nationId == -1) {
+        updateWanderer(state, h, pendingFoundings);
         next.add(h);
         continue;
       }
@@ -191,6 +200,55 @@ public class Population {
     }
     next.removeIf(h -> h.dead);
     state.humans = next;
+    for (int[] spot : pendingFoundings) Nation.foundNewNation(state, spot[0], spot[1], null);
+  }
+
+  private static final double JOIN_RADIUS = 9;
+  private static final int ISOLATION_THRESHOLD = 140;
+
+  /** Nation-less humans (spawned as wanderers, or the sole survivors of a
+   * fallen nation) either migrate to the nearest settlement they can find,
+   * or - if truly isolated for long enough - strike out and found a new
+   * nation themselves. This is how every nation in the game comes to
+   * exist; nothing is pre-seeded. */
+  private static void updateWanderer(GameState state, Human h, List<int[]> pendingFoundings) {
+    WorldGrid grid = state.grid;
+    Settlement nearest = null;
+    double bestD = Double.MAX_VALUE;
+    for (Settlement s : state.settlements.values()) {
+      double d = Math.hypot(s.x - h.x, s.z - h.z);
+      if (d < bestD) { bestD = d; nearest = s; }
+    }
+
+    if (nearest != null && bestD <= JOIN_RADIUS) {
+      h.isolationTicks = 0;
+      h.targetX = nearest.x + 0.5;
+      h.targetZ = nearest.z + 0.5;
+      double dist = moveToward(grid, h, SPEED);
+      if (dist < 0.6) {
+        h.nationId = nearest.nationId;
+        h.settlementId = nearest.id;
+        h.state = "wander";
+      }
+      return;
+    }
+
+    h.isolationTicks++;
+    if (Math.random() < 0.02 || moveToward(grid, h, SPEED) < 0.1) pickWanderTarget(grid, h);
+
+    boolean trulyIsolated = nearest == null || bestD > JOIN_RADIUS * 2.2;
+    if (h.isolationTicks > ISOLATION_THRESHOLD && trulyIsolated && Math.random() < 0.03) {
+      int gx = (int) Math.floor(h.x), gz = (int) Math.floor(h.z);
+      boolean spotOk = grid.inBounds(gx, gz) && grid.isBuildable(grid.idx(gx, gz))
+          && grid.slopeAt(gx, gz) < 1.4 && grid.settlementAt[grid.idx(gx, gz)] < 0;
+      if (!spotOk) {
+        com.worldbox.world.WorldGen.Spot spot = com.worldbox.world.WorldGen.findLandSpot(grid, h.x, h.z, 4, state.rng);
+        if (spot == null) return;
+        gx = spot.x; gz = spot.y;
+      }
+      h.dead = true; // folded into the new settlement's founding population
+      pendingFoundings.add(new int[]{gx, gz});
+    }
   }
 
   private static void updateZombie(GameState state, Human h) {

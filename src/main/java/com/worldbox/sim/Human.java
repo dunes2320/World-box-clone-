@@ -17,6 +17,7 @@ public class Human {
   public int age = 0;
   public boolean dead = false;
   public float hue;
+  public int isolationTicks = 0; // ticks spent as a nation-less wanderer with no settlement in reach
 
   public Human(double x, double z, int nationId, int settlementId) {
     this.id = nextId++;

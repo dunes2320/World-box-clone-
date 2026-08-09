@@ -75,10 +75,15 @@ public class Events {
   // ---- disaster / god-tool triggers (one-shot) ----
   public static void explode(GameState state, double cx, double cy, double radius, boolean crater) {
     WorldGrid grid = state.grid;
+    java.util.Map<String, Integer> depositsDestroyed = new java.util.HashMap<>();
     grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (d < radius * 0.55) {
         if (crater) grid.terrain[i] = Config.STONE;
+        byte res = grid.resource[i];
+        if (res == Config.RES_STONE || res == Config.RES_IRON || res == Config.RES_GOLD) {
+          depositsDestroyed.merge(Config.RESOURCE_INFO.get(res).key, 1, Integer::sum);
+        }
         grid.resource[i] = Config.RES_NONE;
         grid.burning[i] = false;
       } else {
@@ -86,6 +91,10 @@ public class Events {
       }
       grid.markDirtyIdx(i);
     });
+    // supply shock: destroyed deposits mean less future supply, so the
+    // market immediately reacts as if it's scarcer right now
+    for (var e : depositsDestroyed.entrySet()) state.market.nudge(e.getKey(), 1, e.getValue() * 2.5);
+
     double r = radius;
     state.humans.removeIf(h -> Math.hypot(h.x - cx, h.z - cy) < r * 0.7);
     for (Settlement settlement : state.settlements.values()) {

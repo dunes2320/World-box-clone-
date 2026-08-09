@@ -2,9 +2,11 @@ package com.worldbox;
 
 import com.jme3.app.SimpleApplication;
 import com.jme3.app.state.ScreenshotAppState;
+import com.jme3.input.KeyInput;
 import com.jme3.input.MouseInput;
 import com.jme3.input.controls.ActionListener;
 import com.jme3.input.controls.AnalogListener;
+import com.jme3.input.controls.KeyTrigger;
 import com.jme3.input.controls.MouseAxisTrigger;
 import com.jme3.input.controls.MouseButtonTrigger;
 import com.jme3.light.AmbientLight;
@@ -46,6 +48,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private double simTime;
   private double lastTickTime;
   private boolean leftDown, rotating, panning;
+  private boolean moveFwd, moveBack, moveLeft, moveRight;
   private Picking.CellHit lastCell;
 
   private final Vector3f camTarget = new Vector3f();
@@ -119,8 +122,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     inputManager.addMapping("MouseYNeg", new MouseAxisTrigger(MouseInput.AXIS_Y, true));
     inputManager.addMapping("WheelUp", new MouseAxisTrigger(MouseInput.AXIS_WHEEL, false));
     inputManager.addMapping("WheelDown", new MouseAxisTrigger(MouseInput.AXIS_WHEEL, true));
+    inputManager.addMapping("MoveForward", new KeyTrigger(KeyInput.KEY_W), new KeyTrigger(KeyInput.KEY_UP));
+    inputManager.addMapping("MoveBack", new KeyTrigger(KeyInput.KEY_S), new KeyTrigger(KeyInput.KEY_DOWN));
+    inputManager.addMapping("MoveLeft", new KeyTrigger(KeyInput.KEY_A), new KeyTrigger(KeyInput.KEY_LEFT));
+    inputManager.addMapping("MoveRight", new KeyTrigger(KeyInput.KEY_D), new KeyTrigger(KeyInput.KEY_RIGHT));
     inputManager.addListener(this, "Paint", "RotateCam", "PanCam",
-        "MouseXPos", "MouseXNeg", "MouseYPos", "MouseYNeg", "WheelUp", "WheelDown");
+        "MouseXPos", "MouseXNeg", "MouseYPos", "MouseYNeg", "WheelUp", "WheelDown",
+        "MoveForward", "MoveBack", "MoveLeft", "MoveRight");
   }
 
   @Override
@@ -132,6 +140,10 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         leftDown = isPressed;
         if (isPressed) { lastCell = null; handlePick(); }
         break;
+      case "MoveForward": moveFwd = isPressed; break;
+      case "MoveBack": moveBack = isPressed; break;
+      case "MoveLeft": moveLeft = isPressed; break;
+      case "MoveRight": moveRight = isPressed; break;
       default: break;
     }
   }
@@ -159,7 +171,22 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
 
   private static float clamp(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }
 
+  private void applyKeyboardMovement(float tpf) {
+    if (!moveFwd && !moveBack && !moveLeft && !moveRight) return;
+    Vector3f fwd = cam.getDirection().clone().setY(0);
+    if (fwd.lengthSquared() > 1e-6f) fwd.normalizeLocal();
+    Vector3f right = cam.getLeft().negate().setY(0);
+    if (right.lengthSquared() > 1e-6f) right.normalizeLocal();
+    float camSpeed = (18f + camDistance) * tpf;
+    if (moveFwd) camTarget.addLocal(fwd.mult(camSpeed));
+    if (moveBack) camTarget.addLocal(fwd.mult(-camSpeed));
+    if (moveRight) camTarget.addLocal(right.mult(camSpeed));
+    if (moveLeft) camTarget.addLocal(right.mult(-camSpeed));
+  }
+
   private void updateCamera() {
+    camTarget.x = clamp(camTarget.x, -15f, Config.COLS + 15f);
+    camTarget.z = clamp(camTarget.z, -15f, Config.ROWS + 15f);
     float x = camDistance * FastMath.cos(camPitch) * FastMath.sin(camYaw);
     float y = camDistance * FastMath.sin(camPitch);
     float z = camDistance * FastMath.cos(camPitch) * FastMath.cos(camYaw);
@@ -193,6 +220,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   public void simpleUpdate(float tpf) {
     simTime += tpf;
     maybeTick();
+    applyKeyboardMovement(tpf);
     updateCamera();
 
     if (leftDown && GodTools.CONTINUOUS_TOOLS.contains(tool)) {
@@ -242,6 +270,14 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(5.0, () -> hud.debugSetPanelMode("market"));
       testScript.put(5.5, () -> screenshotState.takeScreenshot());
       testScript.put(6.0, () -> hud.debugSetPanelMode(null));
+      double midway = Math.max(15.0, duration * 0.5);
+      testScript.put(midway, () -> {
+        if (!state.nations.isEmpty()) {
+          int firstNationId = state.nations.keySet().iterator().next();
+          setSelection(new GameState.Selection("nation", firstNationId));
+        }
+      });
+      testScript.put(midway + 0.5, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 1.0, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 0.3, () -> {
         System.out.println("TESTMODE_FINAL_STATS tick=" + state.tick

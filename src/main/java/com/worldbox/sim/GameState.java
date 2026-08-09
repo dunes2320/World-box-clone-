@@ -16,6 +16,7 @@ public class GameState {
   public Map<Integer, Settlement> settlements = new LinkedHashMap<>();
   public Map<Integer, Nation> nations = new LinkedHashMap<>();
   public Map<Integer, Army> armies = new LinkedHashMap<>();
+  public Map<Integer, Business> businesses = new LinkedHashMap<>();
   public GlobalMarket market = new GlobalMarket();
   public DiplomacyManager diplomacy = new DiplomacyManager();
   public List<Tornado> tornadoes = new ArrayList<>();

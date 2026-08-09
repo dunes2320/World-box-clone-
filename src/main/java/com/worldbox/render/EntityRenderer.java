@@ -14,6 +14,8 @@ import com.jme3.scene.shape.Cylinder;
 import com.jme3.scene.shape.Torus;
 import com.worldbox.config.Config;
 import com.worldbox.sim.Army;
+import com.worldbox.sim.Bank;
+import com.worldbox.sim.Business;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Human;
 import com.worldbox.sim.Military;
@@ -40,27 +42,42 @@ public class EntityRenderer {
     DEPOSIT_COLORS.put(Config.RES_GOLD, new ColorRGBA(0.902f, 0.773f, 0.247f, 1f));
   }
   private static final ColorRGBA TREE_COLOR = new ColorRGBA(0.137f, 0.361f, 0.157f, 1f);
+  private static final ColorRGBA TRUNK_COLOR = new ColorRGBA(0.365f, 0.259f, 0.157f, 1f);
+  private static final ColorRGBA BANK_COLOR = new ColorRGBA(0.85f, 0.72f, 0.25f, 1f);
+  private static final Map<String, ColorRGBA> BUSINESS_COLORS = new HashMap<>();
+  static {
+    BUSINESS_COLORS.put("wood", new ColorRGBA(0.45f, 0.32f, 0.18f, 1f));
+    BUSINESS_COLORS.put("stone", new ColorRGBA(0.55f, 0.57f, 0.60f, 1f));
+    BUSINESS_COLORS.put("iron", new ColorRGBA(0.75f, 0.4f, 0.2f, 1f));
+  }
 
   private static final int TREE_CAP_SAMPLE = 2600;
   private static final int DEPOSIT_CAP_SAMPLE = 900;
   private static final int SETTLEMENT_CAP = 48;
   private static final int ARMY_CAP = 96;
+  private static final int BUSINESS_CAP = 96;
+  private static final int BANK_CAP = 32;
 
   private final AssetManager assets;
   private final Node root;
   private final NationColorLookup nationColor;
   private WorldGrid grid;
 
-  private final Mesh treeTemplate, depositTemplate, settlementTemplate, humanTemplate, armyTemplate;
+  private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, humanTemplate, armyTemplate;
+  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate;
 
-  private final Geometry treesGeom, depositsGeom;
+  private final Geometry treesGeom, treeTrunksGeom, depositsGeom;
 
   private final Node settlementsNode = new Node("settlements");
   private final Node armiesNode = new Node("armies");
   private final Node humansNode = new Node("humans");
+  private final Node businessesNode = new Node("businesses");
+  private final Node banksNode = new Node("banks");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] armyPool = new Geometry[ARMY_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
+  private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
+  private final Geometry[] bankPool = new Geometry[BANK_CAP];
 
   private final Geometry monsterGeom;
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
@@ -72,26 +89,41 @@ public class EntityRenderer {
     this.grid = grid;
     this.nationColor = nationColor;
 
-    treeTemplate = new Cylinder(2, 6, 0.38f, 0.001f, 0.95f, true, false);
-    MeshUtil.reorientZToY(treeTemplate);
-    depositTemplate = new Box(0.28f, 0.28f, 0.28f);
-    settlementTemplate = new Cylinder(2, 4, 0.55f, 0.001f, 1.0f, true, false);
-    MeshUtil.reorientZToY(settlementTemplate);
+    treeCanopyTemplate = new Cylinder(2, 6, 0.34f, 0.001f, 0.75f, true, false);
+    MeshUtil.reorientZToY(treeCanopyTemplate);
+    treeTrunkTemplate = new Cylinder(2, 5, 0.09f, 0.11f, 0.4f, true, false);
+    MeshUtil.reorientZToY(treeTrunkTemplate);
+    depositTemplate = MeshUtil.buildGem(0.32f, 0.5f);
     humanTemplate = new Cylinder(2, 6, 0.13f, 0.13f, 0.5f, true, false);
     MeshUtil.reorientZToY(humanTemplate);
     armyTemplate = new Cylinder(2, 4, 0.32f, 0.001f, 0.6f, true, false);
     MeshUtil.reorientZToY(armyTemplate);
 
-    treesGeom = new Geometry("Trees", treeTemplate.deepClone());
+    // settlement tiers: a small hut, a boxy town hall, a tall stacked city
+    hutTemplate = new Cylinder(2, 4, 0.5f, 0.001f, 0.9f, true, false);
+    MeshUtil.reorientZToY(hutTemplate);
+    townTemplate = new Box(0.55f, 0.5f, 0.55f);
+    cityTemplate = MeshUtil.mergeMeshes(
+        MeshUtil.translatedCopy(new Box(0.6f, 0.7f, 0.6f), 0, 0.7f, 0),
+        MeshUtil.translatedCopy(new Box(0.4f, 0.45f, 0.4f), 0, 1.85f, 0));
+
+    businessTemplate = new Box(0.22f, 0.22f, 0.22f);
+    bankTemplate = MeshUtil.buildPillar(0.28f, 0.5f, 1.3f);
+
+    treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
     treesGeom.setMaterial(vertexColorMaterial());
     root.attachChild(treesGeom);
+
+    treeTrunksGeom = new Geometry("TreeTrunks", treeTrunkTemplate.deepClone());
+    treeTrunksGeom.setMaterial(vertexColorMaterial());
+    root.attachChild(treeTrunksGeom);
 
     depositsGeom = new Geometry("Deposits", depositTemplate.deepClone());
     depositsGeom.setMaterial(vertexColorMaterial());
     root.attachChild(depositsGeom);
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
-      Geometry g = new Geometry("Settlement" + i, settlementTemplate);
+      Geometry g = new Geometry("Settlement" + i, hutTemplate);
       g.setMaterial(soloColorMaterial(ColorRGBA.Gray));
       g.setCullHint(Spatial.CullHint.Always);
       settlementsNode.attachChild(g);
@@ -116,6 +148,24 @@ public class EntityRenderer {
       humanPool[i] = g;
     }
     root.attachChild(humansNode);
+
+    for (int i = 0; i < BUSINESS_CAP; i++) {
+      Geometry g = new Geometry("Business" + i, businessTemplate);
+      g.setMaterial(soloColorMaterial(ColorRGBA.White));
+      g.setCullHint(Spatial.CullHint.Always);
+      businessesNode.attachChild(g);
+      businessPool[i] = g;
+    }
+    root.attachChild(businessesNode);
+
+    for (int i = 0; i < BANK_CAP; i++) {
+      Geometry g = new Geometry("Bank" + i, bankTemplate);
+      g.setMaterial(soloColorMaterial(BANK_COLOR));
+      g.setCullHint(Spatial.CullHint.Always);
+      banksNode.attachChild(g);
+      bankPool[i] = g;
+    }
+    root.attachChild(banksNode);
 
     Box monsterBox = new Box(1.3f, 1.3f, 1.3f);
     monsterGeom = new Geometry("Monster", monsterBox);
@@ -166,25 +216,30 @@ public class EntityRenderer {
   /** Trees/deposits barely move; rebuild their instance lists on a slow
    * cadence instead of every frame. */
   public void rebuildStatics() {
-    List<PropBatcher.Placement> trees = new ArrayList<>();
+    List<PropBatcher.Placement> canopies = new ArrayList<>();
+    List<PropBatcher.Placement> trunks = new ArrayList<>();
     List<PropBatcher.Placement> deposits = new ArrayList<>();
-    for (int y = 0; y < grid.rows && (trees.size() < TREE_CAP_SAMPLE || deposits.size() < DEPOSIT_CAP_SAMPLE); y++) {
+    for (int y = 0; y < grid.rows && (canopies.size() < TREE_CAP_SAMPLE || deposits.size() < DEPOSIT_CAP_SAMPLE); y++) {
       for (int x = 0; x < grid.cols; x++) {
         int i = grid.idx(x, y);
         byte res = grid.resource[i];
-        if (res == Config.RES_FOREST && trees.size() < TREE_CAP_SAMPLE) {
+        if (res == Config.RES_FOREST && canopies.size() < TREE_CAP_SAMPLE) {
           float scale = 0.6f + Math.min(1f, grid.resourceAmount[i] / 48f) * 0.6f;
           float rotY = (float) ((x * 7 + y * 13) % 6.28);
-          trees.add(new PropBatcher.Placement(x + 0.5f, grid.height[i], y + 0.5f, rotY, scale, TREE_COLOR));
+          float trunkTop = grid.height[i] + 0.38f * scale;
+          trunks.add(new PropBatcher.Placement(x + 0.5f, grid.height[i], y + 0.5f, rotY, scale, TRUNK_COLOR));
+          canopies.add(new PropBatcher.Placement(x + 0.5f, trunkTop, y + 0.5f, rotY, scale, TREE_COLOR));
         } else if (res != Config.RES_NONE && res != Config.RES_FOREST && deposits.size() < DEPOSIT_CAP_SAMPLE) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
-          deposits.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + 0.22f, y + 0.5f, rotY, 1f, c));
+          deposits.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + 0.28f, y + 0.5f, rotY, 1f, c));
         }
       }
     }
-    treesGeom.setMesh(PropBatcher.bake(treeTemplate, trees));
-    treesGeom.setCullHint(trees.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    treesGeom.setMesh(PropBatcher.bake(treeCanopyTemplate, canopies));
+    treesGeom.setCullHint(canopies.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    treeTrunksGeom.setMesh(PropBatcher.bake(treeTrunkTemplate, trunks));
+    treeTrunksGeom.setCullHint(trunks.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     depositsGeom.setMesh(PropBatcher.bake(depositTemplate, deposits));
     depositsGeom.setCullHint(deposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
@@ -193,8 +248,16 @@ public class EntityRenderer {
     updateSettlements(state);
     updateArmies(state, alpha);
     updateHumans(state, alpha);
+    updateBusinesses(state);
+    updateBanks(state);
     updateMonster(state);
     updateTornadoes(state);
+  }
+
+  private Mesh tierTemplate(int population) {
+    if (population >= 35) return cityTemplate;
+    if (population >= 15) return townTemplate;
+    return hutTemplate;
   }
 
   private void updateSettlements(GameState state) {
@@ -204,6 +267,7 @@ public class EntityRenderer {
       Geometry g = settlementPool[i];
       float h = grid.height[grid.idx(s.x, s.z)];
       float scale = (float) (0.55 + Math.sqrt(Math.max(1, s.populationCount)) * 0.13);
+      g.setMesh(tierTemplate(s.populationCount));
       g.setLocalTranslation(s.x + 0.5f, h, s.z + 0.5f);
       g.setLocalScale(scale);
       Nation nation = state.nations.get(s.nationId);
@@ -214,6 +278,43 @@ public class EntityRenderer {
       i++;
     }
     for (; i < SETTLEMENT_CAP; i++) settlementPool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  private void updateBusinesses(GameState state) {
+    int i = 0;
+    for (Business b : state.businesses.values()) {
+      if (i >= BUSINESS_CAP) break;
+      Settlement s = state.settlements.get(b.settlementId);
+      if (s == null) continue;
+      Geometry g = businessPool[i];
+      float h = grid.height[grid.idx(s.x, s.z)];
+      // scatter around the settlement a bit so multiple businesses don't overlap
+      float angle = (b.id * 2.399963f);
+      float ox = (float) Math.cos(angle) * 1.4f, oz = (float) Math.sin(angle) * 1.4f;
+      g.setLocalTranslation(s.x + 0.5f + ox, h + 0.22f, s.z + 0.5f + oz);
+      g.setLocalScale((float) (0.7 + Math.min(1.5, b.capital / 60.0)));
+      g.getMaterial().setColor("Color", BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White));
+      g.setCullHint(Spatial.CullHint.Inherit);
+      i++;
+    }
+    for (; i < BUSINESS_CAP; i++) businessPool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  private void updateBanks(GameState state) {
+    int i = 0;
+    for (Nation n : state.nations.values()) {
+      if (i >= BANK_CAP) break;
+      Settlement capital = state.settlements.get(n.capitalSettlementId);
+      if (capital == null) continue;
+      Geometry g = bankPool[i];
+      float h = grid.height[grid.idx(capital.x, capital.z)];
+      g.setLocalTranslation(capital.x + 0.5f - 1.6f, h, capital.z + 0.5f - 1.6f);
+      g.setLocalScale(0.7f);
+      g.getMaterial().setColor("Color", n.bank.justCrashed ? ColorRGBA.Red : BANK_COLOR);
+      g.setCullHint(Spatial.CullHint.Inherit);
+      i++;
+    }
+    for (; i < BANK_CAP; i++) bankPool[i].setCullHint(Spatial.CullHint.Always);
   }
 
   private void updateArmies(GameState state, float alpha) {

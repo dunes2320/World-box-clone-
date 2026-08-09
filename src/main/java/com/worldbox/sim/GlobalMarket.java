@@ -18,6 +18,9 @@ public class GlobalMarket {
   public final Map<String, Double> prices = new LinkedHashMap<>(Config.BASE_PRICES);
   public final Map<String, Deque<Double>> history = new LinkedHashMap<>();
   public final Map<String, Double> volume = new LinkedHashMap<>();
+  /** 0..1 speculative pressure per resource; high + overpriced = crash risk. */
+  public final Map<String, Double> greed = new LinkedHashMap<>();
+  public boolean crashedThisTick = false;
 
   public GlobalMarket() {
     for (String k : KEYS) {
@@ -25,6 +28,7 @@ public class GlobalMarket {
       dq.add(prices.get(k));
       history.put(k, dq);
       volume.put(k, 0.0);
+      greed.put(k, 0.0);
     }
   }
 
