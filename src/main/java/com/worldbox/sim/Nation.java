@@ -37,6 +37,10 @@ public class Nation {
   public double stability = 65;
   /** last ~120 tax-cycle samples of treasury, for the economy graph. */
   public final java.util.ArrayDeque<Double> treasuryHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of this nation's businesses' combined market-cap
+   * style valuation - the primary series for the stock-market-style
+   * economy graph. */
+  public final java.util.ArrayDeque<Double> marketCapHistory = new java.util.ArrayDeque<>();
 
   private Nation(int founded, String name) {
     this.id = nextId++;

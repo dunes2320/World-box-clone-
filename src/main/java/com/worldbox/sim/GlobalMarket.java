@@ -20,6 +20,11 @@ public class GlobalMarket {
   public final Map<String, Double> volume = new LinkedHashMap<>();
   /** 0..1 speculative pressure per resource; high + overpriced = crash risk. */
   public final Map<String, Double> greed = new LinkedHashMap<>();
+  /** This tick's real trade flow per resource - what actually got sold onto
+   * the market (supply) and bought off of it (demand). Prices are derived
+   * from these, not from an artificial pull back to a fixed base price. */
+  public final Map<String, Double> supplyFlow = new LinkedHashMap<>();
+  public final Map<String, Double> demandFlow = new LinkedHashMap<>();
   public boolean crashedThisTick = false;
 
   public GlobalMarket() {
@@ -29,6 +34,8 @@ public class GlobalMarket {
       history.put(k, dq);
       volume.put(k, 0.0);
       greed.put(k, 0.0);
+      supplyFlow.put(k, 0.0);
+      demandFlow.put(k, 0.0);
     }
   }
 

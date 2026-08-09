@@ -3,7 +3,9 @@ package com.worldbox.sim;
 import com.worldbox.config.Config;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Economy {
   private static final double LEVERAGE_LIMIT = 3.0;
@@ -34,6 +36,11 @@ public class Economy {
 
   public static void update(GameState state) {
     GlobalMarket market = state.market;
+    for (String key : GlobalMarket.keys()) {
+      market.supplyFlow.put(key, 0.0);
+      market.demandFlow.put(key, 0.0);
+    }
+
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
 
@@ -44,7 +51,7 @@ public class Economy {
           seller.stock.merge(key, -sellAmt, Double::sum);
           nation.treasury += sellAmt * market.prices.get(key);
           market.volume.merge(key, sellAmt, Double::sum);
-          market.nudge(key, -1, sellAmt / 12);
+          market.supplyFlow.merge(key, sellAmt, Double::sum);
         }
 
         Settlement buyer = smallestStock(state, nation, key);
@@ -55,17 +62,13 @@ public class Economy {
             nation.treasury -= cost;
             buyer.stock.merge(key, buyAmt, Double::sum);
             market.volume.merge(key, buyAmt, Double::sum);
-            market.nudge(key, 1, buyAmt / 12);
+            market.demandFlow.merge(key, buyAmt, Double::sum);
           }
         }
       }
     }
 
-    for (String key : GlobalMarket.keys()) {
-      double base = Config.BASE_PRICES.get(key);
-      double p = market.prices.get(key);
-      market.prices.put(key, p + (base - p) * 0.008);
-    }
+    settlePrices(state);
 
     updateBusinesses(state);
     updateBanks(state);
@@ -73,6 +76,56 @@ public class Economy {
 
     if (state.tick % 4 == 0) market.snapshot();
   }
+
+  /** Prices are set from real trade flow (what actually sold vs. what
+   * actually got bought this tick) plus ongoing baseline supply and demand
+   * tied to real world state - population consumes, settlements/businesses
+   * produce - instead of decaying back to a fixed number. Baseline supply
+   * and demand are scaled to roughly balance each other under normal
+   * growth, so a price only really moves when something genuinely
+   * disrupts that balance: a war or disaster wiping out settlements
+   * (supply shock), population booming faster than production can keep up
+   * (demand shock), a resource-heavy business boom, and so on. */
+  private static void settlePrices(GameState state) {
+    GlobalMarket market = state.market;
+    int population = state.humans.size();
+    int settlements = state.settlements.size();
+    int businesses = state.businesses.size();
+    int livingNations = 0;
+    for (Nation n : state.nations.values()) if (n.alive) livingNations++;
+
+    // Both sides share population as a base scale so they start balanced
+    // even before any settlement exists (just wanderers foraging for
+    // themselves) - settlements/businesses/nations then layer organized
+    // production and consumption on top, which is what actually pulls a
+    // price away from equilibrium.
+    Map<String, Double> baselineDemand = new HashMap<>();
+    baselineDemand.put("food", population * 0.05);
+    baselineDemand.put("wood", population * 0.015);
+    baselineDemand.put("stone", population * 0.01);
+    baselineDemand.put("iron", population * 0.004 + businesses * 0.3);
+    baselineDemand.put("gold_ore", population * 0.0015 + livingNations * 0.5);
+
+    Map<String, Double> baselineSupply = new HashMap<>();
+    baselineSupply.put("food", population * 0.052 + settlements * 1.0);
+    baselineSupply.put("wood", population * 0.016 + settlements * 0.9);
+    baselineSupply.put("stone", population * 0.011 + settlements * 0.7);
+    baselineSupply.put("iron", population * 0.0045 + settlements * 0.45);
+    baselineSupply.put("gold_ore", population * 0.0016 + settlements * 0.1);
+
+    for (String key : GlobalMarket.keys()) {
+      double base = Config.BASE_PRICES.get(key);
+      double supply = market.supplyFlow.getOrDefault(key, 0.0) + baselineSupply.getOrDefault(key, 0.0) + 0.5;
+      double demand = market.demandFlow.getOrDefault(key, 0.0) + baselineDemand.getOrDefault(key, 0.0) + 0.5;
+      double ratio = demand / supply;
+      double step = clamp(Math.log(ratio) * 0.02, -0.02, 0.02);
+      double p = market.prices.get(key) * (1 + step);
+      p = Math.max(base * 0.25, Math.min(base * 4.0, p));
+      market.prices.put(key, p);
+    }
+  }
+
+  private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
 
   // ---- businesses: private (capitalism) or state-owned (communism) ----
   private static void updateBusinesses(GameState state) {
@@ -124,6 +177,9 @@ public class Economy {
       }
 
       b.capital -= 0.4; // upkeep
+
+      b.trailingRevenue = b.trailingRevenue * 0.95 + revenue * 0.05;
+      b.valuation = Math.max(0, Math.max(0, b.capital) + b.trailingRevenue * 12 - b.debt * 0.5);
 
       // business loans: borrow from the nation's bank when cash is tight,
       // repay out of future profit once healthy again

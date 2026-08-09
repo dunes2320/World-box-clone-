@@ -118,7 +118,7 @@ public class GameHud {
       refreshSidePanel();
     });
     topBar.addChild(spacer(6));
-    Button worldEconBtn = topBar.addChild(new Button("World Economy"));
+    Button worldEconBtn = topBar.addChild(new Button("Market Index"));
     worldEconBtn.addClickCommands(src -> showGraph("world", -1));
 
     toolbar.setLocalTranslation(0, height - 46, 1);
@@ -385,7 +385,7 @@ public class GameHud {
     statRow("Businesses", String.valueOf(bizCount));
     statRow("Business capital", (int) Math.floor(bizCapital) + "g");
 
-    Button viewGraph = sidePanel.addChild(new Button("View Economy Graph"));
+    Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
     viewGraph.addClickCommands(src -> showGraph("nation", id));
 
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
@@ -473,7 +473,7 @@ public class GameHud {
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
 
-    Label title = sidePanel.addChild(new Label(isWorld ? "World Economy" : n.name + " - Economy"));
+    Label title = sidePanel.addChild(new Label(isWorld ? "World Market Index" : n.name + " - Market Cap"));
     title.setFontSize(17);
     Button back = sidePanel.addChild(new Button("Back"));
     back.addClickCommands(src -> {
@@ -486,24 +486,45 @@ public class GameHud {
       refreshSidePanel();
     });
 
-    java.util.ArrayDeque<Double> hist = isWorld ? state.worldEconomyHistory : n.treasuryHistory;
-    if (hist.isEmpty()) {
+    java.util.ArrayDeque<Double> hist = isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
+    if (hist.size() < 2) {
       Label l = sidePanel.addChild(new Label("Collecting data..."));
       l.setColor(MUTED);
     } else {
-      double min = Double.MAX_VALUE, max = -Double.MAX_VALUE, latest = 0;
+      Double[] arr = hist.toArray(new Double[0]);
+      double latest = arr[arr.length - 1];
+      double prev = arr[arr.length - 2];
+      double change = latest - prev;
+      double changePct = prev > 0.01 ? (change / prev) * 100 : 0;
+      double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
       for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
-      latest = hist.peekLast();
-      statRow("Current", (int) Math.floor(latest) + "g");
+      statRow("Market cap", (int) Math.floor(latest) + "g");
+      Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Label changeLbl = changeRow.addChild(new Label("Change"));
+      changeLbl.setColor(MUTED);
+      changeLbl.setPreferredSize(new Vector3f(160, 20, 0));
+      Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%dg)",
+          change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", (int) change)));
+      changeVal.setColor(change >= 0 ? GOOD : DANGER);
       statRow("Range", (int) Math.floor(min) + "g - " + (int) Math.floor(max) + "g");
     }
+    double treasury = isWorld ? sumLivingTreasury(state) : n.treasury;
+    statRow("Treasury", (int) Math.floor(treasury) + "g");
 
     Label chartSpacer = sidePanel.addChild(new Label(" "));
     chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + 16, 0));
   }
 
+  private double sumLivingTreasury(GameState state) {
+    double total = 0;
+    for (Nation n : state.nations.values()) if (n.alive) total += n.treasury;
+    return total;
+  }
+
   /** Rebuilds the raw jME bar-chart geometry for the currently selected
-   * graph, positioned by hand beneath the panel's text content. */
+   * graph, positioned by hand beneath the panel's text content. Bars are
+   * colored green/red against the previous sample, like an up/down day on
+   * a stock chart, rather than by absolute magnitude. */
   private void layoutChart() {
     for (Geometry g : chartBars) g.removeFromParent();
     chartBars.clear();
@@ -512,7 +533,7 @@ public class GameHud {
     boolean isWorld = "world".equals(graphView);
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) return;
-    java.util.ArrayDeque<Double> hist = isWorld ? state.worldEconomyHistory : n.treasuryHistory;
+    java.util.ArrayDeque<Double> hist = isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     if (hist.isEmpty()) return;
 
     java.util.List<Double> values = new java.util.ArrayList<>(hist);
@@ -527,12 +548,13 @@ public class GameHud {
 
     for (int i = 0; i < values.size(); i++) {
       double v = values.get(i);
+      double prev = i > 0 ? values.get(i - 1) : v;
       float t = (float) ((v - min) / span);
       float h = Math.max(2f, t * CHART_HEIGHT);
       Quad quad = new Quad(Math.max(1f, barW - 1.5f), h);
-      Geometry bar = new Geometry("econBar" + i, quad);
+      Geometry bar = new Geometry("stockBar" + i, quad);
       Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-      mat.setColor("Color", lerpColor(DANGER, GOOD, t));
+      mat.setColor("Color", v >= prev ? GOOD : DANGER);
       bar.setMaterial(mat);
       bar.setQueueBucket(RenderQueue.Bucket.Gui);
       bar.setLocalTranslation(originX + i * barW, baselineY, 2);
@@ -549,14 +571,5 @@ public class GameHud {
     baselineBar.setLocalTranslation(originX, baselineY - 2f, 2);
     chartNode.attachChild(baselineBar);
     chartBars.add(baselineBar);
-  }
-
-  private static ColorRGBA lerpColor(ColorRGBA a, ColorRGBA b, float t) {
-    t = Math.max(0f, Math.min(1f, t));
-    return new ColorRGBA(
-        a.r + (b.r - a.r) * t,
-        a.g + (b.g - a.g) * t,
-        a.b + (b.b - a.b) * t,
-        1f);
   }
 }

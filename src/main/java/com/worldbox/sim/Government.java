@@ -21,7 +21,15 @@ public class Government {
 
   public static void update(GameState state) {
     boolean sample = state.tick % 20 == 0;
-    double worldTotal = 0;
+    double worldTreasury = 0;
+    double worldMarketCap = 0;
+    java.util.Map<Integer, Double> marketCapByNation = sample ? new java.util.HashMap<>() : null;
+    if (sample) {
+      for (Business b : state.businesses.values()) {
+        marketCapByNation.merge(b.nationId, b.valuation, Double::sum);
+        worldMarketCap += b.valuation;
+      }
+    }
     for (Nation n : new ArrayList<>(state.nations.values())) {
       if (!n.alive) continue;
       applyGovernmentEffects(n);
@@ -31,12 +39,18 @@ public class Government {
       if (sample) {
         n.treasuryHistory.addLast(n.treasury);
         while (n.treasuryHistory.size() > 120) n.treasuryHistory.removeFirst();
-        worldTotal += n.treasury;
+        worldTreasury += n.treasury;
+
+        n.marketCapHistory.addLast(marketCapByNation.getOrDefault(n.id, 0.0));
+        while (n.marketCapHistory.size() > 120) n.marketCapHistory.removeFirst();
       }
     }
     if (sample) {
-      state.worldEconomyHistory.addLast(worldTotal);
+      state.worldEconomyHistory.addLast(worldTreasury);
       while (state.worldEconomyHistory.size() > 120) state.worldEconomyHistory.removeFirst();
+
+      state.worldMarketCapHistory.addLast(worldMarketCap);
+      while (state.worldMarketCapHistory.size() > 120) state.worldMarketCapHistory.removeFirst();
     }
   }
 
