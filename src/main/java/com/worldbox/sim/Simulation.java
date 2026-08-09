@@ -2,6 +2,7 @@ package com.worldbox.sim;
 
 import com.worldbox.config.Config;
 import com.worldbox.util.Rng;
+import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGen;
 import com.worldbox.world.WorldGrid;
 
@@ -18,6 +19,10 @@ public class Simulation {
     GameState state = new GameState();
     state.grid = grid;
     state.rng = new Rng(seed + 99);
+    state.voxels = new VoxelWorld(grid);
+    for (int z = 0; z < grid.rows; z++) {
+      for (int x = 0; x < grid.cols; x++) state.voxels.resyncHeight(grid, x, z);
+    }
 
     seedWanderers(state, 30);
     return state;

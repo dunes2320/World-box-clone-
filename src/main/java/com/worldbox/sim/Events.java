@@ -1,10 +1,13 @@
 package com.worldbox.sim;
 
 import com.worldbox.config.Config;
+import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Fire/vegetation ambient dynamics, plus every one-shot "weird stuff" god
  * tool: meteor, nuke, earthquake, blessing, zombie outbreak, tornado and
@@ -79,7 +82,6 @@ public class Events {
     grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (d < radius * 0.55) {
-        if (crater) grid.terrain[i] = Config.STONE;
         byte res = grid.resource[i];
         if (res == Config.RES_STONE || res == Config.RES_IRON || res == Config.RES_GOLD) {
           depositsDestroyed.merge(Config.RESOURCE_INFO.get(res).key, 1, Integer::sum);
@@ -91,6 +93,24 @@ public class Events {
       }
       grid.markDirtyIdx(i);
     });
+
+    // a real crater: carve a chunk of blocks out of the world instead of
+    // just painting the terrain type, so the ground actually caves in
+    if (crater) {
+      int ix = (int) Math.floor(cx), iz = (int) Math.floor(cy);
+      double groundY = grid.inBounds(ix, iz) ? grid.height[grid.idx(ix, iz)] : 0;
+      VoxelWorld voxels = state.voxels;
+      Set<Long> touched = new LinkedHashSet<>();
+      voxels.carveSphere(cx, groundY, cy, radius * 0.75, touched);
+      for (long packed : touched) {
+        int x = (int) (packed % grid.cols), z = (int) (packed / grid.cols);
+        voxels.resyncHeight(grid, x, z);
+        int gi = grid.idx(x, z);
+        if (grid.terrain[gi] != Config.WATER) grid.terrain[gi] = Config.STONE;
+        grid.markDirtyIdx(gi);
+      }
+    }
+
     // supply shock: destroyed deposits mean less future supply, so the
     // market immediately reacts as if it's scarcer right now
     for (var e : depositsDestroyed.entrySet()) state.market.nudge(e.getKey(), 1, e.getValue() * 2.5);
@@ -108,11 +128,22 @@ public class Events {
 
   public static void earthquake(GameState state, double cx, double cy, double radius) {
     WorldGrid grid = state.grid;
+    VoxelWorld voxels = state.voxels;
     grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (grid.terrain[i] == Config.WATER) return;
-      grid.height[i] += (float) ((Math.random() - 0.5) * 3 * (1 - d / radius));
-      if (Math.random() < 0.08) grid.terrain[i] = Config.STONE;
+      double intensity = 1 - d / radius;
+      int delta = (int) Math.round((Math.random() - 0.5) * 3 * intensity);
+      if (delta > 0) {
+        for (int k = 0; k < delta; k++) voxels.buildColumn(x, y, VoxelWorld.STONE);
+      } else if (delta < 0) {
+        for (int k = 0; k < -delta; k++) voxels.digColumn(x, y);
+      }
+      voxels.resyncHeight(grid, x, y);
+      if (Math.random() < 0.08) {
+        grid.terrain[i] = Config.STONE;
+        voxels.paintColumnSurface(x, y, VoxelWorld.STONE);
+      }
       grid.markDirtyIdx(i);
     });
     for (Settlement s : state.settlements.values()) {

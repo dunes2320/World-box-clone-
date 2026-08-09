@@ -5,6 +5,7 @@ import com.worldbox.sim.Events;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Nation;
 import com.worldbox.sim.Population;
+import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
 import java.util.LinkedHashSet;
@@ -25,6 +26,8 @@ public class GodTools {
       new ToolDef("grass", "Grass", "Terrain"),
       new ToolDef("dirt", "Dirt", "Terrain"),
       new ToolDef("stone", "Mountain", "Terrain"),
+      new ToolDef("dig", "Dig", "Terrain"),
+      new ToolDef("build", "Build", "Terrain"),
       new ToolDef("forest", "Plant Forest", "Life"),
       new ToolDef("human", "Wanderer", "Life"),
       new ToolDef("foundNation", "Found Nation", "Life"),
@@ -39,17 +42,33 @@ public class GodTools {
   );
 
   public static final Set<String> CONTINUOUS_TOOLS = new LinkedHashSet<>(List.of(
-      "water", "sand", "grass", "dirt", "stone", "forest", "fire"));
+      "water", "sand", "grass", "dirt", "stone", "dig", "build", "forest", "fire"));
 
   private interface CellFn { void apply(int x, int y); }
 
   private static void forEachInBrush(WorldGrid grid, int cx, int cz, int size, CellFn fn) {
-    double r = size - 1;
+    // forEachInRadius measures from the cell-center point (cx+0.5, cz+0.5),
+    // so even the single cell directly under the cursor is 0.707 away from
+    // it - a radius of exactly 0 (brush size 1) would visit nothing at all.
+    double r = Math.max(0.75, size - 1);
     grid.forEachInRadius(cx + 0.5, cz + 0.5, r, (x, y, d) -> fn.apply(x, y));
   }
 
   private static void paintTerrain(GameState state, int cx, int cz, int size, byte terrainType) {
-    forEachInBrush(state.grid, cx, cz, size, (x, y) -> state.grid.setTerrain(x, y, terrainType));
+    WorldGrid grid = state.grid;
+    VoxelWorld voxels = state.voxels;
+    forEachInBrush(grid, cx, cz, size, (x, y) -> {
+      boolean wasWater = grid.terrain[grid.idx(x, y)] == Config.WATER;
+      grid.setTerrain(x, y, terrainType);
+      if (terrainType == Config.WATER) {
+        voxels.paintWaterColumn(x, y);
+      } else if (wasWater) {
+        voxels.fillColumnSolid(x, y, VoxelWorld.blockForTerrain(terrainType));
+      } else {
+        voxels.paintColumnSurface(x, y, VoxelWorld.blockForTerrain(terrainType));
+      }
+      voxels.resyncHeight(grid, x, y);
+    });
   }
 
   /** Returns true if the tool actually mutated something. */
@@ -63,6 +82,22 @@ public class GodTools {
       case "grass": paintTerrain(state, cx, cz, brushSize, Config.GRASS); return true;
       case "dirt": paintTerrain(state, cx, cz, brushSize, Config.DIRT); return true;
       case "stone": paintTerrain(state, cx, cz, brushSize, Config.STONE); return true;
+
+      case "dig":
+        forEachInBrush(grid, cx, cz, brushSize, (x, y) -> {
+          state.voxels.digColumn(x, y);
+          state.voxels.resyncHeight(grid, x, y);
+          grid.markDirtyIdx(grid.idx(x, y));
+        });
+        return true;
+
+      case "build":
+        forEachInBrush(grid, cx, cz, brushSize, (x, y) -> {
+          state.voxels.buildColumn(x, y, VoxelWorld.DIRT);
+          state.voxels.resyncHeight(grid, x, y);
+          grid.markDirtyIdx(grid.idx(x, y));
+        });
+        return true;
 
       case "forest":
         forEachInBrush(grid, cx, cz, brushSize, (x, y) -> {

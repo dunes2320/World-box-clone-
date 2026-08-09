@@ -20,7 +20,7 @@ import com.worldbox.config.Config;
 import com.worldbox.render.EntityRenderer;
 import com.worldbox.render.NationColorLookup;
 import com.worldbox.render.Picking;
-import com.worldbox.render.TerrainMesh;
+import com.worldbox.render.VoxelChunkRenderer;
 import com.worldbox.sim.Army;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Nation;
@@ -36,7 +36,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private final int screenWidth, screenHeight;
 
   private GameState state;
-  private TerrainMesh terrainMesh;
+  private VoxelChunkRenderer voxelRenderer;
   private EntityRenderer entityRenderer;
   private GameHud hud;
 
@@ -83,9 +83,10 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     sun.setColor(new ColorRGBA(1f, 0.96f, 0.86f, 1f));
     rootNode.addLight(sun);
 
-    terrainMesh = new TerrainMesh(state.grid, assetManager, this::nationColorFor);
-    rootNode.attachChild(terrainMesh.geometry);
-    rootNode.attachChild(terrainMesh.waterGeometry);
+    voxelRenderer = new VoxelChunkRenderer(state.voxels, state.grid, assetManager, this::nationColorFor);
+    voxelRenderer.rebuildAll();
+    rootNode.attachChild(voxelRenderer.solidNode);
+    rootNode.attachChild(voxelRenderer.waterNode);
 
     entityRenderer = new EntityRenderer(rootNode, assetManager, state.grid, this::nationColorFor);
     entityRenderer.rebuildStatics();
@@ -210,7 +211,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       return;
     }
 
-    Picking.CellHit cell = Picking.pickTerrainCell(cam, terrainMesh.geometry, state.grid, cursor);
+    Picking.CellHit cell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);
     if (cell == null) return;
     lastCell = cell;
     GodTools.apply(state, tool, cell.x, cell.z, brushSize);
@@ -226,7 +227,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (leftDown && GodTools.CONTINUOUS_TOOLS.contains(tool)) {
       Vector2f cursor = inputManager.getCursorPosition();
       if (!hud.isOverUi(cursor.x, cursor.y)) {
-        Picking.CellHit cell = Picking.pickTerrainCell(cam, terrainMesh.geometry, state.grid, cursor);
+        Picking.CellHit cell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);
         if (cell != null && (lastCell == null || lastCell.x != cell.x || lastCell.z != cell.z)) {
           lastCell = cell;
           GodTools.apply(state, tool, cell.x, cell.z, brushSize);
@@ -234,7 +235,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       }
     }
 
-    terrainMesh.flushDirty();
+    voxelRenderer.flushDirty();
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
     entityRenderer.update(state, alpha);
     updateSelectionRing();
@@ -284,6 +285,30 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(midway + 1.5, () -> screenshotState.takeScreenshot());
       testScript.put(midway + 2.0, () -> hud.debugShowGraph("world", -1));
       testScript.put(midway + 2.5, () -> screenshotState.takeScreenshot());
+      testScript.put(duration - 4.0, () -> {
+        if (!state.settlements.isEmpty()) {
+          var s = state.settlements.values().iterator().next();
+          int mx = Math.min(Config.COLS - 1, s.x + 6), mz = Math.min(Config.ROWS - 1, s.z);
+          int dx = Math.max(0, mx - 6);
+          float beforeMeteor = state.grid.height[state.grid.idx(mx, mz)];
+          float beforeDig = state.grid.height[state.grid.idx(dx, mz)];
+          GodTools.apply(state, "meteor", mx, mz, 3);
+          GodTools.apply(state, "dig", dx, mz, 1);
+          GodTools.apply(state, "dig", dx, mz, 1);
+          float afterDig = state.grid.height[state.grid.idx(dx, mz)];
+          GodTools.apply(state, "build", dx, mz, 1);
+          float afterBuild = state.grid.height[state.grid.idx(dx, mz)];
+          System.out.println("TESTMODE_VOXEL_CHECK meteorHeight=" + beforeMeteor
+              + "->" + state.grid.height[state.grid.idx(mx, mz)]
+              + " digHeight=" + beforeDig + "->" + afterDig
+              + " buildHeight=" + afterDig + "->" + afterBuild);
+          float h = state.grid.height[state.grid.idx(mx, mz)];
+          camTarget.set(mx, h, mz);
+          camDistance = 16f;
+          camPitch = 0.5f;
+        }
+      });
+      testScript.put(duration - 3.7, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 2.0, () -> {
         if (!state.settlements.isEmpty()) {
           var s = state.settlements.values().iterator().next();
@@ -372,7 +397,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   @Override
   public void resetWorld() {
     state = Simulation.createInitialState();
-    terrainMesh.setGrid(state.grid);
+    voxelRenderer.rebind(state.voxels, state.grid);
     entityRenderer.setGrid(state.grid);
     selection = null;
     lastTickTime = simTime;

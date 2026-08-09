@@ -1,6 +1,7 @@
 package com.worldbox.sim;
 
 import com.worldbox.util.Rng;
+import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.Map;
  * simple static functions that take (GameState) and mutate it in place. */
 public class GameState {
   public WorldGrid grid;
+  public VoxelWorld voxels;
   public List<Human> humans = new ArrayList<>();
   public Map<Integer, Settlement> settlements = new LinkedHashMap<>();
   public Map<Integer, Nation> nations = new LinkedHashMap<>();
