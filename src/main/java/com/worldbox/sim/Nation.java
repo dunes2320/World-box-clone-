@@ -33,6 +33,10 @@ public class Nation {
   public boolean alive = true;
   public String ideology; // "capitalism" | "communism"
   public final Bank bank = new Bank();
+  public String government; // Government.DEMOCRACY | AUTOCRACY | MONARCHY | OLIGARCHY
+  public double stability = 65;
+  /** last ~120 tax-cycle samples of treasury, for the economy graph. */
+  public final java.util.ArrayDeque<Double> treasuryHistory = new java.util.ArrayDeque<>();
 
   private Nation(int founded, String name) {
     this.id = nextId++;
@@ -41,6 +45,7 @@ public class Nation {
     this.name = name;
     this.founded = founded;
     this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
+    this.government = Government.random();
   }
 
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {

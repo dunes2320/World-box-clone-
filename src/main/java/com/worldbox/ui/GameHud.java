@@ -1,9 +1,14 @@
 package com.worldbox.ui;
 
 import com.jme3.asset.AssetManager;
+import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.Vector3f;
+import com.jme3.renderer.queue.RenderQueue;
+import com.jme3.scene.Geometry;
 import com.jme3.scene.Node;
+import com.jme3.scene.Spatial;
+import com.jme3.scene.shape.Quad;
 import com.simsilica.lemur.Axis;
 import com.simsilica.lemur.Button;
 import com.simsilica.lemur.Container;
@@ -17,6 +22,7 @@ import com.worldbox.sim.Business;
 import com.worldbox.sim.Diplomacy;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.GlobalMarket;
+import com.worldbox.sim.Government;
 import com.worldbox.sim.Military;
 import com.worldbox.sim.Nation;
 import com.worldbox.sim.Settlement;
@@ -35,6 +41,7 @@ public class GameHud {
   private static final ColorRGBA DANGER = new ColorRGBA(0.88f, 0.33f, 0.30f, 1f);
 
   private final HudContext ctx;
+  private final AssetManager assetManager;
   private final float screenW, screenH;
 
   private final Container toolbar = new Container(new SpringGridLayout(Axis.Y, Axis.X));
@@ -45,12 +52,23 @@ public class GameHud {
   private Label brushLabel;
   private Slider brushSlider;
 
-  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market"
+  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph"
   private double lastStatRefresh, lastPanelRefresh;
+
+  // Economy graph: raw jME quads, positioned by hand since Lemur's grid
+  // layout has no clean way to anchor bars of varying height to a shared
+  // baseline.
+  private final Node chartNode = new Node("economyChart");
+  private final java.util.List<Geometry> chartBars = new java.util.ArrayList<>();
+  private String graphView; // null | "nation" | "world"
+  private int graphNationId = -1;
 
   private static final float TOOLBAR_WIDTH = 190f;
   private static final float TOPBAR_HEIGHT = 42f;
   private static final float SIDEPANEL_WIDTH = 330f;
+  private static final float CHART_WIDTH = 290f;
+  private static final float CHART_HEIGHT = 150f;
+  private static final float CHART_TOP_OFFSET = 190f; // px below sidePanel's top edge
 
   /** Coarse screen-space guard so a click on a HUD panel doesn't also paint
    * the world underneath it. Panel positions are fixed (non-resizable
@@ -64,6 +82,7 @@ public class GameHud {
 
   public GameHud(Node guiNode, AssetManager assets, int width, int height, HudContext ctx) {
     this.ctx = ctx;
+    this.assetManager = assets;
     this.screenW = width;
     this.screenH = height;
 
@@ -98,6 +117,9 @@ public class GameHud {
       ctx.setSelection(null);
       refreshSidePanel();
     });
+    topBar.addChild(spacer(6));
+    Button worldEconBtn = topBar.addChild(new Button("World Economy"));
+    worldEconBtn.addClickCommands(src -> showGraph("world", -1));
 
     toolbar.setLocalTranslation(0, height - 46, 1);
     toolbar.setBackground(new QuadBackgroundComponent(BG));
@@ -106,7 +128,11 @@ public class GameHud {
 
     sidePanel.setBackground(new QuadBackgroundComponent(BG));
     guiNode.attachChild(sidePanel);
-    sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
+    sidePanel.setCullHint(Spatial.CullHint.Always);
+
+    chartNode.setQueueBucket(RenderQueue.Bucket.Gui);
+    chartNode.setCullHint(Spatial.CullHint.Always);
+    guiNode.attachChild(chartNode);
   }
 
   private static String speedLabel(int s) {
@@ -160,6 +186,11 @@ public class GameHud {
   }
 
   /** Test-only hook (used by GameApp's headless verification script). */
+  public void debugShowGraph(String view, int nationId) {
+    showGraph(view, nationId);
+  }
+
+  /** Test-only hook (used by GameApp's headless verification script). */
   public void debugSetPanelMode(String mode) {
     sidePanelMode = mode;
     ctx.setSelection(null);
@@ -206,9 +237,25 @@ public class GameHud {
     else if ("nation".equals(mode) && sel != null) renderNation(state, sel.id);
     else if ("nationsList".equals(mode)) renderNationsList(state);
     else if ("market".equals(mode)) renderMarket(state);
+    else if ("graph".equals(mode)) renderGraph(state);
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
 
     sidePanel.setLocalTranslation(screenW - 320, screenH - 46, 1);
+
+    if (!"graph".equals(mode)) {
+      chartNode.setCullHint(Spatial.CullHint.Always);
+    } else {
+      chartNode.setCullHint(Spatial.CullHint.Inherit);
+      layoutChart();
+    }
+  }
+
+  private void showGraph(String view, int nationId) {
+    graphView = view;
+    graphNationId = nationId;
+    sidePanelMode = "graph";
+    ctx.setSelection(null);
+    refreshSidePanel();
   }
 
   private Button closeButton() {
@@ -287,6 +334,26 @@ public class GameHud {
     statRow("Population", String.valueOf(pop));
     statRow("Military power", String.format("%.0f", military));
 
+    Label govHeader = sidePanel.addChild(new Label("GOVERNMENT"));
+    govHeader.setColor(MUTED); govHeader.setFontSize(12);
+    statRow("Type", n.government);
+    Container stabilityRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    Label stabLabel = stabilityRow.addChild(new Label("Stability"));
+    stabLabel.setColor(MUTED);
+    stabLabel.setPreferredSize(new Vector3f(160, 20, 0));
+    Label stabValue = stabilityRow.addChild(new Label(String.format("%.0f%%", n.stability)));
+    stabValue.setColor(n.stability < 25 ? DANGER : n.stability < 50 ? ACTIVE : GOOD);
+    if (n.stability < 15) {
+      Label unrest = sidePanel.addChild(new Label("Unrest brewing - revolt risk!"));
+      unrest.setColor(DANGER);
+    }
+    Container govButtons = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    for (String gtype : Government.TYPES) {
+      Button gb = govButtons.addChild(new Button(gtype));
+      if (gtype.equals(n.government)) gb.setColor(ACTIVE);
+      gb.addClickCommands(src -> { n.government = gtype; refreshSidePanel(); });
+    }
+
     Button gift = sidePanel.addChild(new Button("Gift 200 gold"));
     gift.setColor(GOOD);
     gift.addClickCommands(src -> Diplomacy.divineGift(state, id, 200));
@@ -317,6 +384,9 @@ public class GameHud {
     }
     statRow("Businesses", String.valueOf(bizCount));
     statRow("Business capital", (int) Math.floor(bizCapital) + "g");
+
+    Button viewGraph = sidePanel.addChild(new Button("View Economy Graph"));
+    viewGraph.addClickCommands(src -> showGraph("nation", id));
 
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
     relHeader.setColor(MUTED); relHeader.setFontSize(12);
@@ -396,5 +466,97 @@ public class GameHud {
         bubble.setColor(greed > 0.5 ? DANGER : ACTIVE);
       }
     }
+  }
+
+  private void renderGraph(GameState state) {
+    boolean isWorld = "world".equals(graphView);
+    Nation n = isWorld ? null : state.nations.get(graphNationId);
+    if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
+
+    Label title = sidePanel.addChild(new Label(isWorld ? "World Economy" : n.name + " - Economy"));
+    title.setFontSize(17);
+    Button back = sidePanel.addChild(new Button("Back"));
+    back.addClickCommands(src -> {
+      if (isWorld) {
+        sidePanelMode = "market";
+      } else {
+        ctx.setSelection(new GameState.Selection("nation", graphNationId));
+      }
+      graphView = null;
+      refreshSidePanel();
+    });
+
+    java.util.ArrayDeque<Double> hist = isWorld ? state.worldEconomyHistory : n.treasuryHistory;
+    if (hist.isEmpty()) {
+      Label l = sidePanel.addChild(new Label("Collecting data..."));
+      l.setColor(MUTED);
+    } else {
+      double min = Double.MAX_VALUE, max = -Double.MAX_VALUE, latest = 0;
+      for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
+      latest = hist.peekLast();
+      statRow("Current", (int) Math.floor(latest) + "g");
+      statRow("Range", (int) Math.floor(min) + "g - " + (int) Math.floor(max) + "g");
+    }
+
+    Label chartSpacer = sidePanel.addChild(new Label(" "));
+    chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + 16, 0));
+  }
+
+  /** Rebuilds the raw jME bar-chart geometry for the currently selected
+   * graph, positioned by hand beneath the panel's text content. */
+  private void layoutChart() {
+    for (Geometry g : chartBars) g.removeFromParent();
+    chartBars.clear();
+
+    GameState state = ctx.getState();
+    boolean isWorld = "world".equals(graphView);
+    Nation n = isWorld ? null : state.nations.get(graphNationId);
+    if (!isWorld && n == null) return;
+    java.util.ArrayDeque<Double> hist = isWorld ? state.worldEconomyHistory : n.treasuryHistory;
+    if (hist.isEmpty()) return;
+
+    java.util.List<Double> values = new java.util.ArrayList<>(hist);
+    if (values.size() > 60) values = values.subList(values.size() - 60, values.size());
+    double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
+    for (double v : values) { min = Math.min(min, v); max = Math.max(max, v); }
+    double span = Math.max(1.0, max - min);
+
+    float originX = sidePanel.getLocalTranslation().x + 16;
+    float baselineY = sidePanel.getLocalTranslation().y - CHART_TOP_OFFSET - CHART_HEIGHT;
+    float barW = CHART_WIDTH / values.size();
+
+    for (int i = 0; i < values.size(); i++) {
+      double v = values.get(i);
+      float t = (float) ((v - min) / span);
+      float h = Math.max(2f, t * CHART_HEIGHT);
+      Quad quad = new Quad(Math.max(1f, barW - 1.5f), h);
+      Geometry bar = new Geometry("econBar" + i, quad);
+      Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+      mat.setColor("Color", lerpColor(DANGER, GOOD, t));
+      bar.setMaterial(mat);
+      bar.setQueueBucket(RenderQueue.Bucket.Gui);
+      bar.setLocalTranslation(originX + i * barW, baselineY, 2);
+      chartNode.attachChild(bar);
+      chartBars.add(bar);
+    }
+
+    Quad baseline = new Quad(CHART_WIDTH, 2f);
+    Geometry baselineBar = new Geometry("econBaseline", baseline);
+    Material baseMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+    baseMat.setColor("Color", MUTED);
+    baselineBar.setMaterial(baseMat);
+    baselineBar.setQueueBucket(RenderQueue.Bucket.Gui);
+    baselineBar.setLocalTranslation(originX, baselineY - 2f, 2);
+    chartNode.attachChild(baselineBar);
+    chartBars.add(baselineBar);
+  }
+
+  private static ColorRGBA lerpColor(ColorRGBA a, ColorRGBA b, float t) {
+    t = Math.max(0f, Math.min(1f, t));
+    return new ColorRGBA(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        1f);
   }
 }

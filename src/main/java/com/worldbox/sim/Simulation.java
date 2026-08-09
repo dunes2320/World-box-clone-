@@ -45,6 +45,7 @@ public class Simulation {
     Settlement.update(state);
     Nation.update(state);
     Economy.update(state);
+    Government.update(state);
     Military.update(state);
     Diplomacy.update(state);
     Events.update(state);

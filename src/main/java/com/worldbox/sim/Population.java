@@ -85,6 +85,49 @@ public class Population {
     h.state = "wander";
   }
 
+  private static void applyLivingCost(Human h) {
+    h.wealth -= 0.05;
+    if (h.wealth < -5 && h.debt <= 0) {
+      double loan = 20;
+      h.debt += loan;
+      h.wealth += loan;
+    }
+  }
+
+  // This is where currency actually enters the world: a hauled load is sold
+  // at the going market price, and whoever employs that worker - a private
+  // business if one exists for that resource, otherwise the public sector
+  // (the nation treasury) - pays them a cut as a wage. Wages first clear any
+  // outstanding home loan; if a worker's savings go negative, they take out
+  // a new one automatically to get by.
+  private static void payWage(GameState state, Settlement settlement, String resourceKey, double amount, Human h) {
+    double value = amount * state.market.prices.getOrDefault(resourceKey, 1.0);
+    double wage = value * 0.35;
+
+    Business employer = null;
+    for (Business b : state.businesses.values()) {
+      if (b.settlementId == settlement.id && b.resourceKey.equals(resourceKey)) { employer = b; break; }
+    }
+    if (employer != null && employer.capital >= wage) {
+      employer.capital -= wage;
+    } else {
+      Nation nation = state.nations.get(settlement.nationId);
+      if (nation != null) nation.treasury -= wage;
+    }
+
+    if (h.debt > 0) {
+      double repay = Math.min(h.debt, wage);
+      h.debt -= repay;
+      wage -= repay;
+    }
+    h.wealth += wage;
+    if (h.wealth < -5 && h.debt <= 0) {
+      double loan = 20;
+      h.debt += loan;
+      h.wealth += loan;
+    }
+  }
+
   private static double moveToward(WorldGrid grid, Human h, double speed) {
     double dx = h.targetX - h.x, dz = h.targetZ - h.z;
     double dist = Math.hypot(dx, dz);
@@ -127,6 +170,8 @@ public class Population {
         next.add(h);
         continue;
       }
+
+      applyLivingCost(h);
 
       int ci = grid.idx(clampCoord((int) Math.floor(h.x), grid.cols), clampCoord((int) Math.floor(h.z), grid.rows));
       if (grid.burning[ci] && Math.random() < 0.35) continue; // burned to death
@@ -187,6 +232,7 @@ public class Population {
           if (dist < 0.2) {
             double cur = settlement.stock.getOrDefault(h.carryingType, 0.0);
             settlement.stock.put(h.carryingType, cur + h.carryingAmount);
+            payWage(state, settlement, h.carryingType, h.carryingAmount, h);
             h.carryingType = null;
             assignJob(state, h);
           }

@@ -12,6 +12,7 @@ public class Business {
   public final String resourceKey; // "wood", "stone", "iron"
   public double capital;
   public double productivity = 1.0;
+  public double debt = 0; // outstanding business loan from the nation's bank
 
   public Business(int settlementId, int nationId, String resourceKey) {
     this.id = nextId++;

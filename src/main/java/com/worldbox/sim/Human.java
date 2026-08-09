@@ -18,6 +18,8 @@ public class Human {
   public boolean dead = false;
   public float hue;
   public int isolationTicks = 0; // ticks spent as a nation-less wanderer with no settlement in reach
+  public double wealth = 0;  // personal savings, paid as wages when they deliver a haul
+  public double debt = 0;    // outstanding home loan, taken automatically when wealth runs dry
 
   public Human(double x, double z, int nationId, int settlementId) {
     this.id = nextId++;

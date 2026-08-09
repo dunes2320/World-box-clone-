@@ -107,23 +107,50 @@ public class Economy {
       double surplus = Math.max(0, s.stock.getOrDefault(b.resourceKey, 0.0) - Config.SETTLEMENT_BUFFER);
       double skim = surplus * 0.15;
       s.stock.merge(b.resourceKey, -skim, Double::sum);
-      double revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity;
+      // oligarchy: the business elite run the show, so private enterprise
+      // is extra productive but the state's cut shrinks
+      double govMultiplier = n.government.equals(Government.OLIGARCHY) ? 1.3 : 1.0;
+      double revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier;
 
       if (n.ideology.equals("communism")) {
         // state-owned: the enterprise's output goes straight to the treasury
         n.treasury += revenue;
         b.capital += revenue * 0.05;
       } else {
-        // private profit, taxed by the state, and reinvestment fuels speculation
-        b.capital += revenue * 0.7;
-        n.treasury += revenue * 0.3;
+        double stateCut = n.government.equals(Government.OLIGARCHY) ? 0.15 : 0.3;
+        b.capital += revenue * (1 - stateCut);
+        n.treasury += revenue * stateCut;
         state.market.nudge(b.resourceKey, 1, 0.4);
       }
 
       b.capital -= 0.4; // upkeep
+
+      // business loans: borrow from the nation's bank when cash is tight,
+      // repay out of future profit once healthy again
+      if (b.capital < 10 && n.bank.reserves > 25) {
+        double loanAmt = 25;
+        n.bank.reserves -= loanAmt;
+        n.bank.loans += loanAmt;
+        b.capital += loanAmt;
+        b.debt += loanAmt;
+      } else if (b.debt > 0 && b.capital > 30) {
+        double repay = Math.min(b.debt, (b.capital - 30) * 0.3);
+        b.debt -= repay;
+        b.capital -= repay;
+        n.bank.loans = Math.max(0, n.bank.loans - repay);
+      }
+
       if (b.capital < -20) bankrupt.add(b.id);
     }
-    for (int id : bankrupt) state.businesses.remove(id);
+    for (int id : bankrupt) {
+      Business b = state.businesses.get(id);
+      if (b != null && b.debt > 0) {
+        // defaulted debt is written off the bank's books - it's gone either way
+        Nation n = state.nations.get(b.nationId);
+        if (n != null) n.bank.loans = Math.max(0, n.bank.loans - b.debt);
+      }
+      state.businesses.remove(id);
+    }
   }
 
   // ---- national banks: reserves, emergency loans, and bank runs ----

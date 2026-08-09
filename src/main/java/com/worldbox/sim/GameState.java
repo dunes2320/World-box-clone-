@@ -17,6 +17,8 @@ public class GameState {
   public Map<Integer, Nation> nations = new LinkedHashMap<>();
   public Map<Integer, Army> armies = new LinkedHashMap<>();
   public Map<Integer, Business> businesses = new LinkedHashMap<>();
+  /** last ~120 samples of total living-nation treasury, for the world economy graph. */
+  public final java.util.ArrayDeque<Double> worldEconomyHistory = new java.util.ArrayDeque<>();
   public GlobalMarket market = new GlobalMarket();
   public DiplomacyManager diplomacy = new DiplomacyManager();
   public List<Tornado> tornadoes = new ArrayList<>();

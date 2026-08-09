@@ -57,6 +57,11 @@ public class EntityRenderer {
   private static final int ARMY_CAP = 96;
   private static final int BUSINESS_CAP = 96;
   private static final int BANK_CAP = 32;
+  private static final int FIRE_CAP = 48;
+  private static final int SPARKLE_CAP = 28;
+  private static final ColorRGBA FLAME_A = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
+  private static final ColorRGBA FLAME_B = new ColorRGBA(1f, 0.82f, 0.25f, 1f);
+  private static final ColorRGBA SPARKLE_COLOR = new ColorRGBA(1f, 0.95f, 0.6f, 1f);
 
   private final AssetManager assets;
   private final Node root;
@@ -65,6 +70,7 @@ public class EntityRenderer {
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, humanTemplate, armyTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate;
+  private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom;
 
@@ -73,11 +79,23 @@ public class EntityRenderer {
   private final Node humansNode = new Node("humans");
   private final Node businessesNode = new Node("businesses");
   private final Node banksNode = new Node("banks");
+  private final Node flagsNode = new Node("flags");
+  private final Node firesNode = new Node("fires");
+  private final Node sparklesNode = new Node("sparkles");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] armyPool = new Geometry[ARMY_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
+  private final Geometry[] flagPool = new Geometry[SETTLEMENT_CAP];
+  private final Geometry[] firePool = new Geometry[FIRE_CAP];
+  private final Geometry[] sparklePool = new Geometry[SPARKLE_CAP];
+
+  /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
+   * trees/deposits in rebuildStatics() and consumed every frame by the
+   * (cheap) per-instance fire flicker / sparkle animation. */
+  private final List<Integer> burningCache = new ArrayList<>();
+  private final List<Integer> goldCache = new ArrayList<>();
 
   private final Geometry monsterGeom;
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
@@ -109,6 +127,19 @@ public class EntityRenderer {
 
     businessTemplate = new Box(0.22f, 0.22f, 0.22f);
     bankTemplate = MeshUtil.buildPillar(0.28f, 0.5f, 1.3f);
+
+    // nation banner: a slim pole with a small flag near the top, planted
+    // beside every settlement so a nation's color reads at a glance.
+    Mesh poleRaw = new Cylinder(2, 4, 0.035f, 0.035f, 1.15f, true, false);
+    MeshUtil.reorientZToY(poleRaw);
+    Mesh pole = MeshUtil.translatedCopy(poleRaw, 0, 0.58f, 0);
+    Mesh cloth = MeshUtil.translatedCopy(new Box(0.15f, 0.09f, 0.02f), 0.15f, 0.98f, 0);
+    flagTemplate = MeshUtil.mergeMeshes(pole, cloth);
+
+    fireTemplate = new Cylinder(2, 5, 0.15f, 0.001f, 0.42f, true, false);
+    MeshUtil.reorientZToY(fireTemplate);
+
+    sparkleTemplate = MeshUtil.buildGem(0.09f, 0.17f);
 
     treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
     treesGeom.setMaterial(vertexColorMaterial());
@@ -167,6 +198,33 @@ public class EntityRenderer {
     }
     root.attachChild(banksNode);
 
+    for (int i = 0; i < SETTLEMENT_CAP; i++) {
+      Geometry g = new Geometry("Flag" + i, flagTemplate);
+      g.setMaterial(soloColorMaterial(ColorRGBA.White));
+      g.setCullHint(Spatial.CullHint.Always);
+      flagsNode.attachChild(g);
+      flagPool[i] = g;
+    }
+    root.attachChild(flagsNode);
+
+    for (int i = 0; i < FIRE_CAP; i++) {
+      Geometry g = new Geometry("Fire" + i, fireTemplate);
+      g.setMaterial(soloColorMaterial(FLAME_A));
+      g.setCullHint(Spatial.CullHint.Always);
+      firesNode.attachChild(g);
+      firePool[i] = g;
+    }
+    root.attachChild(firesNode);
+
+    for (int i = 0; i < SPARKLE_CAP; i++) {
+      Geometry g = new Geometry("Sparkle" + i, sparkleTemplate);
+      g.setMaterial(soloColorMaterial(SPARKLE_COLOR));
+      g.setCullHint(Spatial.CullHint.Always);
+      sparklesNode.attachChild(g);
+      sparklePool[i] = g;
+    }
+    root.attachChild(sparklesNode);
+
     Box monsterBox = new Box(1.3f, 1.3f, 1.3f);
     monsterGeom = new Geometry("Monster", monsterBox);
     Material monsterMat = soloColorMaterial(new ColorRGBA(0.29f, 0.06f, 0.19f, 1f));
@@ -219,7 +277,9 @@ public class EntityRenderer {
     List<PropBatcher.Placement> canopies = new ArrayList<>();
     List<PropBatcher.Placement> trunks = new ArrayList<>();
     List<PropBatcher.Placement> deposits = new ArrayList<>();
-    for (int y = 0; y < grid.rows && (canopies.size() < TREE_CAP_SAMPLE || deposits.size() < DEPOSIT_CAP_SAMPLE); y++) {
+    burningCache.clear();
+    goldCache.clear();
+    for (int y = 0; y < grid.rows; y++) {
       for (int x = 0; x < grid.cols; x++) {
         int i = grid.idx(x, y);
         byte res = grid.resource[i];
@@ -234,6 +294,8 @@ public class EntityRenderer {
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
           deposits.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + 0.28f, y + 0.5f, rotY, 1f, c));
         }
+        if (res == Config.RES_GOLD && goldCache.size() < SPARKLE_CAP) goldCache.add(i);
+        if (grid.burning[i] && burningCache.size() < FIRE_CAP) burningCache.add(i);
       }
     }
     treesGeom.setMesh(PropBatcher.bake(treeCanopyTemplate, canopies));
@@ -252,6 +314,8 @@ public class EntityRenderer {
     updateBanks(state);
     updateMonster(state);
     updateTornadoes(state);
+    updateFires(state);
+    updateSparkles(state);
   }
 
   private Mesh tierTemplate(int population) {
@@ -275,9 +339,59 @@ public class EntityRenderer {
       g.getMaterial().setColor("Color", c);
       g.setUserData("settlementId", s.id);
       g.setCullHint(Spatial.CullHint.Inherit);
+
+      Geometry flag = flagPool[i];
+      float flagOffset = scale * 0.55f + 0.65f;
+      flag.setLocalTranslation(s.x + 0.5f + flagOffset, h, s.z + 0.5f + flagOffset);
+      flag.setLocalScale(0.85f);
+      flag.getMaterial().setColor("Color", c);
+      flag.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
-    for (; i < SETTLEMENT_CAP; i++) settlementPool[i].setCullHint(Spatial.CullHint.Always);
+    for (; i < SETTLEMENT_CAP; i++) {
+      settlementPool[i].setCullHint(Spatial.CullHint.Always);
+      flagPool[i].setCullHint(Spatial.CullHint.Always);
+    }
+  }
+
+  private void updateFires(GameState state) {
+    int count = Math.min(FIRE_CAP, burningCache.size());
+    for (int i = 0; i < count; i++) {
+      int cell = burningCache.get(i);
+      int gx = cell % grid.cols, gz = cell / grid.cols;
+      Geometry g = firePool[i];
+      float h = grid.height[cell];
+      float flicker = (float) Math.sin(state.tick * 0.4 + i * 1.7) * 0.5f + 0.5f;
+      g.setLocalTranslation(gx + 0.5f, h, gz + 0.5f);
+      g.setLocalScale(0.8f + flicker * 0.5f);
+      g.getMaterial().setColor("Color", lerpColor(FLAME_A, FLAME_B, flicker));
+      g.setCullHint(Spatial.CullHint.Inherit);
+    }
+    for (int i = count; i < FIRE_CAP; i++) firePool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  private void updateSparkles(GameState state) {
+    int count = Math.min(SPARKLE_CAP, goldCache.size());
+    for (int i = 0; i < count; i++) {
+      int cell = goldCache.get(i);
+      int gx = cell % grid.cols, gz = cell / grid.cols;
+      Geometry g = sparklePool[i];
+      float h = grid.height[cell];
+      float twinkle = (float) Math.sin(state.tick * 0.15 + i * 2.3) * 0.5f + 0.5f;
+      g.setLocalTranslation(gx + 0.5f, h + 0.55f + twinkle * 0.08f, gz + 0.5f);
+      g.setLocalScale(0.5f + twinkle * 0.6f);
+      g.getMaterial().setColor("Color", SPARKLE_COLOR.mult(0.7f + twinkle * 0.5f));
+      g.setCullHint(Spatial.CullHint.Inherit);
+    }
+    for (int i = count; i < SPARKLE_CAP; i++) sparklePool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  private static ColorRGBA lerpColor(ColorRGBA a, ColorRGBA b, float t) {
+    return new ColorRGBA(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        1f);
   }
 
   private void updateBusinesses(GameState state) {

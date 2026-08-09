@@ -271,13 +271,47 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(5.5, () -> screenshotState.takeScreenshot());
       testScript.put(6.0, () -> hud.debugSetPanelMode(null));
       double midway = Math.max(15.0, duration * 0.5);
+      int[] graphNationId = {-1};
       testScript.put(midway, () -> {
         if (!state.nations.isEmpty()) {
           int firstNationId = state.nations.keySet().iterator().next();
+          graphNationId[0] = firstNationId;
           setSelection(new GameState.Selection("nation", firstNationId));
         }
       });
       testScript.put(midway + 0.5, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 1.0, () -> hud.debugShowGraph("nation", graphNationId[0]));
+      testScript.put(midway + 1.5, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 2.0, () -> hud.debugShowGraph("world", -1));
+      testScript.put(midway + 2.5, () -> screenshotState.takeScreenshot());
+      testScript.put(duration - 2.0, () -> {
+        if (!state.settlements.isEmpty()) {
+          var s = state.settlements.values().iterator().next();
+          float h = state.grid.height[state.grid.idx(s.x, s.z)];
+          camTarget.set(s.x + 0.5f, h, s.z + 0.5f);
+        }
+        camDistance = 18f;
+        camPitch = 0.6f;
+      });
+      testScript.put(duration - 1.7, () -> screenshotState.takeScreenshot());
+      testScript.put(duration - 1.6, () -> {
+        int fx = -1, fz = -1;
+        search:
+        for (int y = 0; y < state.grid.rows; y++) {
+          for (int x = 0; x < state.grid.cols; x++) {
+            if (state.grid.resource[state.grid.idx(x, y)] == Config.RES_FOREST) { fx = x; fz = y; break search; }
+          }
+        }
+        if (fx >= 0) {
+          GodTools.apply(state, "fire", fx, fz, 3);
+          entityRenderer.rebuildStatics();
+          float h = state.grid.height[state.grid.idx(fx, fz)];
+          camTarget.set(fx + 0.5f, h, fz + 0.5f);
+          camDistance = 12f;
+          camPitch = 0.55f;
+        }
+      });
+      testScript.put(duration - 1.2, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 1.0, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 0.3, () -> {
         System.out.println("TESTMODE_FINAL_STATS tick=" + state.tick
