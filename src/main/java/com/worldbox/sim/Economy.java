@@ -49,7 +49,9 @@ public class Economy {
         if (seller != null && seller.stock.get(key) > Config.SETTLEMENT_BUFFER * 1.6) {
           double sellAmt = (seller.stock.get(key) - Config.SETTLEMENT_BUFFER) * 0.08;
           seller.stock.merge(key, -sellAmt, Double::sum);
-          nation.treasury += sellAmt * market.prices.get(key);
+          double saleValue = sellAmt * market.prices.get(key);
+          nation.treasury += saleValue;
+          nation.gdpAccum += saleValue;
           market.volume.merge(key, sellAmt, Double::sum);
           market.supplyFlow.merge(key, sellAmt, Double::sum);
         }
@@ -164,6 +166,7 @@ public class Economy {
       // is extra productive but the state's cut shrinks
       double govMultiplier = n.government.equals(Government.OLIGARCHY) ? 1.3 : 1.0;
       double revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier;
+      n.gdpAccum += revenue;
 
       if (n.ideology.equals("communism")) {
         // state-owned: the enterprise's output goes straight to the treasury

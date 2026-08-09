@@ -62,13 +62,14 @@ public class GameHud {
   private final java.util.List<Geometry> chartBars = new java.util.ArrayList<>();
   private String graphView; // null | "nation" | "world"
   private int graphNationId = -1;
+  private String graphMetric = "marketcap"; // marketcap | unemployment | gdp | currency
 
   private static final float TOOLBAR_WIDTH = 190f;
   private static final float TOPBAR_HEIGHT = 42f;
   private static final float SIDEPANEL_WIDTH = 330f;
   private static final float CHART_WIDTH = 290f;
   private static final float CHART_HEIGHT = 150f;
-  private static final float CHART_TOP_OFFSET = 190f; // px below sidePanel's top edge
+  private static final float CHART_TOP_OFFSET = 226f; // px below sidePanel's top edge
 
   /** Coarse screen-space guard so a click on a HUD panel doesn't also paint
    * the world underneath it. Panel positions are fixed (non-resizable
@@ -191,6 +192,12 @@ public class GameHud {
   }
 
   /** Test-only hook (used by GameApp's headless verification script). */
+  public void debugSetGraphMetric(String metric) {
+    graphMetric = metric;
+    refreshSidePanel();
+  }
+
+  /** Test-only hook (used by GameApp's headless verification script). */
   public void debugSetPanelMode(String mode) {
     sidePanelMode = mode;
     ctx.setSelection(null);
@@ -253,6 +260,7 @@ public class GameHud {
   private void showGraph(String view, int nationId) {
     graphView = view;
     graphNationId = nationId;
+    graphMetric = "marketcap";
     sidePanelMode = "graph";
     ctx.setSelection(null);
     refreshSidePanel();
@@ -468,12 +476,53 @@ public class GameHud {
     }
   }
 
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency"};
+  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp"};
+
+  private String metricTabLabel(String metric) {
+    switch (metric) {
+      case "unemployment": return "Jobs";
+      case "gdp": return "GDP";
+      case "currency": return "Gold";
+      default: return "Cap";
+    }
+  }
+
+  private String metricPanelTitle(String metric) {
+    switch (metric) {
+      case "unemployment": return "Unemployment";
+      case "gdp": return "GDP";
+      case "currency": return "Currency/Gold";
+      default: return "Market Cap";
+    }
+  }
+
+  private String formatMetric(String metric, double v) {
+    switch (metric) {
+      case "unemployment": return String.format("%.1f%%", v * 100);
+      case "currency": return String.format("%.3foz", v);
+      default: return (int) Math.floor(v) + "g";
+    }
+  }
+
+  /** Every metric but market cap needs a specific nation (unemployment and
+   * currency aren't tracked world-wide - "unemployment rate of the whole
+   * world" isn't a meaningful single number the way a nation's is). */
+  private java.util.ArrayDeque<Double> metricHistory(GameState state, String metric, boolean isWorld, Nation n) {
+    switch (metric) {
+      case "unemployment": return isWorld ? null : n.unemploymentHistory;
+      case "gdp": return isWorld ? state.worldGdpHistory : n.gdpHistory;
+      case "currency": return isWorld ? null : n.currencyHistory;
+      default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
+    }
+  }
+
   private void renderGraph(GameState state) {
     boolean isWorld = "world".equals(graphView);
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
 
-    Label title = sidePanel.addChild(new Label(isWorld ? "World Market Index" : n.displayName() + " - Market Cap"));
+    Label title = sidePanel.addChild(new Label((isWorld ? "World Economy" : n.displayName()) + " - " + metricPanelTitle(graphMetric)));
     title.setFontSize(17);
     Button back = sidePanel.addChild(new Button("Back"));
     back.addClickCommands(src -> {
@@ -486,8 +535,15 @@ public class GameHud {
       refreshSidePanel();
     });
 
-    java.util.ArrayDeque<Double> hist = isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
-    if (hist.size() < 2) {
+    Container tabs = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    for (String metric : isWorld ? GRAPH_METRICS_WORLD : GRAPH_METRICS_NATION) {
+      Button tab = tabs.addChild(new Button(metricTabLabel(metric)));
+      if (metric.equals(graphMetric)) tab.setColor(ACTIVE);
+      tab.addClickCommands(src -> { graphMetric = metric; refreshSidePanel(); });
+    }
+
+    java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
+    if (hist == null || hist.size() < 2) {
       Label l = sidePanel.addChild(new Label("Collecting data..."));
       l.setColor(MUTED);
     } else {
@@ -495,21 +551,25 @@ public class GameHud {
       double latest = arr[arr.length - 1];
       double prev = arr[arr.length - 2];
       double change = latest - prev;
-      double changePct = prev > 0.01 ? (change / prev) * 100 : 0;
+      double changePct = Math.abs(prev) > 0.001 ? (change / prev) * 100 : 0;
       double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
       for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
-      statRow("Market cap", (int) Math.floor(latest) + "g");
+      statRow(metricTabLabel(graphMetric), formatMetric(graphMetric, latest));
       Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label changeLbl = changeRow.addChild(new Label("Change"));
       changeLbl.setColor(MUTED);
       changeLbl.setPreferredSize(new Vector3f(160, 20, 0));
-      Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%dg)",
-          change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", (int) change)));
+      Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%s)",
+          change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", formatMetric(graphMetric, Math.abs(change)))));
       changeVal.setColor(change >= 0 ? GOOD : DANGER);
-      statRow("Range", (int) Math.floor(min) + "g - " + (int) Math.floor(max) + "g");
+      statRow("Range", formatMetric(graphMetric, min) + " - " + formatMetric(graphMetric, max));
     }
-    double treasury = isWorld ? sumLivingTreasury(state) : n.treasury;
-    statRow("Treasury", (int) Math.floor(treasury) + "g");
+    if (!isWorld) {
+      statRow("Treasury", (int) Math.floor(n.treasury) + "g");
+      statRow("Currency", n.currencyName);
+    } else {
+      statRow("Treasury", (int) Math.floor(sumLivingTreasury(state)) + "g");
+    }
 
     Label chartSpacer = sidePanel.addChild(new Label(" "));
     chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + 16, 0));
@@ -533,8 +593,8 @@ public class GameHud {
     boolean isWorld = "world".equals(graphView);
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) return;
-    java.util.ArrayDeque<Double> hist = isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
-    if (hist.isEmpty()) return;
+    java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
+    if (hist == null || hist.isEmpty()) return;
 
     java.util.List<Double> values = new java.util.ArrayList<>(hist);
     if (values.size() > 60) values = values.subList(values.size() - 60, values.size());

@@ -23,11 +23,22 @@ public class Government {
     boolean sample = state.tick % 20 == 0;
     double worldTreasury = 0;
     double worldMarketCap = 0;
-    java.util.Map<Integer, Double> marketCapByNation = sample ? new java.util.HashMap<>() : null;
+    double worldGdp = 0;
+    java.util.Map<Integer, Double> marketCapByNation = null;
+    java.util.Map<Integer, int[]> laborByNation = null; // [total, unemployed]
+    double goldPrice = state.market.prices.getOrDefault("gold_ore", Config.BASE_PRICES.get("gold_ore"));
     if (sample) {
+      marketCapByNation = new java.util.HashMap<>();
       for (Business b : state.businesses.values()) {
         marketCapByNation.merge(b.nationId, b.valuation, Double::sum);
         worldMarketCap += b.valuation;
+      }
+      laborByNation = new java.util.HashMap<>();
+      for (Human h : state.humans) {
+        if (h.nationId == Config.UNDEAD_NATION_ID || h.nationId < 0) continue;
+        int[] counts = laborByNation.computeIfAbsent(h.nationId, k -> new int[2]);
+        counts[0]++;
+        if (h.job == null) counts[1]++;
       }
     }
     for (Nation n : new ArrayList<>(state.nations.values())) {
@@ -38,20 +49,41 @@ public class Government {
       maybeRevolt(state, n);
       if (sample) {
         n.treasuryHistory.addLast(n.treasury);
-        while (n.treasuryHistory.size() > 120) n.treasuryHistory.removeFirst();
+        trim(n.treasuryHistory);
         worldTreasury += n.treasury;
 
         n.marketCapHistory.addLast(marketCapByNation.getOrDefault(n.id, 0.0));
-        while (n.marketCapHistory.size() > 120) n.marketCapHistory.removeFirst();
+        trim(n.marketCapHistory);
+
+        int[] labor = laborByNation.getOrDefault(n.id, new int[2]);
+        double unemployment = labor[0] == 0 ? 0 : (double) labor[1] / labor[0];
+        n.unemploymentHistory.addLast(unemployment);
+        trim(n.unemploymentHistory);
+
+        n.gdpHistory.addLast(n.gdpAccum);
+        trim(n.gdpHistory);
+        worldGdp += n.gdpAccum;
+        n.gdpAccum = 0;
+
+        double treasuryPerCapita = labor[0] == 0 ? n.treasury : n.treasury / labor[0];
+        n.currencyHistory.addLast(treasuryPerCapita / Math.max(0.01, goldPrice));
+        trim(n.currencyHistory);
       }
     }
     if (sample) {
       state.worldEconomyHistory.addLast(worldTreasury);
-      while (state.worldEconomyHistory.size() > 120) state.worldEconomyHistory.removeFirst();
+      trim(state.worldEconomyHistory);
 
       state.worldMarketCapHistory.addLast(worldMarketCap);
-      while (state.worldMarketCapHistory.size() > 120) state.worldMarketCapHistory.removeFirst();
+      trim(state.worldMarketCapHistory);
+
+      state.worldGdpHistory.addLast(worldGdp);
+      trim(state.worldGdpHistory);
     }
+  }
+
+  private static void trim(java.util.ArrayDeque<Double> dq) {
+    while (dq.size() > 120) dq.removeFirst();
   }
 
   private static void applyGovernmentEffects(Nation n) {

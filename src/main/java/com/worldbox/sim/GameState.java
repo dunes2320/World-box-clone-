@@ -25,6 +25,8 @@ public class GameState {
    * valuation - the world "stock index", the primary series for the
    * world economy graph. */
   public final java.util.ArrayDeque<Double> worldMarketCapHistory = new java.util.ArrayDeque<>();
+  /** last ~120 periodic readings of world-wide business+trade revenue. */
+  public final java.util.ArrayDeque<Double> worldGdpHistory = new java.util.ArrayDeque<>();
   public GlobalMarket market = new GlobalMarket();
   public DiplomacyManager diplomacy = new DiplomacyManager();
   public List<Tornado> tornadoes = new ArrayList<>();

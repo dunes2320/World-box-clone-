@@ -326,8 +326,14 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(midway + 0.5, () -> screenshotState.takeScreenshot());
       testScript.put(midway + 1.0, () -> hud.debugShowGraph("nation", graphNationId[0]));
       testScript.put(midway + 1.5, () -> screenshotState.takeScreenshot());
-      testScript.put(midway + 2.0, () -> hud.debugShowGraph("world", -1));
-      testScript.put(midway + 2.5, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 1.8, () -> hud.debugSetGraphMetric("unemployment"));
+      testScript.put(midway + 2.0, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 2.2, () -> hud.debugSetGraphMetric("gdp"));
+      testScript.put(midway + 2.4, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 2.6, () -> hud.debugSetGraphMetric("currency"));
+      testScript.put(midway + 2.8, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 3.0, () -> hud.debugShowGraph("world", -1));
+      testScript.put(midway + 3.5, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 4.0, () -> {
         if (!state.settlements.isEmpty()) {
           var s = state.settlements.values().iterator().next();

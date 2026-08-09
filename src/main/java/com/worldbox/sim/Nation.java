@@ -68,6 +68,22 @@ public class Nation {
    * style valuation - the primary series for the stock-market-style
    * economy graph. */
   public final java.util.ArrayDeque<Double> marketCapHistory = new java.util.ArrayDeque<>();
+  /** last ~120 snapshots of the jobless share of this nation's population. */
+  public final java.util.ArrayDeque<Double> unemploymentHistory = new java.util.ArrayDeque<>();
+  /** last ~120 periodic readings of business+trade revenue generated -
+   * a flow (per ~20-tick window), not a running total like treasury. */
+  public final java.util.ArrayDeque<Double> gdpHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of treasury-per-capita measured in gold - how much
+   * gold a citizen's per-capita share of the treasury could buy. */
+  public final java.util.ArrayDeque<Double> currencyHistory = new java.util.ArrayDeque<>();
+  /** revenue generated this sampling window (business output + national
+   * trade), reset to 0 every time it's rolled into gdpHistory. */
+  public double gdpAccum = 0;
+  /** the nation's currency name, e.g. "Valendorian Crown" - cosmetic, but
+   * ties the currency-vs-gold graph to something with a name. */
+  public String currencyName;
+
+  private static final String[] CURRENCY_SUFFIX = {"Crown", "Mark", "Pound", "Dinar", "Franc", "Ducat", "Guilder", "Real", "Krona", "Talent"};
 
   private Nation(int founded, String name) {
     this.id = nextId++;
@@ -77,6 +93,7 @@ public class Nation {
     this.founded = founded;
     this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
     this.government = Government.random();
+    this.currencyName = (name != null ? name : "National") + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
   }
 
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {
