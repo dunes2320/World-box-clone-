@@ -107,37 +107,44 @@ public class EntityRenderer {
     this.grid = grid;
     this.nationColor = nationColor;
 
-    treeCanopyTemplate = new Cylinder(2, 6, 0.34f, 0.001f, 0.75f, true, false);
-    MeshUtil.reorientZToY(treeCanopyTemplate);
-    treeTrunkTemplate = new Cylinder(2, 5, 0.09f, 0.11f, 0.4f, true, false);
-    MeshUtil.reorientZToY(treeTrunkTemplate);
+    // Every prop below is built from stacked/merged boxes instead of
+    // rounded cones/cylinders/toruses - the whole world reads as voxel
+    // construction, not just the ground.
+    treeCanopyTemplate = MeshUtil.mergeMeshes(
+        new Box(0.32f, 0.2f, 0.32f),
+        MeshUtil.translatedCopy(new Box(0.22f, 0.16f, 0.22f), 0, 0.28f, 0));
+    treeTrunkTemplate = new Box(0.09f, 0.2f, 0.09f);
     depositTemplate = MeshUtil.buildGem(0.32f, 0.5f);
-    humanTemplate = new Cylinder(2, 6, 0.13f, 0.13f, 0.5f, true, false);
-    MeshUtil.reorientZToY(humanTemplate);
-    armyTemplate = new Cylinder(2, 4, 0.32f, 0.001f, 0.6f, true, false);
-    MeshUtil.reorientZToY(armyTemplate);
+    humanTemplate = MeshUtil.mergeMeshes(
+        new Box(0.09f, 0.25f, 0.07f),
+        MeshUtil.translatedCopy(new Box(0.075f, 0.075f, 0.075f), 0, 0.325f, 0));
+    armyTemplate = MeshUtil.mergeMeshes(
+        new Box(0.16f, 0.28f, 0.14f),
+        MeshUtil.translatedCopy(new Box(0.1f, 0.1f, 0.1f), 0, 0.38f, 0));
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
-    hutTemplate = new Cylinder(2, 4, 0.5f, 0.001f, 0.9f, true, false);
-    MeshUtil.reorientZToY(hutTemplate);
+    hutTemplate = MeshUtil.mergeMeshes(
+        new Box(0.42f, 0.28f, 0.42f),
+        MeshUtil.translatedCopy(new Box(0.32f, 0.18f, 0.32f), 0, 0.46f, 0));
     townTemplate = new Box(0.55f, 0.5f, 0.55f);
     cityTemplate = MeshUtil.mergeMeshes(
         MeshUtil.translatedCopy(new Box(0.6f, 0.7f, 0.6f), 0, 0.7f, 0),
         MeshUtil.translatedCopy(new Box(0.4f, 0.45f, 0.4f), 0, 1.85f, 0));
 
     businessTemplate = new Box(0.22f, 0.22f, 0.22f);
-    bankTemplate = MeshUtil.buildPillar(0.28f, 0.5f, 1.3f);
+    bankTemplate = MeshUtil.mergeMeshes(
+        new Box(0.26f, 0.5f, 0.26f),
+        MeshUtil.translatedCopy(new Box(0.34f, 0.12f, 0.34f), 0, 0.62f, 0));
 
     // nation banner: a slim pole with a small flag near the top, planted
     // beside every settlement so a nation's color reads at a glance.
-    Mesh poleRaw = new Cylinder(2, 4, 0.035f, 0.035f, 1.15f, true, false);
-    MeshUtil.reorientZToY(poleRaw);
-    Mesh pole = MeshUtil.translatedCopy(poleRaw, 0, 0.58f, 0);
+    Mesh pole = MeshUtil.translatedCopy(new Box(0.035f, 0.575f, 0.035f), 0, 0.58f, 0);
     Mesh cloth = MeshUtil.translatedCopy(new Box(0.15f, 0.09f, 0.02f), 0.15f, 0.98f, 0);
     flagTemplate = MeshUtil.mergeMeshes(pole, cloth);
 
-    fireTemplate = new Cylinder(2, 5, 0.15f, 0.001f, 0.42f, true, false);
-    MeshUtil.reorientZToY(fireTemplate);
+    fireTemplate = MeshUtil.mergeMeshes(
+        new Box(0.13f, 0.16f, 0.13f),
+        MeshUtil.translatedCopy(new Box(0.07f, 0.12f, 0.07f), 0, 0.26f, 0));
 
     sparkleTemplate = MeshUtil.buildGem(0.09f, 0.17f);
 
