@@ -76,10 +76,16 @@ public class Settlement {
 
   private static int countFarmCells(GameState state, Settlement settlement) {
     WorldGrid grid = state.grid;
+    // the visible farm plot is a smaller ring right around the village
+    // center, distinct from the wider (untilled) territory radius
+    double plotRadius = Math.min(4.5, 2.2 + Math.sqrt(settlement.populationCount) * 0.25);
     int[] n = {0};
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
-      if (grid.terrain[i] == Config.GRASS && grid.ownerNation[i] == settlement.nationId) n[0]++;
+      boolean owned = grid.terrain[i] == Config.GRASS && grid.ownerNation[i] == settlement.nationId;
+      if (owned) n[0]++;
+      boolean plot = owned && d <= plotRadius;
+      if (grid.isFarmland[i] != plot) { grid.isFarmland[i] = plot; grid.markDirtyIdx(i); }
     });
     return n[0];
   }

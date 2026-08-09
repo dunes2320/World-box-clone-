@@ -106,7 +106,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     voxelRenderer.waterNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
 
     entityRenderer = new EntityRenderer(rootNode, assetManager, state.grid, this::nationColorFor);
-    entityRenderer.rebuildStatics();
+    entityRenderer.rebuildStatics(state);
 
     GuiGlobals.initialize(this);
     hud = new GameHud(guiNode, assetManager, screenWidth, screenHeight, this);
@@ -378,7 +378,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         }
         if (fx >= 0) {
           GodTools.apply(state, "fire", fx, fz, 3);
-          entityRenderer.rebuildStatics();
+          entityRenderer.rebuildStatics(state);
           float h = state.grid.height[state.grid.idx(fx, fz)];
           camTarget.set(fx + 0.5f, h, fz + 0.5f);
           camDistance = 12f;
@@ -411,7 +411,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     int iterations = 0;
     while (simTime - lastTickTime > interval && iterations < 8) {
       Simulation.tick(state);
-      if (state.tick % 20 == 0) entityRenderer.rebuildStatics();
+      if (state.tick % 20 == 0) entityRenderer.rebuildStatics(state);
       lastTickTime += interval;
       iterations++;
     }
@@ -447,7 +447,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   public void resetWorld() {
     state = Simulation.createInitialState();
     voxelRenderer.rebind(state.voxels, state.grid);
-    entityRenderer.setGrid(state.grid);
+    entityRenderer.setGrid(state);
     selection = null;
     lastTickTime = simTime;
     hud.notifySelectionChanged();

@@ -33,6 +33,8 @@ public class VoxelChunkRenderer {
   private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.130f, 0.380f, 0.620f, 0.80f);
   private static final ColorRGBA FOAM_COLOR = new ColorRGBA(0.72f, 0.85f, 0.88f, 0.85f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
+  private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.62f, 0.48f, 0.26f, 1f);
+  private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.68f, 0.63f, 0.53f, 1f);
 
   // Gentler now that real dynamic sun lighting also shades faces by
   // direction - this only needs to add a light baked-AO hint underneath.
@@ -223,12 +225,14 @@ public class VoxelChunkRenderer {
     if (!faceHidden(world.get(x, y, z - 1), type)) mb.face(x, y, z, Face.NORTH, color, SHADE_NS);
   }
 
-  /** Blends fire glow and territory-owner tint into a top face's color,
-   * matching the old smooth terrain's look. */
+  /** Blends fire glow, territory-owner tint, and road/farmland overlays
+   * into a top face's color, matching the old smooth terrain's look. */
   private ColorRGBA topColor(int x, int z, ColorRGBA base) {
     int i = grid.idx(x, z);
-    if (!grid.burning[i] && grid.ownerNation[i] < 0) return base;
+    if (!grid.burning[i] && grid.ownerNation[i] < 0 && !grid.isRoad[i] && !grid.isFarmland[i]) return base;
     ColorRGBA c = base.clone();
+    if (grid.isFarmland[i]) c.interpolateLocal(FARMLAND_TINT, 0.5f);
+    if (grid.isRoad[i]) c.interpolateLocal(ROAD_TINT, 0.75f);
     if (grid.burning[i]) c.interpolateLocal(FIRE_TINT, 0.55f);
     int owner = grid.ownerNation[i];
     if (owner >= 0 && nationColor != null) {

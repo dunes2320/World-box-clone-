@@ -21,6 +21,11 @@ public class WorldGrid {
   public final int[] burnTimer = new int[n];
   public final int[] ownerNation = new int[n];
   public final int[] settlementAt = new int[n];
+  /** Tilled farmland (recomputed alongside a settlement's farmCells) and
+   * road cells (recomputed alongside territory) - purely a rendering
+   * overlay, blended into the terrain's top-face color. */
+  public final boolean[] isFarmland = new boolean[n];
+  public final boolean[] isRoad = new boolean[n];
 
   /** Cell indices whose terrain/resource/color changed since the renderer
    * last flushed them. */

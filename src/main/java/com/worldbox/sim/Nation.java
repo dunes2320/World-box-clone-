@@ -3,6 +3,7 @@ package com.worldbox.sim;
 import com.worldbox.config.Config;
 import com.worldbox.util.Rng;
 import com.worldbox.world.WorldGen;
+import com.worldbox.world.WorldGrid;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -148,6 +149,8 @@ public class Nation {
   }
 
   public static void update(GameState state) {
+    if (state.tick % 30 == 0) updateRoads(state);
+
     for (Nation nation : new ArrayList<>(state.nations.values())) {
       if (!nation.alive) continue;
 
@@ -171,6 +174,49 @@ public class Nation {
         nation.alive = false;
         state.nations.remove(nation.id);
       }
+    }
+  }
+
+  /** Redraws every nation's road network from scratch each cycle - a
+   * straight line from each settlement to its nation's capital, skipping
+   * water. Simple, but gives every nation visible, purposeful
+   * infrastructure connecting it together instead of isolated dots. */
+  private static void updateRoads(GameState state) {
+    WorldGrid grid = state.grid;
+    boolean[] before = grid.isRoad.clone();
+    java.util.Arrays.fill(grid.isRoad, false);
+    for (Nation nation : state.nations.values()) {
+      if (!nation.alive) continue;
+      Settlement capital = state.settlements.get(nation.capitalSettlementId);
+      if (capital == null) continue;
+      for (int sid : nation.settlementIds) {
+        if (sid == nation.capitalSettlementId) continue;
+        Settlement s = state.settlements.get(sid);
+        if (s == null) continue;
+        drawRoad(grid, capital.x, capital.z, s.x, s.z);
+      }
+    }
+    // only re-mesh chunks whose road status actually changed, not the
+    // whole map, since this redraws from scratch every cycle
+    for (int i = 0; i < grid.isRoad.length; i++) {
+      if (grid.isRoad[i] != before[i]) grid.markDirtyIdx(i);
+    }
+  }
+
+  private static void drawRoad(WorldGrid grid, int x0, int z0, int x1, int z1) {
+    int dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
+    int sx = x0 < x1 ? 1 : -1, sz = z0 < z1 ? 1 : -1;
+    int err = dx - dz;
+    int x = x0, z = z0;
+    while (true) {
+      if (grid.inBounds(x, z)) {
+        int i = grid.idx(x, z);
+        if (grid.terrain[i] != Config.WATER) grid.isRoad[i] = true;
+      }
+      if (x == x1 && z == z1) break;
+      int e2 = 2 * err;
+      if (e2 > -dz) { err -= dz; x += sx; }
+      if (e2 < dx) { err += dx; z += sz; }
     }
   }
 

@@ -53,6 +53,8 @@ public class EntityRenderer {
 
   private static final int TREE_CAP_SAMPLE = 2600;
   private static final int DEPOSIT_CAP_SAMPLE = 900;
+  private static final int HOUSE_CAP_SAMPLE = 700;
+  private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
   private static final int SETTLEMENT_CAP = 48;
   private static final int ARMY_CAP = 96;
   private static final int BUSINESS_CAP = 96;
@@ -69,10 +71,10 @@ public class EntityRenderer {
   private WorldGrid grid;
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, humanTemplate, armyTemplate;
-  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate;
+  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
 
-  private final Geometry treesGeom, treeTrunksGeom, depositsGeom;
+  private final Geometry treesGeom, treeTrunksGeom, depositsGeom, housesGeom;
 
   private final Node settlementsNode = new Node("settlements");
   private final Node armiesNode = new Node("armies");
@@ -148,6 +150,12 @@ public class EntityRenderer {
 
     sparkleTemplate = MeshUtil.buildGem(0.09f, 0.17f);
 
+    // small satellite houses scattered around a settlement's main building
+    // - the town-hall marker alone read as a single icon, not a village
+    houseTemplate = MeshUtil.mergeMeshes(
+        new Box(0.22f, 0.14f, 0.22f),
+        MeshUtil.translatedCopy(new Box(0.16f, 0.09f, 0.16f), 0, 0.23f, 0));
+
     treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
     treesGeom.setMaterial(vertexColorMaterial());
     root.attachChild(treesGeom);
@@ -159,6 +167,10 @@ public class EntityRenderer {
     depositsGeom = new Geometry("Deposits", depositTemplate.deepClone());
     depositsGeom.setMaterial(vertexColorMaterial());
     root.attachChild(depositsGeom);
+
+    housesGeom = new Geometry("Houses", houseTemplate.deepClone());
+    housesGeom.setMaterial(vertexColorMaterial());
+    root.attachChild(housesGeom);
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
       Geometry g = new Geometry("Settlement" + i, hutTemplate);
@@ -276,12 +288,12 @@ public class EntityRenderer {
     mat.setColor("Ambient", c);
   }
 
-  public void setGrid(WorldGrid grid) {
-    this.grid = grid;
+  public void setGrid(GameState state) {
+    this.grid = state.grid;
     for (Geometry g : tornadoGeoms) g.removeFromParent();
     tornadoGeoms.clear();
     monsterGeom.setCullHint(Spatial.CullHint.Always);
-    rebuildStatics();
+    rebuildStatics(state);
   }
 
   private ColorRGBA nationOrFallback(int nationId, ColorRGBA fallback) {
@@ -293,9 +305,9 @@ public class EntityRenderer {
     return fallback;
   }
 
-  /** Trees/deposits barely move; rebuild their instance lists on a slow
-   * cadence instead of every frame. */
-  public void rebuildStatics() {
+  /** Trees/deposits/houses barely move; rebuild their instance lists on a
+   * slow cadence instead of every frame. */
+  public void rebuildStatics(GameState state) {
     List<PropBatcher.Placement> canopies = new ArrayList<>();
     List<PropBatcher.Placement> trunks = new ArrayList<>();
     List<PropBatcher.Placement> deposits = new ArrayList<>();
@@ -326,6 +338,26 @@ public class EntityRenderer {
     treeTrunksGeom.setCullHint(trunks.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     depositsGeom.setMesh(PropBatcher.bake(depositTemplate, deposits));
     depositsGeom.setCullHint(deposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+
+    List<PropBatcher.Placement> houses = new ArrayList<>();
+    for (Settlement s : state.settlements.values()) {
+      if (houses.size() >= HOUSE_CAP_SAMPLE) break;
+      if (s.populationCount < 6) continue;
+      Nation nation = state.nations.get(s.nationId);
+      ColorRGBA color = nation != null ? nationOrFallback(nation.id, HOUSE_FALLBACK) : HOUSE_FALLBACK;
+      int houseCount = Math.min(10, s.populationCount / 6);
+      for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
+        float angle = i * 2.4f + s.id * 0.7f;
+        float radius = 1.1f + (i % 4) * 0.55f;
+        float hx = s.x + 0.5f + (float) Math.cos(angle) * radius;
+        float hz = s.z + 0.5f + (float) Math.sin(angle) * radius;
+        int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
+        float hh = grid.height[grid.idx(gx, gz)];
+        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.6f + (i % 3) * 0.08f, color));
+      }
+    }
+    housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));
+    housesGeom.setCullHint(houses.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
 
   public void update(GameState state, float alpha) {
