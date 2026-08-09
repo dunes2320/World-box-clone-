@@ -284,7 +284,7 @@ public class GameHud {
     title.setFontSize(17);
     closeButton();
     Nation nation = state.nations.get(s.nationId);
-    statRow("Nation", nation != null ? nation.name : "-");
+    statRow("Nation", nation != null ? nation.displayName() : "-");
     statRow("Population", String.valueOf(s.populationCount));
     statRow("Territory radius", String.format("%.1f", s.radius));
     statRow("Under siege", s.siegeProgress > 0.5 ? "yes" : "no");
@@ -318,7 +318,7 @@ public class GameHud {
   private void renderNation(GameState state, int id) {
     Nation n = state.nations.get(id);
     if (n == null) { sidePanelMode = "nationsList"; ctx.setSelection(null); return; }
-    Label title = sidePanel.addChild(new Label(n.name));
+    Label title = sidePanel.addChild(new Label(n.displayName()));
     title.setFontSize(17);
     title.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
     closeButton();
@@ -394,7 +394,7 @@ public class GameHud {
       if (other.id == id) continue;
       String status = state.diplomacy.getStatus(id, other.id);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-      Label name = row.addChild(new Label(other.name + " (" + status + ")"));
+      Label name = row.addChild(new Label(other.displayName() + " (" + status + ")"));
       name.setPreferredSize(new Vector3f(180, 20, 0));
       name.setColor(statusColor(status));
 
@@ -433,7 +433,7 @@ public class GameHud {
     for (Nation n : sorted) {
       int pop = 0;
       for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) pop += s.populationCount; }
-      Button row = sidePanel.addChild(new Button(n.name + "   " + pop + "p  " + (int) Math.floor(n.treasury) + "g"));
+      Button row = sidePanel.addChild(new Button(n.displayName() + "   " + pop + "p  " + (int) Math.floor(n.treasury) + "g"));
       row.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
       final int nid = n.id;
       row.addClickCommands(src -> { ctx.setSelection(new GameState.Selection("nation", nid)); refreshSidePanel(); });
@@ -473,7 +473,7 @@ public class GameHud {
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
 
-    Label title = sidePanel.addChild(new Label(isWorld ? "World Market Index" : n.name + " - Market Cap"));
+    Label title = sidePanel.addChild(new Label(isWorld ? "World Market Index" : n.displayName() + " - Market Cap"));
     title.setFontSize(17);
     Button back = sidePanel.addChild(new Button("Back"));
     back.addClickCommands(src -> {

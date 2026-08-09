@@ -13,11 +13,38 @@ public class Nation {
   private static int nextId = 1;
   private static int colorCursor = 0;
 
-  private static final String[] NAME_PREFIX = {"Val", "Kor", "Thal", "Bran", "Els", "Dun", "Mor", "Ash", "Vor", "Cal", "Ost", "Fen"};
-  private static final String[] NAME_SUFFIX = {"ia", "mark", "land", "gard", "heim", "ova", "stan", "wen", "dor", "ath"};
+  private static final String[] NAME_PREFIX = {
+      "Val", "Kor", "Thal", "Bran", "Els", "Dun", "Mor", "Ash", "Vor", "Cal", "Ost", "Fen",
+      "Ber", "Gal", "Nor", "Ryn", "Sel", "Tor", "Wex", "Zan", "Had", "Lior", "Mir", "Ked",
+      "Sev", "Aur", "Bel", "Cres", "Dra", "Erd", "Fal", "Gris", "Hol", "Ith", "Jor", "Kael"
+  };
+  private static final String[] NAME_MID = {"", "", "", "en", "ar", "in", "on", "ell", "and"};
+  private static final String[] NAME_SUFFIX = {
+      "ia", "mark", "land", "gard", "heim", "ova", "stan", "wen", "dor", "ath",
+      "burg", "shire", "vale", "moor", "crest", "haven", "reach", "ford", "wick", "ton"
+  };
 
+  /** Builds a plausible-sounding core name (e.g. "Valendoria",
+   * "Korshire") - two or three syllables from wide phoneme pools instead
+   * of a single prefix+suffix pair, so nations stop rhyming with each
+   * other after a dozen or so get founded. */
   public static String randomNationName(Rng rng) {
-    return rng.pick(NAME_PREFIX) + rng.pick(NAME_SUFFIX);
+    String mid = rng.pick(NAME_MID);
+    String core = rng.pick(NAME_PREFIX) + mid + rng.pick(NAME_SUFFIX);
+    return Character.toUpperCase(core.charAt(0)) + core.substring(1);
+  }
+
+  /** The government-flavored title placed before/after a nation's core
+   * name - "Kingdom of Valendoria", "Korshire Empire" - so the government
+   * mechanics and the name players see actually agree with each other. */
+  public String displayName() {
+    switch (government) {
+      case Government.MONARCHY: return "Kingdom of " + name;
+      case Government.DEMOCRACY: return "Republic of " + name;
+      case Government.AUTOCRACY: return name + " Empire";
+      case Government.OLIGARCHY: return name + " Consortium";
+      default: return name;
+    }
   }
 
   public final int id;

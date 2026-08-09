@@ -239,19 +239,34 @@ public class EntityRenderer {
     selectionRing.setMaterial(ringMat);
     selectionRing.setLocalRotation(new Quaternion().fromAngleAxis((float) Math.PI / 2, Vector3f.UNIT_X));
     selectionRing.setCullHint(Spatial.CullHint.Always);
+    selectionRing.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(selectionRing);
   }
 
   private Material vertexColorMaterial() {
-    Material mat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
-    mat.setBoolean("VertexColor", true);
+    Material mat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
+    mat.setBoolean("UseVertexColor", true);
+    mat.setColor("Specular", ColorRGBA.Black);
+    mat.setFloat("Shininess", 1f);
     return mat;
   }
 
   private Material soloColorMaterial(ColorRGBA c) {
-    Material mat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
-    mat.setColor("Color", c);
+    Material mat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
+    mat.setBoolean("UseMaterialColors", true);
+    mat.setColor("Diffuse", c);
+    mat.setColor("Ambient", c);
+    mat.setColor("Specular", ColorRGBA.Black);
+    mat.setFloat("Shininess", 1f);
     return mat;
+  }
+
+  /** soloColorMaterial() encodes a flat color as both Diffuse and Ambient
+   * under Lighting.j3md; every runtime re-color needs to touch both to
+   * keep matching the old "just set Color" behavior. */
+  private static void setSoloColor(Material mat, ColorRGBA c) {
+    mat.setColor("Diffuse", c);
+    mat.setColor("Ambient", c);
   }
 
   public void setGrid(WorldGrid grid) {
@@ -336,7 +351,7 @@ public class EntityRenderer {
       g.setLocalScale(scale);
       Nation nation = state.nations.get(s.nationId);
       ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.Gray) : ColorRGBA.Gray;
-      g.getMaterial().setColor("Color", c);
+      setSoloColor(g.getMaterial(), c);
       g.setUserData("settlementId", s.id);
       g.setCullHint(Spatial.CullHint.Inherit);
 
@@ -344,7 +359,7 @@ public class EntityRenderer {
       float flagOffset = scale * 0.55f + 0.65f;
       flag.setLocalTranslation(s.x + 0.5f + flagOffset, h, s.z + 0.5f + flagOffset);
       flag.setLocalScale(0.85f);
-      flag.getMaterial().setColor("Color", c);
+      setSoloColor(flag.getMaterial(), c);
       flag.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
@@ -364,7 +379,7 @@ public class EntityRenderer {
       float flicker = (float) Math.sin(state.tick * 0.4 + i * 1.7) * 0.5f + 0.5f;
       g.setLocalTranslation(gx + 0.5f, h, gz + 0.5f);
       g.setLocalScale(0.8f + flicker * 0.5f);
-      g.getMaterial().setColor("Color", lerpColor(FLAME_A, FLAME_B, flicker));
+      setSoloColor(g.getMaterial(), lerpColor(FLAME_A, FLAME_B, flicker));
       g.setCullHint(Spatial.CullHint.Inherit);
     }
     for (int i = count; i < FIRE_CAP; i++) firePool[i].setCullHint(Spatial.CullHint.Always);
@@ -380,7 +395,7 @@ public class EntityRenderer {
       float twinkle = (float) Math.sin(state.tick * 0.15 + i * 2.3) * 0.5f + 0.5f;
       g.setLocalTranslation(gx + 0.5f, h + 0.55f + twinkle * 0.08f, gz + 0.5f);
       g.setLocalScale(0.5f + twinkle * 0.6f);
-      g.getMaterial().setColor("Color", SPARKLE_COLOR.mult(0.7f + twinkle * 0.5f));
+      setSoloColor(g.getMaterial(), SPARKLE_COLOR.mult(0.7f + twinkle * 0.5f));
       g.setCullHint(Spatial.CullHint.Inherit);
     }
     for (int i = count; i < SPARKLE_CAP; i++) sparklePool[i].setCullHint(Spatial.CullHint.Always);
@@ -407,7 +422,7 @@ public class EntityRenderer {
       float ox = (float) Math.cos(angle) * 1.4f, oz = (float) Math.sin(angle) * 1.4f;
       g.setLocalTranslation(s.x + 0.5f + ox, h + 0.22f, s.z + 0.5f + oz);
       g.setLocalScale((float) (0.7 + Math.min(1.5, b.capital / 60.0)));
-      g.getMaterial().setColor("Color", BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White));
+      setSoloColor(g.getMaterial(), BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White));
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
@@ -424,7 +439,7 @@ public class EntityRenderer {
       float h = grid.height[grid.idx(capital.x, capital.z)];
       g.setLocalTranslation(capital.x + 0.5f - 1.6f, h, capital.z + 0.5f - 1.6f);
       g.setLocalScale(0.7f);
-      g.getMaterial().setColor("Color", n.bank.justCrashed ? ColorRGBA.Red : BANK_COLOR);
+      setSoloColor(g.getMaterial(), n.bank.justCrashed ? ColorRGBA.Red : BANK_COLOR);
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
@@ -446,7 +461,7 @@ public class EntityRenderer {
       g.setLocalRotation(new Quaternion().fromAngleAxis(state.tick * 0.05f, Vector3f.UNIT_Y));
       Nation nation = state.nations.get(a.nationId);
       ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
-      g.getMaterial().setColor("Color", c);
+      setSoloColor(g.getMaterial(), c);
       g.setUserData("armyId", a.id);
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
@@ -473,7 +488,7 @@ public class EntityRenderer {
       ColorRGBA c = h.nationId == Config.UNDEAD_NATION_ID
           ? ZOMBIE_COLOR
           : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
-      g.getMaterial().setColor("Color", c);
+      setSoloColor(g.getMaterial(), c);
       g.setCullHint(Spatial.CullHint.Inherit);
     }
     for (int i = n; i < Config.MAX_HUMANS; i++) humanPool[i].setCullHint(Spatial.CullHint.Always);
@@ -502,6 +517,7 @@ public class EntityRenderer {
       mat.getAdditionalRenderState().setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
       g.setMaterial(mat);
       g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+      g.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
       root.attachChild(g);
       tornadoGeoms.add(g);
     }

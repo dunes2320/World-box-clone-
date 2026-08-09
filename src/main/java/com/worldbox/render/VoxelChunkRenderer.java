@@ -30,13 +30,16 @@ public class VoxelChunkRenderer {
     BLOCK_COLOR.put(VoxelWorld.SAND, new ColorRGBA(0.851f, 0.773f, 0.541f, 1f));
     BLOCK_COLOR.put(VoxelWorld.STONE, new ColorRGBA(0.545f, 0.561f, 0.588f, 1f));
   }
-  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.184f, 0.435f, 0.69f, 0.82f);
+  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.130f, 0.380f, 0.620f, 0.80f);
+  private static final ColorRGBA FOAM_COLOR = new ColorRGBA(0.72f, 0.85f, 0.88f, 0.85f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
 
+  // Gentler now that real dynamic sun lighting also shades faces by
+  // direction - this only needs to add a light baked-AO hint underneath.
   private static final float SHADE_TOP = 1.0f;
-  private static final float SHADE_BOTTOM = 0.55f;
-  private static final float SHADE_NS = 0.82f;
-  private static final float SHADE_EW = 0.70f;
+  private static final float SHADE_BOTTOM = 0.8f;
+  private static final float SHADE_NS = 0.94f;
+  private static final float SHADE_EW = 0.88f;
 
   private VoxelWorld world;
   private WorldGrid grid;
@@ -45,6 +48,10 @@ public class VoxelChunkRenderer {
   public final Node waterNode = new Node("voxelWater");
   private final Geometry[] solidChunks;
   private final Geometry[] waterChunks;
+  /** Pre-wave vertex positions per water chunk, captured at mesh-build
+   * time so the per-frame animation always displaces from a stable base
+   * instead of compounding drift onto itself. */
+  private final Map<Integer, float[]> waterBasePositions = new HashMap<>();
 
   public VoxelChunkRenderer(VoxelWorld world, WorldGrid grid, AssetManager assets, NationColorLookup nationColor) {
     this.world = world;
@@ -54,11 +61,15 @@ public class VoxelChunkRenderer {
     solidChunks = new Geometry[n];
     waterChunks = new Geometry[n];
 
-    Material solidMat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
-    solidMat.setBoolean("VertexColor", true);
+    Material solidMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
+    solidMat.setBoolean("UseVertexColor", true);
+    solidMat.setColor("Specular", ColorRGBA.Black);
+    solidMat.setFloat("Shininess", 1f);
 
-    Material waterMat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
-    waterMat.setBoolean("VertexColor", true);
+    Material waterMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
+    waterMat.setBoolean("UseVertexColor", true);
+    waterMat.setColor("Specular", ColorRGBA.Black);
+    waterMat.setFloat("Shininess", 1f);
     waterMat.setTransparent(true);
     waterMat.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
     waterMat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
@@ -120,18 +131,75 @@ public class VoxelChunkRenderer {
 
     for (int z = z0; z < z1; z++) {
       for (int x = x0; x < x1; x++) {
+        boolean shoreline = false;
         for (int y = 0; y < VoxelWorld.MAX_Y; y++) {
           byte b = world.get(x, y, z);
           if (b == VoxelWorld.AIR) continue;
           MeshBuilder mb = b == VoxelWorld.WATER ? water : solid;
-          ColorRGBA color = b == VoxelWorld.WATER ? WATER_COLOR : BLOCK_COLOR.get(b);
+          ColorRGBA color;
+          if (b == VoxelWorld.WATER) {
+            if (y == VoxelWorld.WATER_LEVEL) shoreline = isShoreline(x, z);
+            color = shoreline ? FOAM_COLOR : WATER_COLOR;
+          } else {
+            color = BLOCK_COLOR.get(b);
+          }
           addVisibleFaces(mb, x, y, z, b, color);
         }
       }
     }
 
     solidChunks[ci].setMesh(solid.build());
-    waterChunks[ci].setMesh(water.build());
+    Mesh waterMesh = water.build();
+    waterChunks[ci].setMesh(waterMesh);
+    if (waterMesh.getVertexCount() > 0) {
+      java.nio.FloatBuffer wpos = waterMesh.getFloatBuffer(VertexBuffer.Type.Position);
+      float[] base = new float[wpos.limit()];
+      wpos.rewind();
+      wpos.get(base);
+      waterBasePositions.put(ci, base);
+    } else {
+      waterBasePositions.remove(ci);
+    }
+  }
+
+  /** A water column counts as shoreline if any orthogonal neighbor is dry
+   * land near the waterline - used to tint a light foam ring around
+   * coasts instead of one flat color for the whole ocean. */
+  private boolean isShoreline(int x, int z) {
+    return isLandNear(x + 1, z) || isLandNear(x - 1, z) || isLandNear(x, z + 1) || isLandNear(x, z - 1);
+  }
+
+  private boolean isLandNear(int x, int z) {
+    if (x < 0 || z < 0 || x >= world.cols || z >= world.rows) return false;
+    return world.get(x, VoxelWorld.WATER_LEVEL, z) != VoxelWorld.WATER
+        && world.columnTopY(x, z) >= VoxelWorld.WATER_LEVEL - 1;
+  }
+
+  /** Nudges every water chunk's vertices with a couple of overlapping sine
+   * waves each frame - a cheap CPU-side ripple instead of a flat static
+   * plane, since Unshaded/Lighting materials have no time-based shader
+   * uniform to animate this on the GPU side. */
+  public void updateWaterAnimation(float time) {
+    for (Map.Entry<Integer, float[]> e : waterBasePositions.entrySet()) {
+      Geometry g = waterChunks[e.getKey()];
+      Mesh mesh = g.getMesh();
+      float[] base = e.getValue();
+      float[] out = new float[base.length];
+      for (int i = 0; i < base.length; i += 3) {
+        float x = base[i], y = base[i + 1], z = base[i + 2];
+        float wave = (float) (Math.sin((x + z) * 0.6 + time * 1.3) * 0.05
+            + Math.sin((x - z) * 0.9 + time * 0.8) * 0.03);
+        out[i] = x;
+        out[i + 1] = y + wave;
+        out[i + 2] = z;
+      }
+      java.nio.FloatBuffer buf = mesh.getFloatBuffer(VertexBuffer.Type.Position);
+      buf.rewind();
+      buf.put(out);
+      buf.rewind();
+      mesh.getBuffer(VertexBuffer.Type.Position).updateData(buf);
+      mesh.updateBound();
+    }
   }
 
   /** True if a face between a block of `selfType` and a neighbor of
@@ -181,23 +249,31 @@ public class VoxelChunkRenderer {
   private static class MeshBuilder {
     final List<Float> pos = new ArrayList<>();
     final List<Float> col = new ArrayList<>();
+    final List<Float> norm = new ArrayList<>();
     final List<Integer> idx = new ArrayList<>();
 
     void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade) {
       float x = bx, y = by - VoxelWorld.Y_OFFSET, z = bz;
       float[][] verts;
+      float nx, ny, nz;
       switch (f) {
-        case TOP: verts = new float[][]{{x, y + 1, z}, {x, y + 1, z + 1}, {x + 1, y + 1, z + 1}, {x + 1, y + 1, z}}; break;
-        case BOTTOM: verts = new float[][]{{x, y, z + 1}, {x, y, z}, {x + 1, y, z}, {x + 1, y, z + 1}}; break;
-        case NORTH: verts = new float[][]{{x + 1, y, z}, {x, y, z}, {x, y + 1, z}, {x + 1, y + 1, z}}; break;
-        case SOUTH: verts = new float[][]{{x, y, z + 1}, {x + 1, y, z + 1}, {x + 1, y + 1, z + 1}, {x, y + 1, z + 1}}; break;
-        case EAST: verts = new float[][]{{x + 1, y, z + 1}, {x + 1, y, z}, {x + 1, y + 1, z}, {x + 1, y + 1, z + 1}}; break;
-        default: verts = new float[][]{{x, y, z}, {x, y, z + 1}, {x, y + 1, z + 1}, {x, y + 1, z}}; break; // WEST
+        case TOP: verts = new float[][]{{x, y + 1, z}, {x, y + 1, z + 1}, {x + 1, y + 1, z + 1}, {x + 1, y + 1, z}}; nx = 0; ny = 1; nz = 0; break;
+        case BOTTOM: verts = new float[][]{{x, y, z + 1}, {x, y, z}, {x + 1, y, z}, {x + 1, y, z + 1}}; nx = 0; ny = -1; nz = 0; break;
+        case NORTH: verts = new float[][]{{x + 1, y, z}, {x, y, z}, {x, y + 1, z}, {x + 1, y + 1, z}}; nx = 0; ny = 0; nz = -1; break;
+        case SOUTH: verts = new float[][]{{x, y, z + 1}, {x + 1, y, z + 1}, {x + 1, y + 1, z + 1}, {x, y + 1, z + 1}}; nx = 0; ny = 0; nz = 1; break;
+        case EAST: verts = new float[][]{{x + 1, y, z + 1}, {x + 1, y, z}, {x + 1, y + 1, z}, {x + 1, y + 1, z + 1}}; nx = 1; ny = 0; nz = 0; break;
+        default: verts = new float[][]{{x, y, z}, {x, y, z + 1}, {x, y + 1, z + 1}, {x, y + 1, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
       }
       int base = pos.size() / 3;
       for (float[] v : verts) { pos.add(v[0]); pos.add(v[1]); pos.add(v[2]); }
+      // a mild baked-AO tint layered under the real dynamic sun lighting -
+      // keeps cliffs/undersides readable even when the sun angle alone
+      // wouldn't shade them
       float r = c.r * shade, g = c.g * shade, b2 = c.b * shade;
-      for (int i = 0; i < 4; i++) { col.add(r); col.add(g); col.add(b2); col.add(c.a); }
+      for (int i = 0; i < 4; i++) {
+        col.add(r); col.add(g); col.add(b2); col.add(c.a);
+        norm.add(nx); norm.add(ny); norm.add(nz);
+      }
       idx.add(base); idx.add(base + 1); idx.add(base + 2);
       idx.add(base); idx.add(base + 2); idx.add(base + 3);
     }
@@ -208,12 +284,14 @@ public class VoxelChunkRenderer {
       for (int i = 0; i < p.length; i++) p[i] = pos.get(i);
       float[] c = new float[col.size()];
       for (int i = 0; i < c.length; i++) c[i] = col.get(i);
+      float[] n = new float[norm.size()];
+      for (int i = 0; i < n.length; i++) n[i] = norm.get(i);
       int[] ix = new int[idx.size()];
       for (int i = 0; i < ix.length; i++) ix[i] = idx.get(i);
       m.setBuffer(VertexBuffer.Type.Position, 3, p);
       m.setBuffer(VertexBuffer.Type.Color, 4, c);
       m.setBuffer(VertexBuffer.Type.Index, 3, ix);
-      m.setBuffer(VertexBuffer.Type.Normal, 3, new float[p.length]);
+      m.setBuffer(VertexBuffer.Type.Normal, 3, n);
       m.updateBound();
       return m;
     }

@@ -15,6 +15,7 @@ import com.jme3.math.ColorRGBA;
 import com.jme3.math.FastMath;
 import com.jme3.math.Vector2f;
 import com.jme3.math.Vector3f;
+import com.jme3.system.AppSettings;
 import com.simsilica.lemur.GuiGlobals;
 import com.worldbox.config.Config;
 import com.worldbox.render.EntityRenderer;
@@ -77,16 +78,32 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     camTarget.set(Config.COLS / 2f, 0, Config.ROWS / 2f);
 
     viewPort.setBackgroundColor(new ColorRGBA(0.56f, 0.78f, 0.91f, 1f));
-    rootNode.addLight(new AmbientLight(new ColorRGBA(0.35f, 0.38f, 0.45f, 1f)));
+    // Kept deliberately dim: Lighting.j3md just adds ambient+diffuse and
+    // clamps at 1.0 with no tonemapping, so a bright ambient+directional
+    // combo saturates every surface to white regardless of its own color.
+    // This headroom (ambient+full-facing-diffuse tops out ~1.05) keeps
+    // color variation intact while still giving real directional shading.
+    rootNode.addLight(new AmbientLight(new ColorRGBA(0.4f, 0.42f, 0.46f, 1f)));
     DirectionalLight sun = new DirectionalLight();
     sun.setDirection(new Vector3f(-0.5f, -1f, -0.4f).normalizeLocal());
-    sun.setColor(new ColorRGBA(1f, 0.96f, 0.86f, 1f));
+    sun.setColor(new ColorRGBA(0.66f, 0.63f, 0.55f, 1f));
     rootNode.addLight(sun);
+
+    rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
+    com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
+        new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 1024, 2);
+    shadowRenderer.setLight(sun);
+    shadowRenderer.setShadowIntensity(0.45f);
+    shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
+    viewPort.addProcessor(shadowRenderer);
 
     voxelRenderer = new VoxelChunkRenderer(state.voxels, state.grid, assetManager, this::nationColorFor);
     voxelRenderer.rebuildAll();
     rootNode.attachChild(voxelRenderer.solidNode);
     rootNode.attachChild(voxelRenderer.waterNode);
+    // a wobbling shadow cast through translucent water looks broken more
+    // often than it looks good - keep water shadow-free
+    voxelRenderer.waterNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
 
     entityRenderer = new EntityRenderer(rootNode, assetManager, state.grid, this::nationColorFor);
     entityRenderer.rebuildStatics();
@@ -127,9 +144,33 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     inputManager.addMapping("MoveBack", new KeyTrigger(KeyInput.KEY_S), new KeyTrigger(KeyInput.KEY_DOWN));
     inputManager.addMapping("MoveLeft", new KeyTrigger(KeyInput.KEY_A), new KeyTrigger(KeyInput.KEY_LEFT));
     inputManager.addMapping("MoveRight", new KeyTrigger(KeyInput.KEY_D), new KeyTrigger(KeyInput.KEY_RIGHT));
+    inputManager.addMapping("ToggleFullscreen", new KeyTrigger(KeyInput.KEY_F11));
     inputManager.addListener(this, "Paint", "RotateCam", "PanCam",
         "MouseXPos", "MouseXNeg", "MouseYPos", "MouseYNeg", "WheelUp", "WheelDown",
-        "MoveForward", "MoveBack", "MoveLeft", "MoveRight");
+        "MoveForward", "MoveBack", "MoveLeft", "MoveRight", "ToggleFullscreen");
+  }
+
+  /** F11: toggles between the windowed resolution and exclusive fullscreen
+   * at the desktop's native resolution. The HUD/camera keep working
+   * unchanged since it re-applies the same logical layout after restart. */
+  private void toggleFullscreen() {
+    try {
+      AppSettings s = new AppSettings(true);
+      s.copyFrom(settings);
+      if (s.isFullscreen()) {
+        s.setResolution(screenWidth, screenHeight);
+        s.setFullscreen(false);
+      } else {
+        java.awt.DisplayMode dm = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+            .getDefaultScreenDevice().getDisplayMode();
+        s.setResolution(dm.getWidth(), dm.getHeight());
+        s.setFullscreen(true);
+      }
+      setSettings(s);
+      restart();
+    } catch (Exception e) {
+      System.err.println("Fullscreen toggle failed: " + e.getMessage());
+    }
   }
 
   @Override
@@ -145,6 +186,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       case "MoveBack": moveBack = isPressed; break;
       case "MoveLeft": moveLeft = isPressed; break;
       case "MoveRight": moveRight = isPressed; break;
+      case "ToggleFullscreen": if (isPressed) toggleFullscreen(); break;
       default: break;
     }
   }
@@ -236,6 +278,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     }
 
     voxelRenderer.flushDirty();
+    voxelRenderer.updateWaterAnimation((float) simTime);
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
     entityRenderer.update(state, alpha);
     updateSelectionRing();
