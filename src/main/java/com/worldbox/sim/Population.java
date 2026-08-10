@@ -172,6 +172,29 @@ public class Population {
     return Math.random() < t * t * 0.02;
   }
 
+  // every person's day cycles through work, home, and a bit of leisure -
+  // "go to work, go home, take a vacation" - staggered per-person (via
+  // h.id) so a whole settlement doesn't clock in and out in lockstep, and
+  // weighted by industriousness so lazier people work less of the day
+  private static final int DAY_LENGTH = 300;
+
+  private static void updateRoutine(GameState state, Human h) {
+    double workFrac = 0.55 + h.personality.industriousness * 0.3; // 0.55..0.85
+    double homeFrac = (1 - workFrac) * 0.6;
+    double t = ((state.tick + h.id * 37) % DAY_LENGTH) / (double) DAY_LENGTH;
+    if (t < workFrac) h.routine = "work";
+    else if (t < workFrac + homeFrac) h.routine = "home";
+    else h.routine = "leisure";
+  }
+
+  private static void pickLeisureTarget(WorldGrid grid, Human h) {
+    for (int i = 0; i < 5; i++) {
+      double nx = h.x + (Math.random() * 2 - 1) * 13;
+      double nz = h.z + (Math.random() * 2 - 1) * 13;
+      if (passable(grid, nx, nz)) { h.targetX = nx; h.targetZ = nz; return; }
+    }
+  }
+
   public static void update(GameState state) {
     WorldGrid grid = state.grid;
     List<Human> next = new ArrayList<>(state.humans.size());
@@ -218,6 +241,8 @@ public class Population {
         continue;
       }
 
+      updateRoutine(state, h);
+
       if (h.state.equals("gather")) {
         double dist = moveToward(grid, h, SPEED);
         if (dist < 0.15) {
@@ -237,8 +262,11 @@ public class Population {
               Settlement settlement = state.settlements.get(h.settlementId);
               if (settlement != null) { h.targetX = settlement.x + 0.5; h.targetZ = settlement.z + 0.5; }
               h.state = "haul";
-            } else {
+            } else if (h.routine.equals("work")) {
               assignJob(state, h);
+            } else {
+              h.job = null;
+              h.state = "wander";
             }
             h.gatherTimer = 0;
           }
@@ -254,12 +282,30 @@ public class Population {
             settlement.stock.put(h.carryingType, cur + h.carryingAmount);
             payWage(state, settlement, h.carryingType, h.carryingAmount, h);
             h.carryingType = null;
-            assignJob(state, h);
+            if (h.routine.equals("work")) {
+              assignJob(state, h);
+            } else {
+              h.job = null;
+              h.state = "wander";
+            }
           }
         }
-      } else {
+      } else if (h.routine.equals("work")) {
         if (Math.random() < 0.02 || moveToward(grid, h, SPEED) < 0.1) pickWanderTarget(grid, h);
         if (Math.random() < 0.05) assignJob(state, h);
+      } else if (h.routine.equals("home")) {
+        Settlement home = state.settlements.get(h.settlementId);
+        if (home != null) {
+          double d = Math.hypot(h.x - (home.x + 0.5), h.z - (home.z + 0.5));
+          if (d > 2.5 || Math.random() < 0.02) {
+            double ang = Math.random() * Math.PI * 2;
+            h.targetX = home.x + 0.5 + Math.cos(ang) * 1.5;
+            h.targetZ = home.z + 0.5 + Math.sin(ang) * 1.5;
+          }
+        }
+        moveToward(grid, h, SPEED * 0.7);
+      } else { // leisure - off on a trip further from home
+        if (Math.random() < 0.015 || moveToward(grid, h, SPEED * 0.85) < 0.1) pickLeisureTarget(grid, h);
       }
 
       next.add(h);

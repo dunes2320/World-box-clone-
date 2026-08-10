@@ -226,7 +226,12 @@ public class VoxelChunkRenderer {
   }
 
   /** Blends fire glow, territory-owner tint, and road/farmland overlays
-   * into a top face's color, matching the old smooth terrain's look. */
+   * into a top face's color, matching the old smooth terrain's look.
+   * Territory itself gets only a faint wash so it doesn't wash out the
+   * underlying terrain, but the actual border - where ownership changes,
+   * including at the map edge - gets a strong accent (a brightened tint of
+   * the nation's own color) so borders are actually visible from a normal
+   * play camera distance instead of needing to zoom in to spot them. */
   private ColorRGBA topColor(int x, int z, ColorRGBA base) {
     int i = grid.idx(x, z);
     if (!grid.burning[i] && grid.ownerNation[i] < 0 && !grid.isRoad[i] && !grid.isFarmland[i]) return base;
@@ -237,9 +242,27 @@ public class VoxelChunkRenderer {
     int owner = grid.ownerNation[i];
     if (owner >= 0 && nationColor != null) {
       ColorRGBA nc = nationColor.colorFor(owner);
-      if (nc != null) c.interpolateLocal(nc, 0.22f);
+      if (nc != null) {
+        if (isBorderCell(x, z, owner)) {
+          ColorRGBA accent = new ColorRGBA(
+              Math.min(1f, nc.r * 1.6f + 0.12f), Math.min(1f, nc.g * 1.6f + 0.12f), Math.min(1f, nc.b * 1.6f + 0.12f), 1f);
+          c.interpolateLocal(accent, 0.88f);
+        } else {
+          c.interpolateLocal(nc, 0.16f);
+        }
+      }
     }
     return c;
+  }
+
+  private boolean borderNeighborDiffers(int x, int z, int owner) {
+    if (!grid.inBounds(x, z)) return true;
+    return grid.ownerNation[grid.idx(x, z)] != owner;
+  }
+
+  private boolean isBorderCell(int x, int z, int owner) {
+    return borderNeighborDiffers(x - 1, z, owner) || borderNeighborDiffers(x + 1, z, owner)
+        || borderNeighborDiffers(x, z - 1, owner) || borderNeighborDiffers(x, z + 1, owner);
   }
 
   private enum Face { TOP, BOTTOM, NORTH, SOUTH, EAST, WEST }

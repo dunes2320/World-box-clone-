@@ -104,6 +104,8 @@ public class EntityRenderer {
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
   private final Geometry selectionRing;
   private final Geometry brushRing;
+  private final Node nationLabelNode = new Node("nationLabelBillboard");
+  private final com.jme3.font.BitmapText nationLabelText;
 
   public EntityRenderer(Node root, AssetManager assets, WorldGrid grid, NationColorLookup nationColor) {
     this.root = root;
@@ -277,6 +279,31 @@ public class EntityRenderer {
     brushRing.setCullHint(Spatial.CullHint.Always);
     brushRing.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(brushRing);
+
+    // billboarded nation-name label, shown floating above the capital
+    // whenever that nation is the current selection
+    com.jme3.font.BitmapFont font = assets.loadFont("Interface/Fonts/Default.fnt");
+    nationLabelText = new com.jme3.font.BitmapText(font);
+    nationLabelText.setSize(0.32f);
+    nationLabelText.setColor(ColorRGBA.White);
+    nationLabelNode.attachChild(nationLabelText);
+    nationLabelNode.addControl(new com.jme3.scene.control.BillboardControl());
+    nationLabelNode.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+    nationLabelNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+    nationLabelNode.setCullHint(Spatial.CullHint.Always);
+    root.attachChild(nationLabelNode);
+  }
+
+  /** Shows `text` floating above (x,h,z), billboarded to always face the
+   * camera - used to hang a nation's name over its capital while that
+   * nation is selected. */
+  public void setNationLabel(String text, float x, float h, float z, boolean visible) {
+    nationLabelNode.setCullHint(visible ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
+    if (!visible) return;
+    if (!nationLabelText.getText().equals(text)) nationLabelText.setText(text);
+    float width = nationLabelText.getLineWidth();
+    nationLabelText.setLocalTranslation(-width / 2f, 0, 0);
+    nationLabelNode.setLocalTranslation(x, h + 2.6f, z);
   }
 
   private Material vertexColorMaterial() {
@@ -552,6 +579,7 @@ public class EntityRenderer {
           ? ZOMBIE_COLOR
           : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
       setSoloColor(g.getMaterial(), c);
+      g.setUserData("humanId", h.id);
       g.setCullHint(Spatial.CullHint.Inherit);
     }
     for (int i = n; i < Config.MAX_HUMANS; i++) humanPool[i].setCullHint(Spatial.CullHint.Always);
@@ -614,6 +642,7 @@ public class EntityRenderer {
 
   public Node getSettlementsNode() { return settlementsNode; }
   public Node getArmiesNode() { return armiesNode; }
+  public Node getHumansNode() { return humansNode; }
 
   private static int clampIdx(int v, int max) { return Math.max(0, Math.min(max - 1, v)); }
 }

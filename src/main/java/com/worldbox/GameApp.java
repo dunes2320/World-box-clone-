@@ -273,10 +273,19 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (tool.equals("select")) {
       Integer sid = Picking.pickPoolId(cam, entityRenderer.getSettlementsNode(), cursor, "settlementId");
       if (sid != null) { setSelection(new GameState.Selection("settlement", sid)); return; }
+      Integer hid = Picking.pickPoolId(cam, entityRenderer.getHumansNode(), cursor, "humanId");
+      if (hid != null) { setSelection(new GameState.Selection("human", hid)); return; }
       Integer aid = Picking.pickPoolId(cam, entityRenderer.getArmiesNode(), cursor, "armyId");
       if (aid != null) {
         Army army = state.armies.get(aid);
         if (army != null) { setSelection(new GameState.Selection("nation", army.nationId)); return; }
+      }
+      // nothing specific under the cursor - if it's inside a nation's
+      // territory, clicking anywhere on the ground pulls up that nation
+      Picking.CellHit territoryCell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);
+      if (territoryCell != null) {
+        int owner = state.grid.ownerNation[state.grid.idx(territoryCell.x, territoryCell.z)];
+        if (owner >= 0) { setSelection(new GameState.Selection("nation", owner)); return; }
       }
       setSelection(null);
       return;
@@ -312,6 +321,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     entityRenderer.update(state, alpha);
     updateSelectionRing();
     updateBrushIndicator();
+    updateNationLabel();
 
     hud.update(tpf, simTime);
 
@@ -348,6 +358,26 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(6.5, () -> hud.debugSetPanelMode("settings"));
       testScript.put(7.0, () -> screenshotState.takeScreenshot());
       testScript.put(7.5, () -> hud.debugSetPanelMode(null));
+      testScript.put(8.0, () -> {
+        if (!state.humans.isEmpty()) setSelection(new GameState.Selection("human", state.humans.get(0).id));
+      });
+      testScript.put(8.5, () -> screenshotState.takeScreenshot());
+      testScript.put(9.0, () -> {
+        if (!state.nations.isEmpty()) {
+          int firstNationId = state.nations.keySet().iterator().next();
+          setSelection(new GameState.Selection("nation", firstNationId));
+          Nation n = state.nations.get(firstNationId);
+          var capital = n != null ? state.settlements.get(n.capitalSettlementId) : null;
+          if (capital != null) {
+            float h = state.grid.height[state.grid.idx(capital.x, capital.z)];
+            camTarget.set(capital.x + 0.5f, h, capital.z + 0.5f);
+            camDistance = camDistanceTarget = 10f;
+            camPitch = 0.35f;
+          }
+        }
+      });
+      testScript.put(9.5, () -> screenshotState.takeScreenshot());
+      testScript.put(10.0, () -> setSelection(null));
       double midway = Math.max(15.0, duration * 0.5);
       int[] graphNationId = {-1};
       testScript.put(midway, () -> {
@@ -472,6 +502,18 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (s == null) { entityRenderer.setSelection(0, 0, 0, false); return; }
     float h = state.grid.height[state.grid.idx(s.x, s.z)];
     entityRenderer.setSelection(s.x + 0.5f, s.z + 0.5f, h, true);
+  }
+
+  private void updateNationLabel() {
+    if (selection == null || !selection.type.equals("nation")) {
+      entityRenderer.setNationLabel("", 0, 0, 0, false);
+      return;
+    }
+    Nation n = state.nations.get(selection.id);
+    var capital = n != null ? state.settlements.get(n.capitalSettlementId) : null;
+    if (capital == null) { entityRenderer.setNationLabel("", 0, 0, 0, false); return; }
+    float h = state.grid.height[state.grid.idx(capital.x, capital.z)];
+    entityRenderer.setNationLabel(n.displayName(), capital.x + 0.5f, h, capital.z + 0.5f, true);
   }
 
   // ---- HudContext ----

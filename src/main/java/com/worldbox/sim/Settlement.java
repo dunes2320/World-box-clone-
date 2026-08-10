@@ -12,11 +12,22 @@ import java.util.Map;
 public class Settlement {
   private static int nextId = 1;
 
-  private static final String[] NAME_A = {"Oak", "Stone", "River", "North", "South", "Iron", "Gold", "Sun", "Wind", "Hill", "White", "Black", "Green", "Silver", "Amber"};
-  private static final String[] NAME_B = {"ford", "haven", "burg", "shire", "port", "hold", "watch", "mere", "vale", "reach", "crest", "fell"};
+  private static final String[] NAME_A = {
+      "Oak", "Stone", "River", "North", "South", "East", "West", "Iron", "Gold", "Sun", "Wind", "Hill",
+      "White", "Black", "Green", "Silver", "Amber", "Copper", "Elm", "Birch", "Willow", "Thorn", "Ash",
+      "Frost", "Shadow", "Bright", "Clear", "Deep", "Fair", "High", "Low", "Old", "New", "Red", "Grey"
+  };
+  private static final String[] NAME_B = {
+      "ford", "haven", "burg", "shire", "port", "hold", "watch", "mere", "vale", "reach", "crest", "fell",
+      "wood", "field", "brook", "gate", "hollow", "wick", "moor", "dale", "worth", "stead", "cross", "bridge"
+  };
+  private static final String[] NAME_MID = {"", "", "", "en", "in", "on", "el"};
 
+  /** Two or occasionally three phoneme pieces, matching the trick used for
+   * nation names - keeps hundreds of settlements from repeating. */
   public static String randomSettlementName(Rng rng) {
-    return rng.pick(NAME_A) + rng.pick(NAME_B);
+    String mid = rng.next() < 0.25 ? rng.pick(NAME_MID) : "";
+    return rng.pick(NAME_A) + mid + rng.pick(NAME_B);
   }
 
   public final int id;

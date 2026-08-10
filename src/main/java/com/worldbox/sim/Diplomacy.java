@@ -49,11 +49,14 @@ public class Diplomacy {
         double score = dip.getScore(nation.id, other.id);
         double theirPower = Nation.totalMilitaryPower(state, other.id) + 1;
 
+        // an ambitious leader is bolder about starting a fight they might
+        // not be fully ready for; a cautious one waits for a clearer edge
+        double ambition = nation.leader != null ? nation.leader.personality.ambition : 0.5;
         if (status.equals(Config.PEACE)) {
           if (score > 55 && Math.random() < 0.5) {
             dip.setStatus(nation.id, other.id, Config.ALLIANCE);
             dip.adjustScore(nation.id, other.id, 10);
-          } else if (score < -35 && myPower > theirPower * 1.3 && Math.random() < 0.3) {
+          } else if (score < -35 && myPower > theirPower * (1.5 - ambition * 0.4) && Math.random() < 0.15 + ambition * 0.3) {
             dip.setStatus(nation.id, other.id, Config.WAR);
             dip.adjustScore(nation.id, other.id, -20);
           }

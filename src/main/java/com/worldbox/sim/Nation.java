@@ -114,6 +114,9 @@ public class Nation {
   /** the nation's currency name, e.g. "Valendorian Crown" - cosmetic, but
    * ties the currency-vs-gold graph to something with a name. */
   public String currencyName;
+  /** the person actually running the country - their personality is a
+   * real input into how the nation behaves, not flavor text. */
+  public Leader leader;
 
   private static final String[] CURRENCY_SUFFIX = {"Crown", "Mark", "Pound", "Dinar", "Franc", "Ducat", "Guilder", "Real", "Krona", "Talent"};
 
@@ -126,6 +129,7 @@ public class Nation {
     this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
     this.government = Government.random();
     this.currencyName = (name != null ? name : "National") + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
+    this.leader = new Leader(this.government);
   }
 
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {
@@ -140,7 +144,7 @@ public class Nation {
   }
 
   public static Nation foundNewNation(GameState state, int x, int z, String name) {
-    Settlement settlement = Settlement.create(state, x, z, -1, null);
+    Settlement settlement = Settlement.create(state, x, z, -1, Settlement.randomSettlementName(state.rng));
     return create(state, settlement, name);
   }
 
@@ -175,6 +179,9 @@ public class Nation {
     }
     if (nation.treasury < -50) target *= 0.65;
     else if (nation.treasury < 0) target *= 0.85;
+    // a greedy leader keeps a bigger cut for the state/themselves no
+    // matter what the government structure nominally allows
+    if (nation.leader != null) target *= (1 - nation.leader.personality.greed * 0.35);
     nation.wagePolicy += (target - nation.wagePolicy) * 0.01;
     nation.wagePolicy = Math.max(0.10, Math.min(0.55, nation.wagePolicy));
   }
@@ -186,8 +193,16 @@ public class Nation {
    * currency system hangs off of. */
   private static void updateMonetaryPolicy(Nation nation) {
     if (nation.currencyCollapsed) { nation.monetaryPolicy = "loose"; return; }
+    // a genuinely foolish leader is reckless regardless of what the
+    // government structure or the books would otherwise justify - this is
+    // the single biggest "bad leader causes a crash" lever
+    if (nation.leader != null && nation.leader.personality.wisdom < 0.2) {
+      nation.monetaryPolicy = "loose";
+      return;
+    }
     boolean accountable = nation.government.equals(Government.DEMOCRACY);
-    if (nation.stability > 55 && (accountable || nation.stability > 75)) {
+    boolean wise = nation.leader == null || nation.leader.personality.wisdom > 0.4;
+    if (nation.stability > 55 && (accountable || nation.stability > 75) && wise) {
       nation.monetaryPolicy = "tight";
     } else if (nation.stability < 30 || (!accountable && nation.treasury < -20)) {
       nation.monetaryPolicy = "loose";

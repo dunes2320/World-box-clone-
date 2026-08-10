@@ -49,6 +49,9 @@ public class GameHud {
   private final Container sidePanel = new Container(new SpringGridLayout(Axis.Y, Axis.X));
   private final Label statLabel;
   private final Map<String, Button> toolButtons = new LinkedHashMap<>();
+  private final Map<String, Button> toolTabButtons = new LinkedHashMap<>();
+  private Container toolGroupContainer;
+  private String activeToolTab = "Terrain";
   private Label brushLabel;
   private Slider brushSlider;
   private Slider zoomSlider;
@@ -155,23 +158,38 @@ public class GameHud {
     return l;
   }
 
+  private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters"};
+
+  /** Tools used to be one long always-visible list; now they're grouped
+   * into clickable tabs (Select stays pinned above them since it's the
+   * default/most-used tool) so the toolbar reads as organized categories
+   * instead of a wall of buttons. */
   private void buildToolbar() {
-    String currentGroup = null;
-    for (GodTools.ToolDef tool : GodTools.TOOLS) {
-      if (!tool.group.equals(currentGroup)) {
-        currentGroup = tool.group;
-        Label header = toolbar.addChild(new Label(currentGroup.toUpperCase()));
-        header.setColor(MUTED);
-        header.setFontSize(12);
-      }
-      Button b = toolbar.addChild(new Button(tool.name));
-      b.setTextHAlignment(com.simsilica.lemur.HAlignment.Left);
-      b.addClickCommands(src -> {
-        ctx.setTool(tool.id);
-        refreshToolButtons();
+    GodTools.ToolDef selectDef = GodTools.TOOLS.get(0);
+    Button selectBtn = toolbar.addChild(new Button(selectDef.name));
+    selectBtn.setTextHAlignment(com.simsilica.lemur.HAlignment.Left);
+    selectBtn.addClickCommands(src -> {
+      ctx.setTool(selectDef.id);
+      refreshToolButtons();
+    });
+    toolButtons.put(selectDef.id, selectBtn);
+
+    Container tabRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    boolean firstTab = true;
+    for (String tabName : TOOL_TABS) {
+      if (!firstTab) tabRow.addChild(spacer(4));
+      firstTab = false;
+      Button tabBtn = tabRow.addChild(new Button(tabName));
+      tabBtn.setFontSize(12);
+      tabBtn.addClickCommands(src -> {
+        activeToolTab = tabName;
+        rebuildToolGroup();
       });
-      toolButtons.put(tool.id, b);
+      toolTabButtons.put(tabName, tabBtn);
     }
+
+    toolGroupContainer = toolbar.addChild(new Container(new SpringGridLayout(Axis.Y, Axis.X)));
+    rebuildToolGroup();
 
     Label brushHeader = toolbar.addChild(new Label("BRUSH SIZE"));
     brushHeader.setColor(MUTED);
@@ -185,6 +203,25 @@ public class GameHud {
     Button reset = toolbar.addChild(new Button("Reset World"));
     reset.addClickCommands(src -> ctx.resetWorld());
 
+    refreshToolButtons();
+  }
+
+  private void rebuildToolGroup() {
+    toolGroupContainer.clearChildren();
+    for (String tabName : TOOL_TABS) {
+      Button b = toolTabButtons.get(tabName);
+      b.setColor(tabName.equals(activeToolTab) ? ACTIVE : TEXT);
+    }
+    for (GodTools.ToolDef tool : GodTools.TOOLS) {
+      if (!tool.group.equals(activeToolTab)) continue;
+      Button b = toolGroupContainer.addChild(new Button(tool.name));
+      b.setTextHAlignment(com.simsilica.lemur.HAlignment.Left);
+      b.addClickCommands(src -> {
+        ctx.setTool(tool.id);
+        refreshToolButtons();
+      });
+      toolButtons.put(tool.id, b);
+    }
     refreshToolButtons();
   }
 
@@ -262,6 +299,7 @@ public class GameHud {
 
     if ("settlement".equals(mode) && sel != null) renderSettlement(state, sel.id);
     else if ("nation".equals(mode) && sel != null) renderNation(state, sel.id);
+    else if ("human".equals(mode) && sel != null) renderHuman(state, sel.id);
     else if ("nationsList".equals(mode)) renderNationsList(state);
     else if ("market".equals(mode)) renderMarket(state);
     else if ("graph".equals(mode)) renderGraph(state);
@@ -362,6 +400,39 @@ public class GameHud {
     return "militia";
   }
 
+  private void renderHuman(GameState state, int id) {
+    com.worldbox.sim.Human h = null;
+    for (com.worldbox.sim.Human candidate : state.humans) {
+      if (candidate.id == id) { h = candidate; break; }
+    }
+    if (h == null) { sidePanelMode = null; ctx.setSelection(null); return; }
+    Label title = sidePanel.addChild(new Label(h.name));
+    title.setFontSize(17);
+    closeButton();
+
+    boolean undead = h.nationId == Config.UNDEAD_NATION_ID;
+    Nation nation = state.nations.get(h.nationId);
+    Settlement settlement = state.settlements.get(h.settlementId);
+    statRow("Nation", undead ? "(undead)" : nation != null ? nation.displayName() : "wanderer");
+    statRow("Home", settlement != null ? settlement.name : "-");
+    statRow("Age", String.valueOf(h.age));
+    if (!undead) {
+      statRow("Job", h.job != null ? h.job : "unemployed");
+      statRow("Activity", h.state);
+      if (h.nationId >= 0) statRow("Routine", h.routine);
+      statRow("Wealth", String.format("%.1fg", h.wealth));
+      if (h.debt > 0.5) statRow("Debt", String.format("%.1fg", h.debt));
+
+      Label persHeader = sidePanel.addChild(new Label("PERSONALITY: " + h.personality.archetype()));
+      persHeader.setColor(MUTED); persHeader.setFontSize(12);
+      statRow("Industrious", String.format("%.0f%%", h.personality.industriousness * 100));
+      statRow("Ambition", String.format("%.0f%%", h.personality.ambition * 100));
+      statRow("Sociable", String.format("%.0f%%", h.personality.sociability * 100));
+      statRow("Wisdom", String.format("%.0f%%", h.personality.wisdom * 100));
+      statRow("Greed", String.format("%.0f%%", h.personality.greed * 100));
+    }
+  }
+
   private void renderNation(GameState state, int id) {
     Nation n = state.nations.get(id);
     if (n == null) { sidePanelMode = "nationsList"; ctx.setSelection(null); return; }
@@ -369,6 +440,13 @@ public class GameHud {
     title.setFontSize(17);
     title.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
     closeButton();
+
+    if (n.leader != null) {
+      Label leaderHeader = sidePanel.addChild(new Label("LEADER"));
+      leaderHeader.setColor(MUTED); leaderHeader.setFontSize(12);
+      statRow(n.leader.title, n.leader.name);
+      statRow("Character", n.leader.personality.archetype());
+    }
 
     int pop = 0;
     double military = 0;

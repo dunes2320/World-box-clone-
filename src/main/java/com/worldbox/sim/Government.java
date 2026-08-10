@@ -123,10 +123,12 @@ public class Government {
   }
 
   private static void applyGovernmentEffects(Nation n) {
-    if (n.government.equals(AUTOCRACY)) {
-      // corruption: a slice of the treasury quietly leaks away
-      n.treasury -= Math.max(0, n.treasury) * 0.004;
-    }
+    // corruption: a slice of the treasury quietly leaks away - how much
+    // depends on the leader personally (greed), not just the system they
+    // sit in, though an autocracy gives them more room to get away with it
+    double corruption = n.leader != null ? n.leader.personality.greed * 0.006 : 0.003;
+    if (n.government.equals(AUTOCRACY)) corruption += 0.003;
+    n.treasury -= Math.max(0, n.treasury) * corruption;
   }
 
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -141,6 +143,7 @@ public class Government {
     }
     if (n.treasury < 0) drift -= 0.05;
     if (n.bank.justCrashed) drift -= 8;
+    if (n.leader != null) drift += (n.leader.personality.wisdom - 0.5) * 0.04 - (n.leader.personality.greed - 0.5) * 0.02;
 
     int atWar = 0;
     for (DiplomacyManager.PairInfo p : state.diplomacy.pairsInvolving(n.id)) {
@@ -157,6 +160,7 @@ public class Government {
     if (Math.random() < 0.05) {
       n.stability -= 10 + Math.random() * 10;
       if (Math.random() < 0.3) n.treasury *= 0.85; // a costly war of succession
+      n.leader = new Leader(n.government); // the throne passes to someone new
     }
   }
 
@@ -191,6 +195,7 @@ public class Government {
       secede(state, n);
     } else {
       n.government = nextGovernmentAfterUnrest(n.government);
+      n.leader = new Leader(n.government); // a coup/revolt installs a new leader
     }
     n.stability = 40;
   }

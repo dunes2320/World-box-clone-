@@ -19,6 +19,8 @@ public class GodTools {
     public ToolDef(String id, String name, String group) { this.id = id; this.name = name; this.group = group; }
   }
 
+  /** Group names double as the toolbar's tab labels (see GameHud) - Select
+   * is pinned outside the tabs since it's the default/most-used tool. */
   public static final List<ToolDef> TOOLS = List.of(
       new ToolDef("select", "Select", "Select"),
       new ToolDef("water", "Water", "Terrain"),
@@ -28,16 +30,16 @@ public class GodTools {
       new ToolDef("stone", "Mountain", "Terrain"),
       new ToolDef("dig", "Dig", "Terrain"),
       new ToolDef("build", "Build", "Terrain"),
-      new ToolDef("forest", "Plant Forest", "Life"),
-      new ToolDef("human", "Wanderer", "Life"),
-      new ToolDef("foundNation", "Found Nation", "Life"),
+      new ToolDef("forest", "Plant Forest", "Terrain"),
+      new ToolDef("human", "Wanderer", "Civilizations"),
+      new ToolDef("foundNation", "Found Nation", "Civilizations"),
+      new ToolDef("monster", "Kaiju", "Creatures"),
+      new ToolDef("zombie", "Outbreak", "Creatures"),
       new ToolDef("fire", "Fire", "Disasters"),
       new ToolDef("meteor", "Meteor", "Disasters"),
       new ToolDef("nuke", "Nuke", "Disasters"),
       new ToolDef("earthquake", "Earthquake", "Disasters"),
       new ToolDef("tornado", "Tornado", "Disasters"),
-      new ToolDef("monster", "Kaiju", "Disasters"),
-      new ToolDef("zombie", "Outbreak", "Disasters"),
       new ToolDef("blessing", "Blessing", "Disasters")
   );
 
