@@ -54,6 +54,7 @@ public class Economy {
           nation.gdpAccum += saleValue;
           market.volume.merge(key, sellAmt, Double::sum);
           market.supplyFlow.merge(key, sellAmt, Double::sum);
+          if (key.equals("gold_ore")) nation.goldReserves += sellAmt;
         }
 
         Settlement buyer = smallestStock(state, nation, key);
@@ -70,6 +71,7 @@ public class Economy {
       }
     }
 
+    if (state.tick % 20 == 0) sampleGoldRemaining(state);
     settlePrices(state);
 
     updateBusinesses(state);
@@ -113,7 +115,12 @@ public class Economy {
     baselineSupply.put("wood", population * 0.016 + settlements * 0.9);
     baselineSupply.put("stone", population * 0.011 + settlements * 0.7);
     baselineSupply.put("iron", population * 0.0045 + settlements * 0.45);
-    baselineSupply.put("gold_ore", population * 0.0016 + settlements * 0.1);
+    // gold's baseline supply is choked down as real in-ground deposits run
+    // out - unlike every other resource, it can't just keep flowing from
+    // population growth alone once the world is actually out of it
+    double goldRemaining = market.goldRemainingInGround;
+    double goldScarcity = goldRemaining < 0 ? 1.0 : clamp(goldRemaining / 500.0, 0.02, 1.0);
+    baselineSupply.put("gold_ore", (population * 0.0016 + settlements * 0.1) * goldScarcity);
 
     for (String key : GlobalMarket.keys()) {
       double base = Config.BASE_PRICES.get(key);
@@ -128,6 +135,17 @@ public class Economy {
   }
 
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /** Gold never respawns once mined - this is what makes "gold can't go up
+   * if there isn't any more" literally true instead of just a vibe. */
+  private static void sampleGoldRemaining(GameState state) {
+    var grid = state.grid;
+    double remaining = 0;
+    for (int i = 0; i < grid.cols * grid.rows; i++) {
+      if (grid.resource[i] == Config.RES_GOLD) remaining += grid.resourceAmount[i];
+    }
+    state.market.goldRemainingInGround = remaining;
+  }
 
   // ---- businesses: private (capitalism) or state-owned (communism) ----
   private static void updateBusinesses(GameState state) {

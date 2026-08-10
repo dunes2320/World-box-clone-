@@ -118,6 +118,7 @@ public class Events {
     double r = radius;
     state.humans.removeIf(h -> Math.hypot(h.x - cx, h.z - cy) < r * 0.7);
     for (Settlement settlement : state.settlements.values()) {
+      if (settlement.abandoned) continue;
       double d = Math.hypot(settlement.x - cx, settlement.z - cy);
       if (d < radius) {
         int loss = (int) Math.round((1 - d / radius) * settlement.populationCount * 0.4);
@@ -147,7 +148,7 @@ public class Events {
       grid.markDirtyIdx(i);
     });
     for (Settlement s : state.settlements.values()) {
-      if (Math.hypot(s.x - cx, s.z - cy) < radius) s.siegeProgress = 0;
+      if (!s.abandoned && Math.hypot(s.x - cx, s.z - cy) < radius) s.siegeProgress = 0;
     }
     state.humans.removeIf(h -> {
       double d = Math.hypot(h.x - cx, h.z - cy);
@@ -162,7 +163,7 @@ public class Events {
       if (grid.burning[i]) { grid.burning[i] = false; grid.markDirtyIdx(i); }
     });
     for (Settlement s : state.settlements.values()) {
-      if (Math.hypot(s.x - cx, s.z - cy) <= radius) {
+      if (!s.abandoned && Math.hypot(s.x - cx, s.z - cy) <= radius) {
         s.stock.merge("food", 60.0, Double::sum);
         Nation n = state.nations.get(s.nationId);
         if (n != null) n.treasury += 70;
@@ -231,7 +232,11 @@ public class Events {
       double d = Math.hypot(s.x - m.x, s.z - m.z);
       if (d < bestD) { bestD = d; target = s; }
     }
-    if (target != null) {
+    // deliberately don't skip an abandoned (0-population) settlement here:
+    // once a monster empties one it has nothing left to kill there and no
+    // reason to move on, so it idles on the ruin instead of hunting down
+    // every other settlement in the world one by one
+    if (target != null && !target.abandoned) {
       double dx = target.x - m.x, dz = target.z - m.z;
       double dist = Math.hypot(dx, dz);
       if (dist > 1.4) {

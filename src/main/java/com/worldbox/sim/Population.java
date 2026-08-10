@@ -33,7 +33,11 @@ public class Population {
     }
   }
 
-  private static int[] findResourceCell(WorldGrid grid, double cx, double cz, byte resourceType, double radius) {
+  /** Only unclaimed (no-man's-land) cells or the searching nation's own
+   * territory are eligible - a nation's population can't quietly poach
+   * resources sitting inside another nation's borders. Getting at those
+   * means declaring war and taking the territory, not simply walking in. */
+  private static int[] findResourceCell(WorldGrid grid, double cx, double cz, byte resourceType, double radius, int nationId) {
     int best = -1, bestX = -1, bestY = -1;
     double bestD = Double.MAX_VALUE;
     int r = (int) Math.ceil(radius);
@@ -43,10 +47,11 @@ public class Population {
         int x = cxi + dx, y = czi + dy;
         if (!grid.inBounds(x, y)) continue;
         int i = grid.idx(x, y);
-        if (grid.resource[i] == resourceType && grid.resourceAmount[i] > 0) {
-          double d = (double) dx * dx + (double) dy * dy;
-          if (d < bestD) { bestD = d; bestX = x; bestY = y; best = i; }
-        }
+        if (grid.resource[i] != resourceType || grid.resourceAmount[i] <= 0) continue;
+        int owner = grid.ownerNation[i];
+        if (owner >= 0 && owner != nationId) continue;
+        double d = (double) dx * dx + (double) dy * dy;
+        if (d < bestD) { bestD = d; bestX = x; bestY = y; best = i; }
       }
     }
     if (best < 0) return null;
@@ -70,7 +75,7 @@ public class Population {
     String[] sorted = keys.clone();
     java.util.Arrays.sort(sorted, (a, b) -> Double.compare(settlement.stock.get(a), settlement.stock.get(b)));
     for (String k : sorted) {
-      int[] cell = findResourceCell(state.grid, settlement.x, settlement.z, jobResource(k), 14);
+      int[] cell = findResourceCell(state.grid, settlement.x, settlement.z, jobResource(k), 14, h.nationId);
       if (cell != null) {
         h.job = k;
         h.gatherX = cell[0];
@@ -101,8 +106,9 @@ public class Population {
   // outstanding home loan; if a worker's savings go negative, they take out
   // a new one automatically to get by.
   private static void payWage(GameState state, Settlement settlement, String resourceKey, double amount, Human h) {
+    Nation nation = state.nations.get(settlement.nationId);
     double value = amount * state.market.prices.getOrDefault(resourceKey, 1.0);
-    double wage = value * 0.35;
+    double wage = value * (nation != null ? nation.wagePolicy : 0.35);
 
     Business employer = null;
     for (Business b : state.businesses.values()) {
@@ -110,9 +116,8 @@ public class Population {
     }
     if (employer != null && employer.capital >= wage) {
       employer.capital -= wage;
-    } else {
-      Nation nation = state.nations.get(settlement.nationId);
-      if (nation != null) nation.treasury -= wage;
+    } else if (nation != null) {
+      nation.treasury -= wage;
     }
 
     if (h.debt > 0) {
@@ -154,6 +159,19 @@ public class Population {
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
   private static int clampCoord(int v, int max) { return Math.max(0, Math.min(max - 1, v)); }
 
+  // every villager is a mortal individual, not just a population counter:
+  // once they cross OLD_AGE_START their death odds climb tick by tick,
+  // clustering natural deaths in a realistic-feeling window rather than an
+  // exact cutoff - some live a bit longer, some a bit shorter
+  private static final int OLD_AGE_START = 3500;
+  private static final double OLD_AGE_SPAN = 4000;
+
+  private static boolean diesOfOldAge(Human h) {
+    if (h.age <= OLD_AGE_START) return false;
+    double t = Math.min(1.0, (h.age - OLD_AGE_START) / OLD_AGE_SPAN);
+    return Math.random() < t * t * 0.02;
+  }
+
   public static void update(GameState state) {
     WorldGrid grid = state.grid;
     List<Human> next = new ArrayList<>(state.humans.size());
@@ -170,6 +188,8 @@ public class Population {
         next.add(h);
         continue;
       }
+
+      if (diesOfOldAge(h)) continue;
 
       applyLivingCost(h);
 
@@ -262,6 +282,7 @@ public class Population {
     Settlement nearest = null;
     double bestD = Double.MAX_VALUE;
     for (Settlement s : state.settlements.values()) {
+      if (s.abandoned) continue;
       double d = Math.hypot(s.x - h.x, s.z - h.z);
       if (d < bestD) { bestD = d; nearest = s; }
     }

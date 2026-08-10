@@ -292,8 +292,9 @@ public class GameHud {
     title.setFontSize(17);
     closeButton();
     Nation nation = state.nations.get(s.nationId);
-    statRow("Nation", nation != null ? nation.displayName() : "-");
+    statRow("Nation", s.abandoned ? "(abandoned ruin)" : nation != null ? nation.displayName() : "-");
     statRow("Population", String.valueOf(s.populationCount));
+    statRow("Housing", s.populationCount + " / " + (int) (s.housingStock * Settlement.PEOPLE_PER_HOUSE));
     statRow("Territory radius", String.format("%.1f", s.radius));
     statRow("Under siege", s.siegeProgress > 0.5 ? "yes" : "no");
 
@@ -338,6 +339,20 @@ public class GameHud {
 
     statRow("Treasury", (int) Math.floor(n.treasury) + "g");
     statRow("Tax rate", (int) Math.round(n.taxRate * 100) + "%");
+    statRow("Wage policy", (int) Math.round(n.wagePolicy * 100) + "% of sale value");
+
+    Label currencyHeader = sidePanel.addChild(new Label("CURRENCY: " + n.currencyName));
+    currencyHeader.setColor(MUTED); currencyHeader.setFontSize(12);
+    if (n.currencyCollapsed) {
+      Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
+      collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
+    } else {
+      statRow("Standard", n.goldStandard ? "gold-backed" : "fiat (unbacked)");
+      statRow("Exchange rate", String.format("%.3fx", n.exchangeRate));
+      statRow("Inflation", String.format("%+.1f%%/window", n.inflationRate * 100));
+      statRow("Monetary policy", n.monetaryPolicy);
+    }
+
     statRow("Settlements", String.valueOf(n.settlementIds.size()));
     statRow("Population", String.valueOf(pop));
     statRow("Military power", String.format("%.0f", military));
@@ -476,14 +491,15 @@ public class GameHud {
     }
   }
 
-  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency"};
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation"};
   private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp"};
 
   private String metricTabLabel(String metric) {
     switch (metric) {
       case "unemployment": return "Jobs";
       case "gdp": return "GDP";
-      case "currency": return "Gold";
+      case "currency": return "FX";
+      case "inflation": return "Inflation";
       default: return "Cap";
     }
   }
@@ -492,7 +508,8 @@ public class GameHud {
     switch (metric) {
       case "unemployment": return "Unemployment";
       case "gdp": return "GDP";
-      case "currency": return "Currency/Gold";
+      case "currency": return "Exchange Rate";
+      case "inflation": return "Inflation";
       default: return "Market Cap";
     }
   }
@@ -500,19 +517,21 @@ public class GameHud {
   private String formatMetric(String metric, double v) {
     switch (metric) {
       case "unemployment": return String.format("%.1f%%", v * 100);
-      case "currency": return String.format("%.3foz", v);
+      case "currency": return String.format("%.3fx", v);
+      case "inflation": return String.format("%+.1f%%", v * 100);
       default: return (int) Math.floor(v) + "g";
     }
   }
 
-  /** Every metric but market cap needs a specific nation (unemployment and
-   * currency aren't tracked world-wide - "unemployment rate of the whole
-   * world" isn't a meaningful single number the way a nation's is). */
+  /** Every metric but market cap needs a specific nation (unemployment,
+   * exchange rate and inflation aren't tracked world-wide - there's no
+   * single meaningful "world inflation rate" the way a nation's is). */
   private java.util.ArrayDeque<Double> metricHistory(GameState state, String metric, boolean isWorld, Nation n) {
     switch (metric) {
       case "unemployment": return isWorld ? null : n.unemploymentHistory;
       case "gdp": return isWorld ? state.worldGdpHistory : n.gdpHistory;
       case "currency": return isWorld ? null : n.currencyHistory;
+      case "inflation": return isWorld ? null : n.inflationHistory;
       default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     }
   }

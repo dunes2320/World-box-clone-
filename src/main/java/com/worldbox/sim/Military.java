@@ -112,7 +112,7 @@ public class Military {
     Settlement best = null;
     double bestD = Double.MAX_VALUE;
     for (Settlement s : state.settlements.values()) {
-      if (s.nationId == nation.id) continue;
+      if (s.abandoned || s.nationId == nation.id) continue;
       String rel = state.diplomacy.getStatus(nation.id, s.nationId);
       if (!rel.equals(Config.WAR)) continue;
       for (int sid : nation.settlementIds) {
@@ -198,6 +198,7 @@ public class Military {
 
   private static void resolveSieges(GameState state) {
     for (Settlement settlement : state.settlements.values()) {
+      if (settlement.abandoned) continue;
       List<Army> attackers = new ArrayList<>();
       for (Army army : state.armies.values()) {
         if (army.dead || army.nationId == settlement.nationId) continue;

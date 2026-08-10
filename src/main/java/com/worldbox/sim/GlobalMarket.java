@@ -26,6 +26,9 @@ public class GlobalMarket {
   public final Map<String, Double> supplyFlow = new LinkedHashMap<>();
   public final Map<String, Double> demandFlow = new LinkedHashMap<>();
   public boolean crashedThisTick = false;
+  /** Gold physically still sitting in the ground, world-wide - gold never
+   * respawns once mined, so this only ever shrinks. -1 = not sampled yet. */
+  public double goldRemainingInGround = -1;
 
   public GlobalMarket() {
     for (String k : KEYS) {

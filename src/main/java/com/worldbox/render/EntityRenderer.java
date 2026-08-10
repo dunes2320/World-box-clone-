@@ -55,6 +55,7 @@ public class EntityRenderer {
   private static final int DEPOSIT_CAP_SAMPLE = 900;
   private static final int HOUSE_CAP_SAMPLE = 700;
   private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
+  private static final ColorRGBA RUIN_COLOR = new ColorRGBA(0.32f, 0.3f, 0.28f, 1f);
   private static final int SETTLEMENT_CAP = 48;
   private static final int ARMY_CAP = 96;
   private static final int BUSINESS_CAP = 96;
@@ -102,6 +103,7 @@ public class EntityRenderer {
   private final Geometry monsterGeom;
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
   private final Geometry selectionRing;
+  private final Geometry brushRing;
 
   public EntityRenderer(Node root, AssetManager assets, WorldGrid grid, NationColorLookup nationColor) {
     this.root = root;
@@ -260,6 +262,21 @@ public class EntityRenderer {
     selectionRing.setCullHint(Spatial.CullHint.Always);
     selectionRing.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(selectionRing);
+
+    // unit-radius ring, scaled per-frame to the active tool's actual brush
+    // radius so the player can see exactly what a click will affect
+    Torus brushMesh = new Torus(28, 5, 0.045f, 1f);
+    brushRing = new Geometry("BrushIndicator", brushMesh);
+    Material brushMat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
+    brushMat.setColor("Color", new ColorRGBA(1f, 0.92f, 0.3f, 0.85f));
+    brushMat.setTransparent(true);
+    brushMat.getAdditionalRenderState().setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+    brushRing.setMaterial(brushMat);
+    brushRing.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+    brushRing.setLocalRotation(new Quaternion().fromAngleAxis((float) Math.PI / 2, Vector3f.UNIT_X));
+    brushRing.setCullHint(Spatial.CullHint.Always);
+    brushRing.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+    root.attachChild(brushRing);
   }
 
   private Material vertexColorMaterial() {
@@ -388,18 +405,25 @@ public class EntityRenderer {
       g.setMesh(tierTemplate(s.populationCount));
       g.setLocalTranslation(s.x + 0.5f, h, s.z + 0.5f);
       g.setLocalScale(scale);
-      Nation nation = state.nations.get(s.nationId);
-      ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.Gray) : ColorRGBA.Gray;
-      setSoloColor(g.getMaterial(), c);
+      Geometry flag = flagPool[i];
+      if (s.abandoned) {
+        // ruin: structure stays standing (per design) but drained of its
+        // nation's color and flying no flag - a dead settlement, not a
+        // living one that just happens to have a small population
+        setSoloColor(g.getMaterial(), RUIN_COLOR);
+        flag.setCullHint(Spatial.CullHint.Always);
+      } else {
+        Nation nation = state.nations.get(s.nationId);
+        ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.Gray) : ColorRGBA.Gray;
+        setSoloColor(g.getMaterial(), c);
+        float flagOffset = scale * 0.55f + 0.65f;
+        flag.setLocalTranslation(s.x + 0.5f + flagOffset, h, s.z + 0.5f + flagOffset);
+        flag.setLocalScale(0.85f);
+        setSoloColor(flag.getMaterial(), c);
+        flag.setCullHint(Spatial.CullHint.Inherit);
+      }
       g.setUserData("settlementId", s.id);
       g.setCullHint(Spatial.CullHint.Inherit);
-
-      Geometry flag = flagPool[i];
-      float flagOffset = scale * 0.55f + 0.65f;
-      flag.setLocalTranslation(s.x + 0.5f + flagOffset, h, s.z + 0.5f + flagOffset);
-      flag.setLocalScale(0.85f);
-      setSoloColor(flag.getMaterial(), c);
-      flag.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
     for (; i < SETTLEMENT_CAP; i++) {
@@ -576,6 +600,16 @@ public class EntityRenderer {
   public void setSelection(float x, float z, float h, boolean visible) {
     selectionRing.setCullHint(visible ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
     if (visible) selectionRing.setLocalTranslation(x, h + 0.08f, z);
+  }
+
+  /** Shows a ring on the ground at (x,z) sized to `radius` - lets the
+   * player see exactly what a terrain tool will affect before clicking. */
+  public void setBrushIndicator(float x, float z, float h, float radius, boolean visible) {
+    brushRing.setCullHint(visible ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
+    if (visible) {
+      brushRing.setLocalTranslation(x, h + 0.22f, z);
+      brushRing.setLocalScale(Math.max(0.3f, radius));
+    }
   }
 
   public Node getSettlementsNode() { return settlementsNode; }

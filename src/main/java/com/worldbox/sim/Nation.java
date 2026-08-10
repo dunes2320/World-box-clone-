@@ -56,6 +56,10 @@ public class Nation {
   public final Set<Integer> settlementIds = new LinkedHashSet<>();
   public double treasury = 180;
   public double taxRate = Config.TAX_RATE_DEFAULT;
+  /** Government-set share of a sold haul's value that goes to the worker
+   * as a wage - a real policy lever, not a fixed constant, so different
+   * governments (and different treasuries) pay their workers differently. */
+  public double wagePolicy = 0.35;
   public final Set<Integer> armyIds = new LinkedHashSet<>();
   public final int founded;
   public boolean alive = true;
@@ -74,9 +78,36 @@ public class Nation {
   /** last ~120 periodic readings of business+trade revenue generated -
    * a flow (per ~20-tick window), not a running total like treasury. */
   public final java.util.ArrayDeque<Double> gdpHistory = new java.util.ArrayDeque<>();
-  /** last ~120 samples of treasury-per-capita measured in gold - how much
-   * gold a citizen's per-capita share of the treasury could buy. */
+  /** last ~120 samples of this currency's exchange rate (1.0 = par at
+   * founding); this is what actually crashes when a currency collapses. */
   public final java.util.ArrayDeque<Double> currencyHistory = new java.util.ArrayDeque<>();
+  /** last ~120 windowed inflation readings - the rate new money entered
+   * circulation outpacing real output growth. */
+  public final java.util.ArrayDeque<Double> inflationHistory = new java.util.ArrayDeque<>();
+  /** true once this nation only prints to cover deficits with no reserve
+   * backing - once dominant enough, a currency can leave the gold standard
+   * and never goes back, same as real reserve currencies. */
+  public boolean goldStandard = true;
+  /** total currency this nation has ever put into circulation - grows
+   * only when the government prints to cover a deficit. */
+  public double moneySupply = 180;
+  /** physical gold this nation has actually banked (from mined gold_ore
+   * sales) - while on the gold standard this caps how much can be
+   * printed, so a nation can't fabricate backing it doesn't have. */
+  public double goldReserves = 0;
+  /** currency value relative to its own founding value; 0 once collapsed. */
+  public double exchangeRate = 1.0;
+  public double inflationRate = 0;
+  /** once a currency hyperinflates to worthlessness it never recovers -
+   * exactly like a real collapsed currency. */
+  public boolean currencyCollapsed = false;
+  /** money printed since the last inflation sample window. */
+  public double printedThisWindow = 0;
+  /** "loose" prints through any deficit, "tight" refuses to print and
+   * eats the deficit instead, "neutral" lets government type + stability
+   * decide case by case. Governments auto-pick this; a reckless (loose)
+   * pick under a bad, unstable leader is exactly what causes a crash. */
+  public String monetaryPolicy = "neutral";
   /** revenue generated this sampling window (business output + national
    * trade), reset to 0 every time it's rolled into gdpHistory. */
   public double gdpAccum = 0;
@@ -127,6 +158,96 @@ public class Nation {
     else if (nation.treasury > 400) nation.taxRate = Math.max(0.1, nation.taxRate - 0.002);
   }
 
+  /** Wages are a real policy choice: democracies bid wages up to keep
+   * voters happy, oligarchies/autocracies keep them low to protect
+   * capital/the state, and any government facing a deep deficit cuts
+   * wages further as an austerity measure - a bad leader running the
+   * treasury into the ground shows up here as real people getting paid
+   * less, not just as an abstract stat. */
+  private static void updateWagePolicy(Nation nation) {
+    double target;
+    switch (nation.government == null ? "" : nation.government) {
+      case Government.DEMOCRACY: target = 0.44; break;
+      case Government.MONARCHY: target = 0.32; break;
+      case Government.AUTOCRACY: target = 0.26; break;
+      case Government.OLIGARCHY: target = 0.20; break;
+      default: target = 0.35;
+    }
+    if (nation.treasury < -50) target *= 0.65;
+    else if (nation.treasury < 0) target *= 0.85;
+    nation.wagePolicy += (target - nation.wagePolicy) * 0.01;
+    nation.wagePolicy = Math.max(0.10, Math.min(0.55, nation.wagePolicy));
+  }
+
+  /** A government's monetary stance isn't fixed - a stable, accountable
+   * government (high stability, democracy) chooses discipline; an
+   * unstable or unaccountable one reaches for the printing press instead
+   * of admitting a deficit. This is the "bad leader" lever the whole
+   * currency system hangs off of. */
+  private static void updateMonetaryPolicy(Nation nation) {
+    if (nation.currencyCollapsed) { nation.monetaryPolicy = "loose"; return; }
+    boolean accountable = nation.government.equals(Government.DEMOCRACY);
+    if (nation.stability > 55 && (accountable || nation.stability > 75)) {
+      nation.monetaryPolicy = "tight";
+    } else if (nation.stability < 30 || (!accountable && nation.treasury < -20)) {
+      nation.monetaryPolicy = "loose";
+    } else {
+      nation.monetaryPolicy = "neutral";
+    }
+  }
+
+  /** The heart of the currency simulation: deficits get covered by
+   * printing money rather than shown to the player directly, exactly like
+   * a real central bank quietly monetizing debt - the player only finds
+   * out once inflation and a weakening exchange rate make it visible. A
+   * gold-standard nation can only print up to what its banked gold could
+   * cover; a fiat nation (one that has left the gold standard) can print
+   * without limit, for better or worse. */
+  private static void updateCurrency(GameState state, Nation nation) {
+    if (nation.currencyCollapsed) {
+      nation.exchangeRate = 0;
+      return;
+    }
+
+    if (nation.treasury < 0) {
+      boolean willPrint = !nation.monetaryPolicy.equals("tight");
+      if (willPrint) {
+        double need = -nation.treasury;
+        double goldPrice = state.market.prices.getOrDefault("gold_ore", 1.0);
+        double printed = need;
+        if (nation.goldStandard) {
+          // fractional reserve: banked gold backs several times its value in
+          // circulating currency, plus every nation keeps a small
+          // unconditional cushion so a modest deficit doesn't instantly and
+          // permanently jam the printing press for a nation with no gold yet
+          double backingCapacity = nation.goldReserves * goldPrice * 4.0;
+          double headroom = Math.max(nation.moneySupply * 0.05, backingCapacity - nation.moneySupply);
+          printed = Math.min(need, Math.max(0, headroom));
+        }
+        if (printed > 0) {
+          nation.treasury += printed;
+          nation.moneySupply += printed;
+          nation.printedThisWindow += printed;
+        }
+      }
+    }
+
+    // a currency dominant enough to trust the whole world's trade can
+    // afford to cut loose from the gold standard and print at will - "pull
+    // a US" - once gone, nobody goes back to a hard peg
+    if (nation.goldStandard && nation.stability > 55 && Math.random() < 0.0004) {
+      double worldSupply = 0;
+      int count = 0;
+      for (Nation o : state.nations.values()) {
+        if (!o.alive) continue;
+        worldSupply += o.moneySupply;
+        count++;
+      }
+      double avg = count > 0 ? worldSupply / count : 0;
+      if (avg > 0 && nation.moneySupply > avg * 1.8) nation.goldStandard = false;
+    }
+  }
+
   private static void tryExpand(GameState state, Nation nation) {
     if (nation.treasury < 220) return;
     if (nation.settlementIds.size() >= 6) return;
@@ -168,13 +289,27 @@ public class Nation {
       }
       nation.treasury += treasuryGain;
       trySettlementUpkeepSpending(nation);
+      updateWagePolicy(nation);
+      updateMonetaryPolicy(nation);
+      updateCurrency(state, nation);
       tryExpand(state, nation);
 
       if (nation.settlementIds.isEmpty()) {
-        nation.alive = false;
-        state.nations.remove(nation.id);
+        killNation(state, nation);
       }
     }
+  }
+
+  /** Wipes a nation's world presence: its armies, and the nation record
+   * itself (with all its stats/history). Settlements were already released
+   * back to no-man's-land by Settlement.abandon() before this is called. */
+  public static void killNation(GameState state, Nation nation) {
+    nation.alive = false;
+    for (int aid : new ArrayList<>(nation.armyIds)) {
+      Army a = state.armies.get(aid);
+      if (a != null) a.dead = true;
+    }
+    state.nations.remove(nation.id);
   }
 
   /** Redraws every nation's road network from scratch each cycle - a
@@ -228,8 +363,7 @@ public class Nation {
     if (newNation != null) newNation.settlementIds.add(settlement.id);
     for (Human h : state.humans) if (h.settlementId == settlement.id) h.nationId = newNationId;
     if (oldNation != null && oldNation.settlementIds.isEmpty()) {
-      oldNation.alive = false;
-      state.nations.remove(oldNation.id);
+      killNation(state, oldNation);
     }
   }
 }

@@ -26,7 +26,6 @@ public class Government {
     double worldGdp = 0;
     java.util.Map<Integer, Double> marketCapByNation = null;
     java.util.Map<Integer, int[]> laborByNation = null; // [total, unemployed]
-    double goldPrice = state.market.prices.getOrDefault("gold_ore", Config.BASE_PRICES.get("gold_ore"));
     if (sample) {
       marketCapByNation = new java.util.HashMap<>();
       for (Business b : state.businesses.values()) {
@@ -63,11 +62,14 @@ public class Government {
         n.gdpHistory.addLast(n.gdpAccum);
         trim(n.gdpHistory);
         worldGdp += n.gdpAccum;
+
+        updateInflationAndExchangeRate(n);
         n.gdpAccum = 0;
 
-        double treasuryPerCapita = labor[0] == 0 ? n.treasury : n.treasury / labor[0];
-        n.currencyHistory.addLast(treasuryPerCapita / Math.max(0.01, goldPrice));
+        n.currencyHistory.addLast(n.exchangeRate);
         trim(n.currencyHistory);
+        n.inflationHistory.addLast(n.inflationRate);
+        trim(n.inflationHistory);
       }
     }
     if (sample) {
@@ -84,6 +86,40 @@ public class Government {
 
   private static void trim(java.util.ArrayDeque<Double> dq) {
     while (dq.size() > 120) dq.removeFirst();
+  }
+
+  /** Inflation is measured the way it actually happens: new money entering
+   * circulation this window versus how much real output grew to absorb
+   * it. Printing to cover a deficit with no matching real growth is what
+   * debases a currency; growing the real economy instead doesn't. A
+   * currency that hyperinflates past recognition collapses for good -
+   * exactly like a real currency that loses all public confidence never
+   * gets it back. */
+  private static void updateInflationAndExchangeRate(Nation n) {
+    if (n.currencyCollapsed) {
+      n.exchangeRate = 0;
+      n.printedThisWindow = 0;
+      return;
+    }
+
+    // real output growth is a much gentler counterweight than money
+    // printing is a danger - this is deliberately asymmetric so healthy
+    // growth nudges a currency up slowly, while reckless printing can
+    // genuinely wreck it
+    double supplyGrowth = n.moneySupply > 1 ? n.printedThisWindow / n.moneySupply : 0;
+    double outputGrowth = n.moneySupply > 1 ? Math.max(0, n.gdpAccum) / Math.max(400, n.moneySupply * 4) : 0;
+    double windowInflation = supplyGrowth - outputGrowth * 0.1;
+    n.inflationRate = n.inflationRate * 0.85 + windowInflation * 0.15;
+    n.printedThisWindow = 0;
+
+    double drag = clamp(n.inflationRate, -0.03, 0.5) * 0.3;
+    n.exchangeRate = Math.max(0, Math.min(3.0, n.exchangeRate * (1 - drag)));
+
+    if (n.exchangeRate < 0.02) {
+      n.currencyCollapsed = true;
+      n.exchangeRate = 0;
+      n.treasury *= 0.1; // hyperinflation wipes out real savings, not just the number on paper
+    }
   }
 
   private static void applyGovernmentEffects(Nation n) {
@@ -172,8 +208,7 @@ public class Government {
     seceded.stability = 35;
     state.diplomacy.adjustScore(n.id, seceded.id, -40);
     if (n.settlementIds.isEmpty()) {
-      n.alive = false;
-      state.nations.remove(n.id);
+      Nation.killNation(state, n);
     }
   }
 }

@@ -282,6 +282,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
     entityRenderer.update(state, alpha);
     updateSelectionRing();
+    updateBrushIndicator();
 
     hud.update(tpf, simTime);
 
@@ -297,7 +298,9 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testModeExitAt = duration;
       speed = 4;
       boolean skipDisasters = "true".equals(System.getProperty("worldbox.skipScript"));
+      testScript.put(0.5, () -> { tool = "dig"; brushSize = 4; });
       testScript.put(1.0, () -> screenshotState.takeScreenshot());
+      testScript.put(1.2, () -> tool = "select");
       testScript.put(2.0, () -> {
         if (!skipDisasters) {
           GodTools.apply(state, "monster", Config.COLS / 2, Config.ROWS / 2, 3);
@@ -416,6 +419,17 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       iterations++;
     }
     if (iterations >= 8) lastTickTime = simTime;
+  }
+
+  private void updateBrushIndicator() {
+    if (tool.equals("select")) { entityRenderer.setBrushIndicator(0, 0, 0, 0, false); return; }
+    Vector2f cursor = inputManager.getCursorPosition();
+    if (hud.isOverUi(cursor.x, cursor.y)) { entityRenderer.setBrushIndicator(0, 0, 0, 0, false); return; }
+    Picking.CellHit cell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);
+    if (cell == null) { entityRenderer.setBrushIndicator(0, 0, 0, 0, false); return; }
+    float h = state.grid.height[state.grid.idx(cell.x, cell.z)];
+    float radius = (float) GodTools.brushRadius(brushSize);
+    entityRenderer.setBrushIndicator(cell.x + 0.5f, cell.z + 0.5f, h, radius, true);
   }
 
   private void updateSelectionRing() {

@@ -31,6 +31,10 @@ public class Settlement {
   public int starveTicks = 0;
   public double siegeProgress = 0;
   public final int founded;
+  /** True once population has hit 0 - the settlement leaves its nation
+   * and territory but its structures stay standing as a visible ruin. */
+  public boolean abandoned = false;
+  public double housingStock = 5;
 
   private Settlement(int x, int z, int nationId, String name, int foundedTick) {
     this.id = nextId++;
@@ -93,6 +97,8 @@ public class Settlement {
   private static final double FOOD_PER_WORKER = 0.55;
   private static final double FOOD_PER_POP = 0.42;
   private static final int POP_CAP_PER_SETTLEMENT = 70;
+  public static final double PEOPLE_PER_HOUSE = 4.0;
+  private static final double HOUSE_WOOD_COST = 12.0;
 
   public static void update(GameState state) {
     for (Settlement s : state.settlements.values()) s.populationCount = 0;
@@ -101,20 +107,48 @@ public class Settlement {
       if (s != null) s.populationCount++;
     }
 
+    List<Settlement> toAbandon = null;
     for (Settlement settlement : state.settlements.values()) {
+      if (!settlement.abandoned && settlement.populationCount == 0) {
+        if (toAbandon == null) toAbandon = new ArrayList<>();
+        toAbandon.add(settlement);
+      }
+    }
+    if (toAbandon != null) for (Settlement settlement : toAbandon) abandon(state, settlement);
+
+    for (Settlement settlement : state.settlements.values()) {
+      if (settlement.abandoned) continue;
+
       if (state.tick % 25 == 0) {
         settlement.radius = Math.min(11, 3.5 + Math.sqrt(settlement.populationCount) * 0.85);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
       }
 
-      // small passive trickle (foraging) so a settlement that hits 0
-      // population from disaster/famine can still recover eventually,
-      // instead of being stuck at 0 food -> 0 production -> 0 growth forever
-      double production = Math.min(settlement.populationCount, settlement.farmCells) * FOOD_PER_WORKER
-          + Math.min(settlement.farmCells, 3) * 0.08;
+      int farmWorkers = Math.min(settlement.populationCount, settlement.farmCells);
+      // a small unconditional foraging trickle, independent of farmland -
+      // a settlement founded on a grass-poor spot (sand, or boxed in by
+      // mountains) would otherwise produce exactly zero food forever and
+      // starve out immediately, which used to be harmless (a dead
+      // settlement just sat inert) but now genuinely deletes the whole
+      // nation if it was that settlement's only one - this buys a real
+      // settlement enough time to trade, expand, or be reinforced instead
+      double production = farmWorkers * FOOD_PER_WORKER + Math.min(settlement.farmCells, 3) * 0.08 + 1.2;
       double consumption = settlement.populationCount * FOOD_PER_POP;
       settlement.stock.merge("food", production - consumption, Double::sum);
+
+      // a farm needs a hired hand to run, and that hand is paid a
+      // government-set daily wage - the same wagePolicy lever that governs
+      // every other job, so an underpaying government shows up here too.
+      // Unlike a haul-wage this isn't backed by a matching market sale, so
+      // it's kept modest - a subsidy the treasury carries, not a 1:1 cost.
+      if (farmWorkers > 0) {
+        Nation farmNation = state.nations.get(settlement.nationId);
+        if (farmNation != null) {
+          double foodPrice = state.market.prices.getOrDefault("food", 1.0);
+          farmNation.treasury -= farmWorkers * FOOD_PER_WORKER * foodPrice * farmNation.wagePolicy * 0.35;
+        }
+      }
 
       if (settlement.stock.get("food") < 0) {
         settlement.starveTicks++;
@@ -134,8 +168,19 @@ public class Settlement {
         settlement.starveTicks = 0;
       }
 
+      // every citizen needs a roof: build houses out of spare wood whenever
+      // the settlement is running low on space for its current population
+      double houseCapacity = settlement.housingStock * PEOPLE_PER_HOUSE;
+      if (settlement.populationCount >= houseCapacity - 2
+          && settlement.stock.get("wood") > HOUSE_WOOD_COST + Config.SETTLEMENT_BUFFER * 0.5) {
+        settlement.stock.merge("wood", -HOUSE_WOOD_COST, Double::sum);
+        settlement.housingStock += 1;
+        houseCapacity = settlement.housingStock * PEOPLE_PER_HOUSE;
+      }
+
       if (settlement.stock.get("food") > Config.SETTLEMENT_BUFFER
           && settlement.populationCount < POP_CAP_PER_SETTLEMENT
+          && settlement.populationCount < houseCapacity
           && state.humans.size() < Config.MAX_HUMANS) {
         settlement.growthAccum += 0.015;
         if (settlement.growthAccum >= 1) {
@@ -149,6 +194,38 @@ public class Settlement {
         }
       }
     }
+  }
+
+  /** A settlement that just lost its last citizen leaves its nation and
+   * releases its territory/farmland back to no-man's-land; its structures
+   * stay physically standing (settlementAt is left alone) but the ruin no
+   * longer contributes population, stock, or territory to the world. */
+  private static void abandon(GameState state, Settlement settlement) {
+    settlement.abandoned = true;
+    // zero out (rather than clear) so the many call sites that assume the
+    // standard keys are always present don't NPE on a missing entry
+    for (String key : settlement.stock.keySet()) settlement.stock.put(key, 0.0);
+
+    int oldNationId = settlement.nationId;
+    Nation nation = state.nations.get(oldNationId);
+    if (nation != null) {
+      nation.settlementIds.remove(Integer.valueOf(settlement.id));
+      if (nation.capitalSettlementId == settlement.id) {
+        nation.capitalSettlementId = nation.settlementIds.isEmpty() ? -1 : nation.settlementIds.iterator().next();
+      }
+    }
+    settlement.nationId = -1;
+
+    WorldGrid grid = state.grid;
+    grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
+      int i = grid.idx(x, y);
+      if (grid.ownerNation[i] == oldNationId) { grid.ownerNation[i] = -1; grid.markDirtyIdx(i); }
+      if (grid.isFarmland[i]) { grid.isFarmland[i] = false; grid.markDirtyIdx(i); }
+    });
+
+    List<Integer> deadBusinesses = new ArrayList<>();
+    for (Business b : state.businesses.values()) if (b.settlementId == settlement.id) deadBusinesses.add(b.id);
+    for (int id : deadBusinesses) state.businesses.remove(id);
   }
 
   /** Full re-claim pass across every settlement, nearest-wins. Cheap enough

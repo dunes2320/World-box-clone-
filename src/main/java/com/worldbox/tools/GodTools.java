@@ -46,11 +46,13 @@ public class GodTools {
 
   private interface CellFn { void apply(int x, int y); }
 
+  /** forEachInRadius measures from the cell-center point (cx+0.5, cz+0.5),
+   * so even the single cell directly under the cursor is 0.707 away from
+   * it - a radius of exactly 0 (brush size 1) would visit nothing at all. */
+  public static double brushRadius(int size) { return Math.max(0.75, size - 1); }
+
   private static void forEachInBrush(WorldGrid grid, int cx, int cz, int size, CellFn fn) {
-    // forEachInRadius measures from the cell-center point (cx+0.5, cz+0.5),
-    // so even the single cell directly under the cursor is 0.707 away from
-    // it - a radius of exactly 0 (brush size 1) would visit nothing at all.
-    double r = Math.max(0.75, size - 1);
+    double r = brushRadius(size);
     grid.forEachInRadius(cx + 0.5, cz + 0.5, r, (x, y, d) -> fn.apply(x, y));
   }
 
