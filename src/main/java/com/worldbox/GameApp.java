@@ -53,7 +53,10 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private Picking.CellHit lastCell;
 
   private final Vector3f camTarget = new Vector3f();
-  private float camYaw = 0.5f, camPitch = 0.75f, camDistance = 55f;
+  private float camYaw = 0.5f, camPitch = 0.75f, camDistance = 55f, camDistanceTarget = 55f;
+  /** Player-configurable scroll-wheel zoom speed multiplier, set from the
+   * settings panel. */
+  private float zoomSensitivity = 1.0f;
 
   // headless verification mode: F12, or -Dworldbox.testMode=true to
   // auto-screenshot and exit (used by automated smoke tests / CI, no effect
@@ -112,7 +115,8 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     hud = new GameHud(guiNode, assetManager, screenWidth, screenHeight, this);
 
     setupInput();
-    updateCamera();
+    camTarget.y = terrainHeightAt(camTarget.x, camTarget.z);
+    updateCamera(1f);
 
     screenshotState = new ScreenshotAppState(System.getProperty("java.io.tmpdir") + "/", "worldbox");
     stateManager.attach(screenshotState);
@@ -208,8 +212,11 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       else if (name.equals("MouseYPos")) camTarget.addLocal(fwd.mult(value * panSpeed));
       else if (name.equals("MouseYNeg")) camTarget.addLocal(fwd.mult(-value * panSpeed));
     }
-    if (name.equals("WheelUp")) camDistance = clamp(camDistance - value * 20f, 8f, 140f);
-    else if (name.equals("WheelDown")) camDistance = clamp(camDistance + value * 20f, 8f, 140f);
+    // wheel input only nudges a target distance - updateCamera() eases
+    // camDistance toward it each frame, turning discrete wheel notches into
+    // a smooth scroll instead of an instant jump
+    if (name.equals("WheelUp")) camDistanceTarget = clamp(camDistanceTarget - value * 7f * zoomSensitivity, 8f, 140f);
+    else if (name.equals("WheelDown")) camDistanceTarget = clamp(camDistanceTarget + value * 7f * zoomSensitivity, 8f, 140f);
   }
 
   private static float clamp(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -227,13 +234,35 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (moveLeft) camTarget.addLocal(right.mult(-camSpeed));
   }
 
-  private void updateCamera() {
+  private float terrainHeightAt(float wx, float wz) {
+    int gx = (int) Math.max(0, Math.min(Config.COLS - 1, Math.floor(wx)));
+    int gz = (int) Math.max(0, Math.min(Config.ROWS - 1, Math.floor(wz)));
+    return state.grid.height[state.grid.idx(gx, gz)];
+  }
+
+  private void updateCamera(float tpf) {
     camTarget.x = clamp(camTarget.x, -15f, Config.COLS + 15f);
     camTarget.z = clamp(camTarget.z, -15f, Config.ROWS + 15f);
+
+    // ease toward the wheel's target distance rather than snapping to it
+    camDistance += (camDistanceTarget - camDistance) * Math.min(1f, tpf * 10f);
+
+    // keep the orbit pivot glued to the ground under it, not a stale
+    // height from wherever the camera happened to start - otherwise
+    // zooming in over a hill drops the camera below the terrain surface
+    camTarget.y += (terrainHeightAt(camTarget.x, camTarget.z) - camTarget.y) * Math.min(1f, tpf * 6f);
+
     float x = camDistance * FastMath.cos(camPitch) * FastMath.sin(camYaw);
     float y = camDistance * FastMath.sin(camPitch);
     float z = camDistance * FastMath.cos(camPitch) * FastMath.cos(camYaw);
-    cam.setLocation(camTarget.add(x, y, z));
+    Vector3f camPos = camTarget.add(x, y, z);
+
+    // belt and suspenders: never let the camera itself end up under the
+    // ground it's flying over, no matter how close/shallow the angle
+    float minY = terrainHeightAt(camPos.x, camPos.z) + 1.2f;
+    if (camPos.y < minY) camPos.y = minY;
+
+    cam.setLocation(camPos);
     cam.lookAt(camTarget, Vector3f.UNIT_Y);
   }
 
@@ -264,7 +293,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     simTime += tpf;
     maybeTick();
     applyKeyboardMovement(tpf);
-    updateCamera();
+    updateCamera(tpf);
 
     if (leftDown && GodTools.CONTINUOUS_TOOLS.contains(tool)) {
       Vector2f cursor = inputManager.getCursorPosition();
@@ -316,7 +345,9 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(4.5, () -> screenshotState.takeScreenshot());
       testScript.put(5.0, () -> hud.debugSetPanelMode("market"));
       testScript.put(5.5, () -> screenshotState.takeScreenshot());
-      testScript.put(6.0, () -> hud.debugSetPanelMode(null));
+      testScript.put(6.5, () -> hud.debugSetPanelMode("settings"));
+      testScript.put(7.0, () -> screenshotState.takeScreenshot());
+      testScript.put(7.5, () -> hud.debugSetPanelMode(null));
       double midway = Math.max(15.0, duration * 0.5);
       int[] graphNationId = {-1};
       testScript.put(midway, () -> {
@@ -356,7 +387,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
               + " buildHeight=" + afterDig + "->" + afterBuild);
           float h = state.grid.height[state.grid.idx(mx, mz)];
           camTarget.set(mx, h, mz);
-          camDistance = 16f;
+          camDistance = camDistanceTarget = 16f;
           camPitch = 0.5f;
         }
       });
@@ -367,7 +398,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
           float h = state.grid.height[state.grid.idx(s.x, s.z)];
           camTarget.set(s.x + 0.5f, h, s.z + 0.5f);
         }
-        camDistance = 18f;
+        camDistance = camDistanceTarget = 18f;
         camPitch = 0.6f;
       });
       testScript.put(duration - 1.7, () -> screenshotState.takeScreenshot());
@@ -384,7 +415,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
           entityRenderer.rebuildStatics(state);
           float h = state.grid.height[state.grid.idx(fx, fz)];
           camTarget.set(fx + 0.5f, h, fz + 0.5f);
-          camDistance = 12f;
+          camDistance = camDistanceTarget = 12f;
           camPitch = 0.55f;
         }
       });
@@ -456,6 +487,8 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   }
   @Override public int getGameSpeed() { return speed; }
   @Override public void setGameSpeed(int n) { speed = n; }
+  @Override public float getZoomSensitivity() { return zoomSensitivity; }
+  @Override public void setZoomSensitivity(float v) { zoomSensitivity = v; }
 
   @Override
   public void resetWorld() {

@@ -13,4 +13,6 @@ public interface HudContext {
   int getGameSpeed();
   void setGameSpeed(int n);
   void resetWorld();
+  float getZoomSensitivity();
+  void setZoomSensitivity(float v);
 }

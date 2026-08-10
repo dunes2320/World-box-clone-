@@ -51,8 +51,10 @@ public class GameHud {
   private final Map<String, Button> toolButtons = new LinkedHashMap<>();
   private Label brushLabel;
   private Slider brushSlider;
+  private Slider zoomSlider;
+  private Label zoomLabel;
 
-  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph"
+  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph" | "settings"
   private double lastStatRefresh, lastPanelRefresh;
 
   // Economy graph: raw jME quads, positioned by hand since Lemur's grid
@@ -121,6 +123,13 @@ public class GameHud {
     topBar.addChild(spacer(6));
     Button worldEconBtn = topBar.addChild(new Button("Market Index"));
     worldEconBtn.addClickCommands(src -> showGraph("world", -1));
+    topBar.addChild(spacer(6));
+    Button settingsBtn = topBar.addChild(new Button("Settings"));
+    settingsBtn.addClickCommands(src -> {
+      sidePanelMode = "settings".equals(sidePanelMode) ? null : "settings";
+      ctx.setSelection(null);
+      refreshSidePanel();
+    });
 
     toolbar.setLocalTranslation(0, height - 46, 1);
     toolbar.setBackground(new QuadBackgroundComponent(BG));
@@ -217,12 +226,23 @@ public class GameHud {
       brushLabel.setText(String.valueOf(brushVal));
     }
 
+    if (zoomSlider != null && "settings".equals(sidePanelMode)) {
+      float zoomVal = Math.round(zoomSlider.getModel().getValue() * 10f) / 10f;
+      if (Math.abs(zoomVal - ctx.getZoomSensitivity()) > 0.001f) {
+        ctx.setZoomSensitivity(zoomVal);
+        zoomLabel.setText(String.format("%.1fx", zoomVal));
+      }
+    }
+
     if (now - lastStatRefresh > 0.28) {
       lastStatRefresh = now;
       GameState state = ctx.getState();
       statLabel.setText("Pop: " + state.humans.size() + "   Nations: " + state.nations.size() + "   Tick: " + state.tick);
     }
-    if (now - lastPanelRefresh > 1.0) {
+    // "settings" is deliberately excluded from the periodic auto-refresh -
+    // rebuilding the panel every second would recreate the slider mid-drag
+    // and reset it out from under the player's mouse
+    if (now - lastPanelRefresh > 1.0 && !"settings".equals(sidePanelMode)) {
       lastPanelRefresh = now;
       refreshSidePanel();
     }
@@ -245,6 +265,7 @@ public class GameHud {
     else if ("nationsList".equals(mode)) renderNationsList(state);
     else if ("market".equals(mode)) renderMarket(state);
     else if ("graph".equals(mode)) renderGraph(state);
+    else if ("settings".equals(mode)) renderSettings();
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
 
     sidePanel.setLocalTranslation(screenW - 320, screenH - 46, 1);
@@ -283,6 +304,23 @@ public class GameHud {
     l.setPreferredSize(new Vector3f(160, 20, 0));
     Label v = row.addChild(new Label(value));
     v.setColor(TEXT);
+  }
+
+  private void renderSettings() {
+    Label title = sidePanel.addChild(new Label("Settings"));
+    title.setFontSize(17);
+    closeButton();
+
+    Label camHeader = sidePanel.addChild(new Label("CAMERA"));
+    camHeader.setColor(MUTED); camHeader.setFontSize(12);
+
+    Label zoomHeader = sidePanel.addChild(new Label("Scroll zoom sensitivity"));
+    zoomHeader.setColor(TEXT);
+    zoomSlider = sidePanel.addChild(new Slider(new DefaultRangedValueModel(0.2, 3.0, ctx.getZoomSensitivity()), Axis.X));
+    zoomSlider.setDelta(0.1);
+    zoomSlider.setPreferredSize(new Vector3f(260, 24, 0));
+    zoomLabel = sidePanel.addChild(new Label(String.format("%.1fx", ctx.getZoomSensitivity())));
+    zoomLabel.setColor(MUTED);
   }
 
   private void renderSettlement(GameState state, int id) {
@@ -346,9 +384,12 @@ public class GameHud {
     if (n.currencyCollapsed) {
       Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
       collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
+      statRow("Pegged to", n.goldStandard ? "gold (peg broken)" : "nothing (was floating fiat)");
+      statRow("In circulation", (int) Math.floor(n.moneySupply) + "g");
     } else {
-      statRow("Standard", n.goldStandard ? "gold-backed" : "fiat (unbacked)");
-      statRow("Exchange rate", String.format("%.3fx", n.exchangeRate));
+      statRow("Pegged to", n.goldStandard ? "gold" : "nothing (free-floating fiat)");
+      statRow("In circulation", (int) Math.floor(n.moneySupply) + "g");
+      statRow("Worth vs peg", String.format("%.3fx", n.exchangeRate));
       statRow("Inflation", String.format("%+.1f%%/window", n.inflationRate * 100));
       statRow("Monetary policy", n.monetaryPolicy);
     }
