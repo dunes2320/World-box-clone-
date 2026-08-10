@@ -49,6 +49,8 @@ public class EntityRenderer {
     BUSINESS_COLORS.put("wood", new ColorRGBA(0.45f, 0.32f, 0.18f, 1f));
     BUSINESS_COLORS.put("stone", new ColorRGBA(0.55f, 0.57f, 0.60f, 1f));
     BUSINESS_COLORS.put("iron", new ColorRGBA(0.75f, 0.4f, 0.2f, 1f));
+    BUSINESS_COLORS.put("food", new ColorRGBA(0.85f, 0.72f, 0.22f, 1f));
+    BUSINESS_COLORS.put("market", new ColorRGBA(0.62f, 0.32f, 0.72f, 1f));
   }
 
   private static final int TREE_CAP_SAMPLE = 2600;
@@ -84,6 +86,7 @@ public class EntityRenderer {
   private final Node banksNode = new Node("banks");
   private final Node flagsNode = new Node("flags");
   private final Node firesNode = new Node("fires");
+  private final Node smokeNode = new Node("smoke");
   private final Node sparklesNode = new Node("sparkles");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] armyPool = new Geometry[ARMY_CAP];
@@ -92,6 +95,7 @@ public class EntityRenderer {
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
   private final Geometry[] flagPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] firePool = new Geometry[FIRE_CAP];
+  private final Geometry[] smokePool = new Geometry[FIRE_CAP];
   private final Geometry[] sparklePool = new Geometry[SPARKLE_CAP];
 
   /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
@@ -238,6 +242,24 @@ public class EntityRenderer {
       firePool[i] = g;
     }
     root.attachChild(firesNode);
+
+    // a soft, rising, fading puff above every burning cell - cheap enough
+    // (one low-poly sphere each) to run alongside the flames themselves
+    com.jme3.scene.shape.Sphere smokeMesh = new com.jme3.scene.shape.Sphere(6, 6, 0.35f);
+    for (int i = 0; i < FIRE_CAP; i++) {
+      Geometry g = new Geometry("Smoke" + i, smokeMesh);
+      Material smokeMat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
+      smokeMat.setColor("Color", new ColorRGBA(0.35f, 0.35f, 0.37f, 0.5f));
+      smokeMat.setTransparent(true);
+      smokeMat.getAdditionalRenderState().setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+      g.setMaterial(smokeMat);
+      g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+      g.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+      g.setCullHint(Spatial.CullHint.Always);
+      smokeNode.attachChild(g);
+      smokePool[i] = g;
+    }
+    root.attachChild(smokeNode);
 
     for (int i = 0; i < SPARKLE_CAP; i++) {
       Geometry g = new Geometry("Sparkle" + i, sparkleTemplate);
@@ -413,6 +435,7 @@ public class EntityRenderer {
     updateMonster(state);
     updateTornadoes(state);
     updateFires(state);
+    updateSmoke(state);
     updateSparkles(state);
   }
 
@@ -473,6 +496,27 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Inherit);
     }
     for (int i = count; i < FIRE_CAP; i++) firePool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  private void updateSmoke(GameState state) {
+    int count = Math.min(FIRE_CAP, burningCache.size());
+    for (int i = 0; i < count; i++) {
+      int cell = burningCache.get(i);
+      int gx = cell % grid.cols, gz = cell / grid.cols;
+      Geometry g = smokePool[i];
+      float h = grid.height[cell];
+      float phase = ((state.tick * 0.012f) + i * 0.37f) % 1f;
+      float rise = phase * 3.2f;
+      float drift = (float) Math.sin(i * 1.3f + phase * 2f) * 0.3f;
+      float alpha = (float) Math.sin(phase * Math.PI) * 0.4f;
+      float scale = 0.4f + phase * 0.8f;
+      g.setLocalTranslation(gx + 0.5f + drift, h + 0.7f + rise, gz + 0.5f + drift * 0.6f);
+      g.setLocalScale(scale);
+      Material mat = g.getMaterial();
+      mat.setColor("Color", new ColorRGBA(0.33f, 0.33f, 0.35f, Math.max(0f, alpha)));
+      g.setCullHint(Spatial.CullHint.Inherit);
+    }
+    for (int i = count; i < FIRE_CAP; i++) smokePool[i].setCullHint(Spatial.CullHint.Always);
   }
 
   private void updateSparkles(GameState state) {

@@ -37,7 +37,10 @@ public class Government {
         if (h.nationId == Config.UNDEAD_NATION_ID || h.nationId < 0) continue;
         int[] counts = laborByNation.computeIfAbsent(h.nationId, k -> new int[2]);
         counts[0]++;
-        if (h.job == null) counts[1]++;
+        // only count someone as unemployed if they're actually trying to
+        // work and can't - not just off duty on their scheduled home/
+        // leisure time, which would otherwise inflate this hugely
+        if (h.job == null && h.routine.equals("work")) counts[1]++;
       }
     }
     for (Nation n : new ArrayList<>(state.nations.values())) {
@@ -56,6 +59,7 @@ public class Government {
 
         int[] labor = laborByNation.getOrDefault(n.id, new int[2]);
         double unemployment = labor[0] == 0 ? 0 : (double) labor[1] / labor[0];
+        n.unemploymentRate = unemployment;
         n.unemploymentHistory.addLast(unemployment);
         trim(n.unemploymentHistory);
 
@@ -151,6 +155,21 @@ public class Government {
     }
     drift -= atWar * 0.03;
 
+    // unemployment erodes stability, but a young/small nation gets a lot
+    // of slack (teething problems aren't a crisis yet) while an old,
+    // established nation is expected to have its economy figured out by
+    // now, so the same jobless rate hurts it far more
+    int pop = 0;
+    for (int sid : n.settlementIds) {
+      Settlement s = state.settlements.get(sid);
+      if (s != null) pop += s.populationCount;
+    }
+    double ageYears = com.worldbox.util.Calendar.ageYears(Math.max(0, state.tick - n.founded));
+    double maturity = clamp(ageYears / 40.0, 0, 1) * 0.6 + clamp(pop / 150.0, 0, 1) * 0.4;
+    if (n.unemploymentRate > 0.15) {
+      drift -= (n.unemploymentRate - 0.15) * (0.4 + maturity * 2.6);
+    }
+
     n.stability = clamp(n.stability + drift, 0, 100);
   }
 
@@ -196,6 +215,7 @@ public class Government {
     } else {
       n.government = nextGovernmentAfterUnrest(n.government);
       n.leader = new Leader(n.government); // a coup/revolt installs a new leader
+      n.issueNewCurrency(); // ...and the new regime issues its own currency
     }
     n.stability = 40;
   }

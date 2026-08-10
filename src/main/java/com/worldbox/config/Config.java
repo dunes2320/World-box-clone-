@@ -8,8 +8,8 @@ import java.util.Map;
 public final class Config {
   private Config() {}
 
-  public static final int COLS = 72;
-  public static final int ROWS = 72;
+  public static final int COLS = 128;
+  public static final int ROWS = 128;
 
   // terrain types
   public static final byte WATER = 0;

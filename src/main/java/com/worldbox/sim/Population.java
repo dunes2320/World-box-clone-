@@ -63,13 +63,41 @@ public class Population {
       case "wood": return Config.RES_FOREST;
       case "stone": return Config.RES_STONE;
       case "iron": return Config.RES_IRON;
+      case "gold": return Config.RES_GOLD;
       default: return Config.RES_NONE;
     }
   }
 
+  /** New/idle workers are offered the government gold mine first - a real
+   * job with real pay, but not everyone's job. Only a limited number of
+   * citizens can hold it at once, scaled to the nation's size, so a young
+   * nation has a small mine and a large one can run a bigger one. Once
+   * that's full (or there's no reachable gold), workers fall back to
+   * whichever tracked resource the settlement needs most, as before. */
   private static void assignJob(GameState state, Human h) {
     Settlement settlement = state.settlements.get(h.settlementId);
     if (settlement == null) { h.job = null; return; }
+
+    int nationPop = 0, goldMiners = 0;
+    for (Human other : state.humans) {
+      if (other.dead || other.nationId != h.nationId) continue;
+      nationPop++;
+      if ("gold".equals(other.job)) goldMiners++;
+    }
+    int goldCap = 1 + nationPop / 8;
+    if (goldMiners < goldCap) {
+      int[] goldCell = findResourceCell(state.grid, settlement.x, settlement.z, Config.RES_GOLD, 14, h.nationId);
+      if (goldCell != null) {
+        h.job = "gold";
+        h.gatherX = goldCell[0];
+        h.gatherY = goldCell[1];
+        h.targetX = goldCell[0] + 0.5;
+        h.targetZ = goldCell[1] + 0.5;
+        h.state = "gather";
+        return;
+      }
+    }
+
     String[] keys = {"wood", "stone", "iron"};
     // pick whichever tracked resource is scarcest relative to a healthy buffer
     String[] sorted = keys.clone();
@@ -97,6 +125,19 @@ public class Population {
       h.debt += loan;
       h.wealth += loan;
     }
+  }
+
+  /** A jobless citizen still gets a modest government benefit - enough to
+   * get by day to day, not enough to make unemployment comfortable versus
+   * actually working. Funded straight out of the treasury like any other
+   * government spending, so a nation with a lot of unemployment really
+   * does feel it in its books. */
+  private static void payUnemploymentBenefit(GameState state, Human h) {
+    Nation nation = state.nations.get(h.nationId);
+    if (nation == null) return;
+    double benefit = 0.12;
+    nation.treasury -= benefit;
+    h.wealth += benefit;
   }
 
   // This is where currency actually enters the world: a hauled load is sold
@@ -160,11 +201,12 @@ public class Population {
   private static int clampCoord(int v, int max) { return Math.max(0, Math.min(max - 1, v)); }
 
   // every villager is a mortal individual, not just a population counter:
-  // once they cross OLD_AGE_START their death odds climb tick by tick,
-  // clustering natural deaths in a realistic-feeling window rather than an
+  // h.age is in days (one tick = one day, see util.Calendar), so this is a
+  // real human lifespan - once they cross 60 their death odds climb day by
+  // day, clustering natural deaths mostly between 60 and 90 rather than an
   // exact cutoff - some live a bit longer, some a bit shorter
-  private static final int OLD_AGE_START = 3500;
-  private static final double OLD_AGE_SPAN = 4000;
+  private static final int OLD_AGE_START = 60 * com.worldbox.util.Calendar.DAYS_PER_YEAR;
+  private static final double OLD_AGE_SPAN = 30 * com.worldbox.util.Calendar.DAYS_PER_YEAR;
 
   private static boolean diesOfOldAge(Human h) {
     if (h.age <= OLD_AGE_START) return false;
@@ -172,16 +214,18 @@ public class Population {
     return Math.random() < t * t * 0.02;
   }
 
-  // every person's day cycles through work, home, and a bit of leisure -
-  // "go to work, go home, take a vacation" - staggered per-person (via
-  // h.id) so a whole settlement doesn't clock in and out in lockstep, and
-  // weighted by industriousness so lazier people work less of the day
-  private static final int DAY_LENGTH = 300;
+  // every person cycles through work, home, and a bit of leisure - "go to
+  // work, go home, take a vacation" - staggered per-person (via h.id) so a
+  // whole settlement doesn't clock in and out in lockstep, and weighted by
+  // industriousness so lazier people work less. This is a behavioral
+  // rhythm, not a literal calendar day (a real day is one tick, see
+  // util.Calendar) - more like a working season within the year.
+  private static final int ROUTINE_CYCLE = 300;
 
   private static void updateRoutine(GameState state, Human h) {
     double workFrac = 0.55 + h.personality.industriousness * 0.3; // 0.55..0.85
     double homeFrac = (1 - workFrac) * 0.6;
-    double t = ((state.tick + h.id * 37) % DAY_LENGTH) / (double) DAY_LENGTH;
+    double t = ((state.tick + h.id * 37) % ROUTINE_CYCLE) / (double) ROUTINE_CYCLE;
     if (t < workFrac) h.routine = "work";
     else if (t < workFrac + homeFrac) h.routine = "home";
     else h.routine = "leisure";
@@ -214,7 +258,9 @@ public class Population {
 
       if (diesOfOldAge(h)) continue;
 
-      applyLivingCost(h);
+      // no nation means no money and no debt - a wanderer has nothing to
+      // spend and nothing to owe until they actually join or found one
+      if (h.nationId >= 0) applyLivingCost(h);
 
       int ci = grid.idx(clampCoord((int) Math.floor(h.x), grid.cols), clampCoord((int) Math.floor(h.z), grid.rows));
       if (grid.burning[ci] && Math.random() < 0.35) continue; // burned to death
@@ -293,6 +339,7 @@ public class Population {
       } else if (h.routine.equals("work")) {
         if (Math.random() < 0.02 || moveToward(grid, h, SPEED) < 0.1) pickWanderTarget(grid, h);
         if (Math.random() < 0.05) assignJob(state, h);
+        if (h.job == null) payUnemploymentBenefit(state, h);
       } else if (h.routine.equals("home")) {
         Settlement home = state.settlements.get(h.settlementId);
         if (home != null) {

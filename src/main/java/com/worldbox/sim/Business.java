@@ -9,7 +9,11 @@ public class Business {
   public final int id;
   public int settlementId;
   public int nationId;
-  public final String resourceKey; // "wood", "stone", "iron"
+  /** "farm" | "market" | "extraction" - a settlement's economy has to be
+   * built in that order: a farm first, then a market, only then can
+   * resource-extraction businesses (wood/stone/iron) form. */
+  public final String type;
+  public final String resourceKey; // "food" for a farm, "wood"/"stone"/"iron" for extraction, "market" (unused) for a market
   public double capital;
   public double productivity = 1.0;
   public double debt = 0; // outstanding business loan from the nation's bank
@@ -21,11 +25,11 @@ public class Business {
    * number, so this reads like a real company's market cap. */
   public double valuation = 20;
 
-  public Business(int settlementId, int nationId, String resourceKey) {
+  public Business(int settlementId, int nationId, String type, String resourceKey) {
     this.id = nextId++;
     this.settlementId = settlementId;
     this.nationId = nationId;
+    this.type = type;
     this.resourceKey = resourceKey;
-    this.capital = 20;
   }
 }

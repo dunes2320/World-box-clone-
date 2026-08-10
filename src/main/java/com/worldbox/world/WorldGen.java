@@ -27,6 +27,11 @@ public class WorldGen {
         double h = elevation * 14;
         grid.height[i] = (float) h;
 
+        // a separate moisture field breaks up what would otherwise be one
+        // uniform grass biome into real plains/dirt patches, so the map
+        // reads as varied terrain instead of a flat green blob
+        double moisture = fbm.fbm(x * 0.045 + 400, y * 0.045 + 400, 4, 2, 0.5);
+
         if (h < -1.0) {
           grid.terrain[i] = Config.WATER;
         } else if (h < -0.15) {
@@ -35,6 +40,8 @@ public class WorldGen {
           grid.terrain[i] = Config.STONE;
         } else if (h > 3.6 && fbm.fbm(x * 0.1 + 200, y * 0.1 + 200, 2, 2, 0.5) > 0.55) {
           grid.terrain[i] = Config.STONE;
+        } else if (moisture < -0.18) {
+          grid.terrain[i] = Config.DIRT;
         } else {
           grid.terrain[i] = Config.GRASS;
         }

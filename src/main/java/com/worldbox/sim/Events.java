@@ -39,7 +39,10 @@ public class Events {
       if (grid.burnTimer[i] <= 0) {
         grid.burning[i] = false;
         grid.resource[i] = Config.RES_NONE;
-        if (grid.terrain[i] == Config.GRASS) grid.terrain[i] = Config.DIRT;
+        if (grid.terrain[i] == Config.GRASS) {
+          grid.terrain[i] = Config.DIRT;
+          state.voxels.paintColumnSurface(i % grid.cols, i / grid.cols, VoxelWorld.DIRT);
+        }
         grid.markDirtyIdx(i);
         continue;
       }
@@ -55,6 +58,15 @@ public class Events {
     }
   }
 
+  private static boolean hasGrassNeighbor(WorldGrid grid, int x, int y) {
+    int[][] dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    for (int[] d : dirs) {
+      int nx = x + d[0], ny = y + d[1];
+      if (grid.inBounds(nx, ny) && grid.terrain[grid.idx(nx, ny)] == Config.GRASS) return true;
+    }
+    return false;
+  }
+
   private static void updateVegetation(GameState state) {
     WorldGrid grid = state.grid;
     int samples = 250;
@@ -62,14 +74,21 @@ public class Events {
       int x = (int) (Math.random() * grid.cols);
       int y = (int) (Math.random() * grid.rows);
       int i = grid.idx(x, y);
-      if (grid.terrain[i] != Config.GRASS) continue;
-      if (grid.resource[i] == Config.RES_FOREST) {
-        if (grid.resourceAmount[i] < Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 8 && Math.random() < 0.05) {
-          grid.resourceAmount[i] += 1;
+      if (grid.terrain[i] == Config.GRASS) {
+        if (grid.resource[i] == Config.RES_FOREST) {
+          if (grid.resourceAmount[i] < Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 8 && Math.random() < 0.05) {
+            grid.resourceAmount[i] += 1;
+          }
+        } else if (grid.resource[i] == Config.RES_NONE && Math.random() < 0.004) {
+          grid.resource[i] = Config.RES_FOREST;
+          grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 2;
+          grid.markDirtyIdx(i);
         }
-      } else if (grid.resource[i] == Config.RES_NONE && Math.random() < 0.004) {
-        grid.resource[i] = Config.RES_FOREST;
-        grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 2;
+      } else if (grid.terrain[i] == Config.DIRT && !grid.burning[i] && hasGrassNeighbor(grid, x, y) && Math.random() < 0.02) {
+        // grass slowly reclaims bare dirt (burn scars heal, cleared
+        // patches soften) if it's got grass nearby to spread from
+        grid.terrain[i] = Config.GRASS;
+        state.voxels.paintColumnSurface(x, y, VoxelWorld.GRASS);
         grid.markDirtyIdx(i);
       }
     }

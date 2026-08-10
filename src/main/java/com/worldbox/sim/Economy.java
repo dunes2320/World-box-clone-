@@ -9,8 +9,14 @@ import java.util.Map;
 
 public class Economy {
   private static final double LEVERAGE_LIMIT = 3.0;
-  private static final int MAX_BUSINESSES_PER_SETTLEMENT = 2;
+  private static final int MAX_BUSINESSES_PER_SETTLEMENT = 4; // farm + market + up to 2 extraction
   private static final String[] BUSINESS_RESOURCES = {"wood", "stone", "iron"};
+  /** Founding capital comes from a bank loan, not free money - "one person
+   * decides to take out a loan" to build it. Kept modest so a normal
+   * settlement can service it comfortably; only reckless policy (taxing/
+   * printing a business into the ground) or a genuine string of bad luck
+   * pushes it to the existing bankruptcy threshold. */
+  private static final double FOUNDING_LOAN = 15;
 
   private static Settlement biggestStock(GameState state, Nation nation, String key) {
     Settlement best = null;
@@ -34,6 +40,13 @@ public class Economy {
     return best;
   }
 
+  private static boolean hasMarketBusiness(GameState state, int settlementId) {
+    for (Business b : state.businesses.values()) {
+      if (b.settlementId == settlementId && b.type.equals("market")) return true;
+    }
+    return false;
+  }
+
   public static void update(GameState state) {
     GlobalMarket market = state.market;
     for (String key : GlobalMarket.keys()) {
@@ -50,6 +63,9 @@ public class Economy {
           double sellAmt = (seller.stock.get(key) - Config.SETTLEMENT_BUFFER) * 0.08;
           seller.stock.merge(key, -sellAmt, Double::sum);
           double saleValue = sellAmt * market.prices.get(key);
+          // a market business handles trade better than an ad hoc sale -
+          // this is its whole reason to exist once a settlement has one
+          if (hasMarketBusiness(state, seller.id)) saleValue *= 1.25;
           nation.treasury += saleValue;
           nation.gdpAccum += saleValue;
           market.volume.merge(key, sellAmt, Double::sum);
@@ -147,24 +163,51 @@ public class Economy {
     state.market.goldRemainingInGround = remaining;
   }
 
+  /** A new business always starts as a bank loan, never free money - "one
+   * person decides to take out a loan" to build it. */
+  private static void foundBusiness(GameState state, Settlement s, Nation n, String type, String resourceKey) {
+    Business b = new Business(s.id, s.nationId, type, resourceKey);
+    n.bank.reserves = Math.max(0, n.bank.reserves - FOUNDING_LOAN);
+    n.bank.loans += FOUNDING_LOAN;
+    b.debt = FOUNDING_LOAN;
+    b.capital = FOUNDING_LOAN * 0.7; // the rest went straight to setup costs
+    state.businesses.put(b.id, b);
+  }
+
   // ---- businesses: private (capitalism) or state-owned (communism) ----
   private static void updateBusinesses(GameState state) {
     if (state.tick % 3 == 0) {
       for (Settlement s : state.settlements.values()) {
         if (s.populationCount < 10) continue;
-        int existing = 0;
-        for (Business b : state.businesses.values()) if (b.settlementId == s.id) existing++;
-        if (existing >= MAX_BUSINESSES_PER_SETTLEMENT) continue;
+        List<Business> existing = new ArrayList<>();
+        for (Business b : state.businesses.values()) if (b.settlementId == s.id) existing.add(b);
+        if (existing.size() >= MAX_BUSINESSES_PER_SETTLEMENT) continue;
+        Nation n = state.nations.get(s.nationId);
+        if (n == null) continue;
+
+        boolean hasFarm = existing.stream().anyMatch(b -> b.type.equals("farm"));
+        boolean hasMarket = existing.stream().anyMatch(b -> b.type.equals("market"));
+
+        // the economy has to be built in order: a settlement's first
+        // business is always a farm, then a market - only once both exist
+        // can resource-extraction businesses form
+        if (!hasFarm) {
+          if (Math.random() < 0.03 && s.stock.getOrDefault("food", 0.0) > Config.SETTLEMENT_BUFFER * 0.5) {
+            foundBusiness(state, s, n, "farm", "food");
+          }
+          continue;
+        }
+        if (!hasMarket) {
+          if (Math.random() < 0.03) foundBusiness(state, s, n, "market", "market");
+          continue;
+        }
+
         if (Math.random() > 0.02) continue;
         String key = BUSINESS_RESOURCES[(int) (Math.random() * BUSINESS_RESOURCES.length)];
         if (s.stock.getOrDefault(key, 0.0) < Config.SETTLEMENT_BUFFER) continue;
-        boolean dup = false;
-        for (Business b : state.businesses.values()) {
-          if (b.settlementId == s.id && b.resourceKey.equals(key)) { dup = true; break; }
-        }
+        boolean dup = existing.stream().anyMatch(b -> key.equals(b.resourceKey));
         if (dup) continue;
-        Business b = new Business(s.id, s.nationId, key);
-        state.businesses.put(b.id, b);
+        foundBusiness(state, s, n, "extraction", key);
       }
     }
 
@@ -177,13 +220,28 @@ public class Economy {
 
       if (b.capital > 15) b.productivity = Math.min(3.0, b.productivity + 0.001);
 
-      double surplus = Math.max(0, s.stock.getOrDefault(b.resourceKey, 0.0) - Config.SETTLEMENT_BUFFER);
-      double skim = surplus * 0.15;
-      s.stock.merge(b.resourceKey, -skim, Double::sum);
       // oligarchy: the business elite run the show, so private enterprise
       // is extra productive but the state's cut shrinks
       double govMultiplier = n.government.equals(Government.OLIGARCHY) ? 1.3 : 1.0;
-      double revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier;
+      double revenue = 0;
+
+      if (b.type.equals("farm")) {
+        // a farm turns wood and stone into food - real production, not
+        // just a resale - on top of whatever food surplus it also sells
+        double wood = Math.min(2.0, s.stock.getOrDefault("wood", 0.0));
+        double stone = Math.min(1.0, s.stock.getOrDefault("stone", 0.0));
+        s.stock.merge("wood", -wood, Double::sum);
+        s.stock.merge("stone", -stone, Double::sum);
+        s.stock.merge("food", (wood + stone) * b.productivity * 1.5, Double::sum);
+      }
+
+      if (!b.type.equals("market")) {
+        double surplus = Math.max(0, s.stock.getOrDefault(b.resourceKey, 0.0) - Config.SETTLEMENT_BUFFER);
+        double skim = surplus * 0.15;
+        s.stock.merge(b.resourceKey, -skim, Double::sum);
+        revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier;
+        state.market.nudge(b.resourceKey, 1, 0.4);
+      }
       n.gdpAccum += revenue;
 
       if (n.ideology.equals("communism")) {
@@ -194,7 +252,6 @@ public class Economy {
         double stateCut = n.government.equals(Government.OLIGARCHY) ? 0.15 : 0.3;
         b.capital += revenue * (1 - stateCut);
         n.treasury += revenue * stateCut;
-        state.market.nudge(b.resourceKey, 1, 0.4);
       }
 
       b.capital -= 0.4; // upkeep

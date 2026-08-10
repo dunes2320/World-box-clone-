@@ -100,7 +100,7 @@ public class GameHud {
     title.setFontSize(20);
     title.setColor(TEXT);
     topBar.addChild(spacer(30));
-    statLabel = topBar.addChild(new Label("Pop: 0   Nations: 0   Tick: 0"));
+    statLabel = topBar.addChild(new Label("Pop: 0   Nations: 0"));
     statLabel.setColor(MUTED);
     topBar.addChild(spacer(30));
 
@@ -274,7 +274,8 @@ public class GameHud {
     if (now - lastStatRefresh > 0.28) {
       lastStatRefresh = now;
       GameState state = ctx.getState();
-      statLabel.setText("Pop: " + state.humans.size() + "   Nations: " + state.nations.size() + "   Tick: " + state.tick);
+      statLabel.setText("Pop: " + state.humans.size() + "   Nations: " + state.nations.size()
+          + "   " + com.worldbox.util.Calendar.dateString(state.tick));
     }
     // "settings" is deliberately excluded from the periodic auto-refresh -
     // rebuilding the panel every second would recreate the slider mid-drag
@@ -400,6 +401,16 @@ public class GameHud {
     return "militia";
   }
 
+  /** People are paid in their own country's currency, not literal gold -
+   * this is the short label ("Crown", "Franc", ...) pulled off the
+   * nation's currencyName for money amounts. Null (no nation) falls back
+   * to a generic unit. */
+  private String currencyAbbrev(Nation n) {
+    if (n == null || n.currencyName == null) return "g";
+    String[] parts = n.currencyName.split(" ");
+    return parts[parts.length - 1];
+  }
+
   private void renderHuman(GameState state, int id) {
     com.worldbox.sim.Human h = null;
     for (com.worldbox.sim.Human candidate : state.humans) {
@@ -415,13 +426,14 @@ public class GameHud {
     Settlement settlement = state.settlements.get(h.settlementId);
     statRow("Nation", undead ? "(undead)" : nation != null ? nation.displayName() : "wanderer");
     statRow("Home", settlement != null ? settlement.name : "-");
-    statRow("Age", String.valueOf(h.age));
+    statRow("Age", com.worldbox.util.Calendar.ageYears(h.age) + " years");
     if (!undead) {
       statRow("Job", h.job != null ? h.job : "unemployed");
       statRow("Activity", h.state);
       if (h.nationId >= 0) statRow("Routine", h.routine);
-      statRow("Wealth", String.format("%.1fg", h.wealth));
-      if (h.debt > 0.5) statRow("Debt", String.format("%.1fg", h.debt));
+      String cur = currencyAbbrev(nation);
+      statRow("Wealth", String.format("%.1f %s", h.wealth, cur));
+      if (h.debt > 0.5) statRow("Debt", String.format("%.1f %s", h.debt, cur));
 
       Label persHeader = sidePanel.addChild(new Label("PERSONALITY: " + h.personality.archetype()));
       persHeader.setColor(MUTED); persHeader.setFontSize(12);
@@ -453,7 +465,8 @@ public class GameHud {
     for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) pop += s.populationCount; }
     for (var a : state.armies.values()) if (a.nationId == id) military += a.strength;
 
-    statRow("Treasury", (int) Math.floor(n.treasury) + "g");
+    String cur = currencyAbbrev(n);
+    statRow("Treasury", (int) Math.floor(n.treasury) + " " + cur);
     statRow("Tax rate", (int) Math.round(n.taxRate * 100) + "%");
     statRow("Wage policy", (int) Math.round(n.wagePolicy * 100) + "% of sale value");
 
@@ -463,10 +476,10 @@ public class GameHud {
       Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
       collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
       statRow("Pegged to", n.goldStandard ? "gold (peg broken)" : "nothing (was floating fiat)");
-      statRow("In circulation", (int) Math.floor(n.moneySupply) + "g");
+      statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
     } else {
       statRow("Pegged to", n.goldStandard ? "gold" : "nothing (free-floating fiat)");
-      statRow("In circulation", (int) Math.floor(n.moneySupply) + "g");
+      statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
       statRow("Worth vs peg", String.format("%.3fx", n.exchangeRate));
       statRow("Inflation", String.format("%+.1f%%/window", n.inflationRate * 100));
       statRow("Monetary policy", n.monetaryPolicy);
@@ -510,8 +523,8 @@ public class GameHud {
       refreshSidePanel();
     });
 
-    statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + "g");
-    statRow("Bank loans", (int) Math.floor(n.bank.loans) + "g");
+    statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + " " + cur);
+    statRow("Bank loans", (int) Math.floor(n.bank.loans) + " " + cur);
     if (n.bank.justCrashed) {
       Label crashLabel = sidePanel.addChild(new Label("BANK RUN! Reserves wiped out."));
       crashLabel.setColor(DANGER);
@@ -525,7 +538,7 @@ public class GameHud {
       bizCapital += b.capital;
     }
     statRow("Businesses", String.valueOf(bizCount));
-    statRow("Business capital", (int) Math.floor(bizCapital) + "g");
+    statRow("Business capital", (int) Math.floor(bizCapital) + " " + cur);
 
     Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
     viewGraph.addClickCommands(src -> showGraph("nation", id));
@@ -575,7 +588,8 @@ public class GameHud {
     for (Nation n : sorted) {
       int pop = 0;
       for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) pop += s.populationCount; }
-      Button row = sidePanel.addChild(new Button(n.displayName() + "   " + pop + "p  " + (int) Math.floor(n.treasury) + "g"));
+      Button row = sidePanel.addChild(new Button(
+          n.displayName() + "   " + pop + "p  " + (int) Math.floor(n.treasury) + " " + currencyAbbrev(n)));
       row.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
       final int nid = n.id;
       row.addClickCommands(src -> { ctx.setSelection(new GameState.Selection("nation", nid)); refreshSidePanel(); });

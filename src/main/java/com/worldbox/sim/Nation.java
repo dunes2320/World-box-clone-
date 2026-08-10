@@ -108,6 +108,10 @@ public class Nation {
    * decide case by case. Governments auto-pick this; a reckless (loose)
    * pick under a bad, unstable leader is exactly what causes a crash. */
   public String monetaryPolicy = "neutral";
+  /** last-sampled jobless share of this nation's population - cached here
+   * (rather than recomputed every tick) so stability can react to it
+   * without an extra full population scan each tick. */
+  public double unemploymentRate = 0;
   /** revenue generated this sampling window (business output + national
    * trade), reset to 0 every time it's rolled into gdpHistory. */
   public double gdpAccum = 0;
@@ -120,21 +124,33 @@ public class Nation {
 
   private static final String[] CURRENCY_SUFFIX = {"Crown", "Mark", "Pound", "Dinar", "Franc", "Ducat", "Guilder", "Real", "Krona", "Talent"};
 
-  private Nation(int founded, String name) {
+  /** A real consequence of a revolution or economic collapse: the old
+   * currency is scrapped and a new one is issued. Money supply resets to
+   * whatever's left in the treasury (can't un-print what was already
+   * spent into the economy) and the exchange rate starts fresh at par. */
+  public void issueNewCurrency() {
+    this.currencyName = this.name + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
+    this.moneySupply = Math.max(50, this.treasury);
+    this.exchangeRate = 1.0;
+    this.inflationRate = 0;
+    this.printedThisWindow = 0;
+    this.currencyCollapsed = false;
+  }
+
+  private Nation(int founded, String name, Rng rng) {
     this.id = nextId++;
     this.colorIndex = colorCursor++ % Config.NATION_COLORS.length;
     this.color = Config.NATION_COLORS[this.colorIndex];
-    this.name = name;
+    this.name = name != null ? name : randomNationName(rng != null ? rng : new Rng((long) (Math.random() * Long.MAX_VALUE)));
     this.founded = founded;
     this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
     this.government = Government.random();
-    this.currencyName = (name != null ? name : "National") + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
+    this.currencyName = this.name + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
     this.leader = new Leader(this.government);
   }
 
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {
-    Nation nation = new Nation(state.tick, name != null ? name : null);
-    if (name == null) nation.name = "Nation " + nation.id;
+    Nation nation = new Nation(state.tick, name, state.rng);
     nation.capitalSettlementId = capitalSettlement.id;
     nation.settlementIds.add(capitalSettlement.id);
     state.nations.put(nation.id, nation);
