@@ -298,8 +298,11 @@ public class Economy {
         // bank - crediting reserves without debiting treasury was
         // manufacturing money out of nothing every single tick, which is
         // exactly how reserves ballooned into the millions over a long
-        // run while treasury and the money supply stayed sane
-        double deposit = (n.treasury - 100) * 0.01;
+        // run while treasury and the money supply stayed sane. The rate
+        // is also a tenth of what it was: even a real transfer, run every
+        // single tick with no return flow, still drags the whole
+        // treasury surplus into reserves within a few years.
+        double deposit = (n.treasury - 100) * 0.001;
         n.treasury -= deposit;
         bank.reserves += deposit;
       }
@@ -310,6 +313,12 @@ public class Economy {
         n.treasury += need;
       }
       bank.loans *= 1.0006;
+
+      // hard consistency floor: whatever the deposit/withdrawal/interest
+      // math above works out to, the bank can never hold more money than
+      // its nation's own currency supply actually contains - this is the
+      // guarantee the whole banking rework exists for
+      bank.reserves = Math.min(bank.reserves, n.moneySupply);
 
       if (bank.reserves > 0.01 && bank.loans > bank.reserves * LEVERAGE_LIMIT) {
         double crashChance = 0.01 * Math.min(4.0, bank.loans / (bank.reserves * LEVERAGE_LIMIT));

@@ -118,9 +118,24 @@ public class Population {
     h.state = "wander";
   }
 
+  private static final double HOUSE_PRICE = 40;
+
   private static void applyLivingCost(GameState state, Human h) {
     h.wealth -= 0.05;
     resolveFinances(state, h);
+    if (!h.hasHouse) maybeBuyHouse(state.nations.get(h.nationId), h);
+  }
+
+  /** Losing a house to repossession shouldn't be a life sentence - once a
+   * defaulted citizen is debt-free again and has saved up a real cushion
+   * on top of the price, they buy back in. Without this, every default
+   * ever taken just accumulates forever and homelessness only ever
+   * ratchets upward across a long game. */
+  private static void maybeBuyHouse(Nation nation, Human h) {
+    if (h.hasHouse || h.debt > 0 || h.wealth < HOUSE_PRICE * 1.5) return;
+    h.wealth -= HOUSE_PRICE;
+    h.hasHouse = true;
+    if (nation != null) nation.bank.reserves += HOUSE_PRICE;
   }
 
   /** A citizen's wealth can't just sit arbitrarily negative forever - if
