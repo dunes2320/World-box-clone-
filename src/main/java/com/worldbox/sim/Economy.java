@@ -294,7 +294,13 @@ public class Economy {
       bank.justCrashed = false;
 
       if (n.treasury > 100) {
+        // this has to actually leave the treasury when it lands in the
+        // bank - crediting reserves without debiting treasury was
+        // manufacturing money out of nothing every single tick, which is
+        // exactly how reserves ballooned into the millions over a long
+        // run while treasury and the money supply stayed sane
         double deposit = (n.treasury - 100) * 0.01;
+        n.treasury -= deposit;
         bank.reserves += deposit;
       }
       if (n.treasury < 0 && bank.reserves > 5) {

@@ -44,7 +44,9 @@ public final class Config {
 
   // simulation
   public static final int TICK_MS = 220;
-  public static final int MAX_HUMANS = 420;
+  // was 420 - too tight a ceiling to see real multi-year growth play out;
+  // a 10-15 year run hit this cap by year 8 and sat flat for the rest
+  public static final int MAX_HUMANS = 600;
   public static final int MAX_AGE = 3200;
   public static final int MATURE_AGE = 70;
 

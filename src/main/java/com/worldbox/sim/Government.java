@@ -209,7 +209,12 @@ public class Government {
       if (s == null) continue;
       List<Human> residents = new ArrayList<>();
       for (Human h : state.humans) if (h.settlementId == s.id) residents.add(h);
+      // rounding down a 5-15% loss hits zero for any settlement under ~7
+      // people, so a tiny failed nation could revolt forever and never
+      // actually lose anyone - a real collapse has to draw blood even
+      // when there are only a couple of citizens left to lose
       int losses = (int) (residents.size() * (0.05 + Math.random() * 0.1));
+      if (losses == 0 && !residents.isEmpty()) losses = 1;
       for (int i = 0; i < losses && !residents.isEmpty(); i++) {
         residents.remove((int) (Math.random() * residents.size())).dead = true;
       }
