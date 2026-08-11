@@ -337,7 +337,27 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testModeExitAt = duration;
       speed = 4;
       boolean skipDisasters = "true".equals(System.getProperty("worldbox.skipScript"));
+      testScript.put(0.3, () -> {
+        // find a shoreline cell (sand next to water) for a close-up debug shot
+        outer:
+        for (int y = 0; y < state.grid.rows; y++) {
+          for (int x = 0; x < state.grid.cols; x++) {
+            int i = state.grid.idx(x, y);
+            if (state.grid.terrain[i] != Config.SAND) continue;
+            boolean nearWater = (x + 1 < state.grid.cols && state.grid.terrain[state.grid.idx(x + 1, y)] == Config.WATER)
+                || (y + 1 < state.grid.rows && state.grid.terrain[state.grid.idx(x, y + 1)] == Config.WATER);
+            if (nearWater) {
+              float h = state.grid.height[i];
+              camTarget.set(x + 0.5f, h, y + 0.5f);
+              camDistance = camDistanceTarget = 10f;
+              camPitch = 1.1f;
+              break outer;
+            }
+          }
+        }
+      });
       testScript.put(0.5, () -> { tool = "dig"; brushSize = 4; });
+      testScript.put(0.8, () -> screenshotState.takeScreenshot());
       testScript.put(1.0, () -> screenshotState.takeScreenshot());
       testScript.put(1.2, () -> tool = "select");
       testScript.put(2.0, () -> {
@@ -476,10 +496,43 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     while (simTime - lastTickTime > interval && iterations < 8) {
       Simulation.tick(state);
       if (state.tick % 20 == 0) entityRenderer.rebuildStatics(state);
+      if (testMode && state.tick % com.worldbox.util.Calendar.DAYS_PER_YEAR == 0) logEconomicHealth();
       lastTickTime += interval;
       iterations++;
     }
     if (iterations >= 8) lastTickTime = simTime;
+  }
+
+  /** Yearly economic snapshot, only printed in test mode - lets a long
+   * soak-test run be checked for realistic growth/collapse after the fact
+   * from console output instead of only the tiny final-tick summary. */
+  private void logEconomicHealth() {
+    double years = state.tick / (double) com.worldbox.util.Calendar.DAYS_PER_YEAR;
+    int homeless = 0;
+    double totalWealth = 0, totalDebt = 0;
+    for (com.worldbox.sim.Human h : state.humans) {
+      if (!h.hasHouse) homeless++;
+      totalWealth += h.wealth;
+      totalDebt += h.debt;
+    }
+    int n = Math.max(1, state.humans.size());
+    System.out.println(String.format(
+        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f",
+        years, state.tick, state.humans.size(), state.nations.size(), Nation.totalFounded(),
+        state.settlements.size(), homeless, totalWealth / n, totalDebt / n));
+    for (Nation nation : state.nations.values()) {
+      if (!nation.alive) continue;
+      int pop = 0;
+      for (int sid : nation.settlementIds) {
+        com.worldbox.sim.Settlement s = state.settlements.get(sid);
+        if (s != null) pop += s.populationCount;
+      }
+      System.out.println(String.format(
+          "  NATION %s pop=%d gov=%s treasury=%.0f bankReserves=%.0f bankLoans=%.0f moneySupply=%.0f gdp=%.0f unemployment=%.2f inflation=%.3f exchangeRate=%.2f collapsed=%b stability=%.0f",
+          nation.name, pop, nation.government, nation.treasury, nation.bank.reserves, nation.bank.loans,
+          nation.moneySupply, nation.gdpHistory.isEmpty() ? 0 : nation.gdpHistory.peekLast(), nation.unemploymentRate,
+          nation.inflationRate, nation.exchangeRate, nation.currencyCollapsed, nation.stability));
+    }
   }
 
   private void updateBrushIndicator() {

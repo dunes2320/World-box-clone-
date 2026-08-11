@@ -30,11 +30,23 @@ public class VoxelChunkRenderer {
     BLOCK_COLOR.put(VoxelWorld.SAND, new ColorRGBA(0.851f, 0.773f, 0.541f, 1f));
     BLOCK_COLOR.put(VoxelWorld.STONE, new ColorRGBA(0.545f, 0.561f, 0.588f, 1f));
   }
-  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.130f, 0.380f, 0.620f, 0.80f);
-  private static final ColorRGBA FOAM_COLOR = new ColorRGBA(0.72f, 0.85f, 0.88f, 0.85f);
+  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.098f, 0.310f, 0.560f, 0.92f);
+  // sky is a pale blue (~0.56, 0.78, 0.91) - the old foam color was close
+  // enough to it that a shoreline blended almost invisibly into open sky,
+  // which read as a gap where the water should visibly meet the sand.
+  // This one is bright, opaque, and clearly whiter than the sky.
+  private static final ColorRGBA FOAM_COLOR = new ColorRGBA(0.92f, 0.97f, 0.98f, 0.97f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.62f, 0.48f, 0.26f, 1f);
   private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.68f, 0.63f, 0.53f, 1f);
+  // purely a rendering-layer touch so the mountain spine reads as a real
+  // peak instead of the same flat grey stone all the way up - no new block
+  // type or terrain byte involved, just a height-based tint on stone tops.
+  private static final ColorRGBA SNOW_COLOR = new ColorRGBA(0.95f, 0.96f, 0.98f, 1f);
+  // measured actual terrain heights only reach ~7-10 above sea level at
+  // their tallest, so the snow line has to sit well below that or it
+  // would never render on any peak
+  private static final int SNOW_LINE = VoxelWorld.Y_OFFSET + 6;
 
   // Gentler now that real dynamic sun lighting also shades faces by
   // direction - this only needs to add a light baked-AO hint underneath.
@@ -216,6 +228,10 @@ public class VoxelChunkRenderer {
   private void addVisibleFaces(MeshBuilder mb, int x, int y, int z, byte type, ColorRGBA color) {
     if (!faceHidden(world.get(x, y + 1, z), type)) {
       ColorRGBA c = type == VoxelWorld.WATER ? color : topColor(x, z, color);
+      if (type == VoxelWorld.STONE && y >= SNOW_LINE) {
+        float t = Math.min(1f, (y - SNOW_LINE) / 4f);
+        c = c.clone().interpolateLocal(SNOW_COLOR, 0.4f + t * 0.5f);
+      }
       mb.face(x, y, z, Face.TOP, c, SHADE_TOP);
     }
     if (!faceHidden(world.get(x, y - 1, z), type)) mb.face(x, y, z, Face.BOTTOM, color, SHADE_BOTTOM);

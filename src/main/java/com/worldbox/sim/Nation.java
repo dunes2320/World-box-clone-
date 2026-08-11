@@ -14,6 +14,11 @@ public class Nation {
   private static int nextId = 1;
   private static int colorCursor = 0;
 
+  /** Total nations ever founded this game, alive or extinct - lets debug
+   * tooling report an extinction rate (founded vs. currently alive)
+   * instead of only ever seeing whoever's still standing. */
+  public static int totalFounded() { return nextId - 1; }
+
   private static final String[] NAME_PREFIX = {
       "Val", "Kor", "Thal", "Bran", "Els", "Dun", "Mor", "Ash", "Vor", "Cal", "Ost", "Fen",
       "Ber", "Gal", "Nor", "Ryn", "Sel", "Tor", "Wex", "Zan", "Had", "Lior", "Mir", "Ked",

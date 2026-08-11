@@ -434,6 +434,7 @@ public class GameHud {
       String cur = currencyAbbrev(nation);
       statRow("Wealth", String.format("%.1f %s", h.wealth, cur));
       if (h.debt > 0.5) statRow("Debt", String.format("%.1f %s", h.debt, cur));
+      statRow("Housing", h.hasHouse ? "Owns a house" : "Repossessed - homeless");
 
       Label persHeader = sidePanel.addChild(new Label("PERSONALITY: " + h.personality.archetype()));
       persHeader.setColor(MUTED); persHeader.setFontSize(12);

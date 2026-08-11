@@ -118,13 +118,48 @@ public class Population {
     h.state = "wander";
   }
 
-  private static void applyLivingCost(Human h) {
+  private static void applyLivingCost(GameState state, Human h) {
     h.wealth -= 0.05;
-    if (h.wealth < -5 && h.debt <= 0) {
+    resolveFinances(state, h);
+  }
+
+  /** A citizen's wealth can't just sit arbitrarily negative forever - if
+   * they dip below -5 with no existing debt, they take out a modest loan
+   * to cover it, same as before. But if they're ALREADY in debt and still
+   * can't make ends meet, that's a real default: the bank can't get its
+   * money back from someone with nothing, so it repossesses their house
+   * and sells it, recovering only about half the original loan's value -
+   * the rest is a straight loss. Either way nobody's wealth just sits at
+   * -400 forever with no consequence. */
+  private static void resolveFinances(GameState state, Human h) {
+    if (h.wealth >= -5) return;
+    Nation nation = state.nations.get(h.nationId);
+    if (h.debt <= 0) {
+      // the loan is real borrowed money, not conjured out of nowhere - it
+      // comes out of the nation's own bank, same pool business loans draw
+      // from, so total money in the system stays accountable
       double loan = 20;
       h.debt += loan;
       h.wealth += loan;
+      if (nation != null) {
+        nation.bank.reserves = Math.max(0, nation.bank.reserves - loan);
+        nation.bank.loans += loan;
+      }
+    } else {
+      defaultOnLoan(nation, h);
     }
+  }
+
+  private static void defaultOnLoan(Nation nation, Human h) {
+    if (nation != null) {
+      nation.bank.loans = Math.max(0, nation.bank.loans - h.debt);
+      if (h.hasHouse) {
+        nation.bank.reserves += h.debt * 0.5;
+        h.hasHouse = false;
+      }
+    }
+    h.debt = 0;
+    h.wealth = 0;
   }
 
   /** A jobless citizen still gets a modest government benefit - enough to
@@ -144,8 +179,8 @@ public class Population {
   // at the going market price, and whoever employs that worker - a private
   // business if one exists for that resource, otherwise the public sector
   // (the nation treasury) - pays them a cut as a wage. Wages first clear any
-  // outstanding home loan; if a worker's savings go negative, they take out
-  // a new one automatically to get by.
+  // outstanding home loan; see resolveFinances for what happens if their
+  // savings go negative anyway.
   private static void payWage(GameState state, Settlement settlement, String resourceKey, double amount, Human h) {
     Nation nation = state.nations.get(settlement.nationId);
     double value = amount * state.market.prices.getOrDefault(resourceKey, 1.0);
@@ -165,13 +200,10 @@ public class Population {
       double repay = Math.min(h.debt, wage);
       h.debt -= repay;
       wage -= repay;
+      if (nation != null) nation.bank.loans = Math.max(0, nation.bank.loans - repay);
     }
     h.wealth += wage;
-    if (h.wealth < -5 && h.debt <= 0) {
-      double loan = 20;
-      h.debt += loan;
-      h.wealth += loan;
-    }
+    resolveFinances(state, h);
   }
 
   private static double moveToward(WorldGrid grid, Human h, double speed) {
@@ -260,7 +292,7 @@ public class Population {
 
       // no nation means no money and no debt - a wanderer has nothing to
       // spend and nothing to owe until they actually join or found one
-      if (h.nationId >= 0) applyLivingCost(h);
+      if (h.nationId >= 0) applyLivingCost(state, h);
 
       int ci = grid.idx(clampCoord((int) Math.floor(h.x), grid.cols), clampCoord((int) Math.floor(h.z), grid.rows));
       if (grid.burning[ci] && Math.random() < 0.35) continue; // burned to death

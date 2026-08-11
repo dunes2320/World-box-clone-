@@ -67,6 +67,14 @@ public class Government {
         trim(n.gdpHistory);
         worldGdp += n.gdpAccum;
 
+        // money in circulation should track how big the real economy
+        // actually is, not just sit frozen at its founding value while
+        // treasury/bank/business figures grow around it - this is
+        // separate from (and doesn't count toward) printedThisWindow, so
+        // it never shows up as inflation; only reckless deficit printing
+        // does that
+        n.moneySupply += Math.max(0, n.gdpAccum) * 0.15;
+
         updateInflationAndExchangeRate(n);
         n.gdpAccum = 0;
 
