@@ -453,12 +453,15 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(duration - 3.7, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 2.0, () -> {
         if (!state.settlements.isEmpty()) {
-          var s = state.settlements.values().iterator().next();
-          float h = state.grid.height[state.grid.idx(s.x, s.z)];
-          camTarget.set(s.x + 0.5f, h, s.z + 0.5f);
+          com.worldbox.sim.Settlement biggest = null;
+          for (var s : state.settlements.values()) {
+            if (biggest == null || s.populationCount > biggest.populationCount) biggest = s;
+          }
+          float h = state.grid.height[state.grid.idx(biggest.x, biggest.z)];
+          camTarget.set(biggest.x + 0.5f, h, biggest.z + 0.5f);
         }
-        camDistance = camDistanceTarget = 18f;
-        camPitch = 0.6f;
+        camDistance = camDistanceTarget = 14f;
+        camPitch = 0.55f;
       });
       testScript.put(duration - 1.7, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 1.6, () -> {
