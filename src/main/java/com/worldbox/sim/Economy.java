@@ -56,13 +56,14 @@ public class Economy {
 
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
+      updateEconCycle(nation);
 
       for (String key : GlobalMarket.keys()) {
         Settlement seller = biggestStock(state, nation, key);
         if (seller != null && seller.stock.get(key) > Config.SETTLEMENT_BUFFER * 1.6) {
           double sellAmt = (seller.stock.get(key) - Config.SETTLEMENT_BUFFER) * 0.08;
           seller.stock.merge(key, -sellAmt, Double::sum);
-          double saleValue = sellAmt * market.prices.get(key);
+          double saleValue = sellAmt * market.prices.get(key) * nation.econCycle;
           // a market business handles trade better than an ad hoc sale -
           // this is its whole reason to exist once a settlement has one
           if (hasMarketBusiness(state, seller.id)) saleValue *= 1.25;
@@ -152,6 +153,20 @@ public class Economy {
 
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
 
+  /** A mature, saturated economy (population capped, businesses maxed
+   * out per settlement) has nothing left to make its GDP move once
+   * everything's built - it just sits dead flat at one equilibrium value
+   * forever except for the rare price crash. Real economies keep having
+   * genuine multi-year expansions and recessions even after "growing up".
+   * This is a slow mean-reverting random walk - small daily nudges that
+   * only really show up as a trend over months, not the instant noise a
+   * plain random multiplier would produce. */
+  private static void updateEconCycle(Nation n) {
+    n.econCycle += (Math.random() - 0.5) * 0.012;
+    n.econCycle += (1.0 - n.econCycle) * 0.003;
+    n.econCycle = clamp(n.econCycle, 0.55, 1.6);
+  }
+
   /** Gold never respawns once mined - this is what makes "gold can't go up
    * if there isn't any more" literally true instead of just a vibe. */
   private static void sampleGoldRemaining(GameState state) {
@@ -239,7 +254,7 @@ public class Economy {
         double surplus = Math.max(0, s.stock.getOrDefault(b.resourceKey, 0.0) - Config.SETTLEMENT_BUFFER);
         double skim = surplus * 0.15;
         s.stock.merge(b.resourceKey, -skim, Double::sum);
-        revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier;
+        revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier * n.econCycle;
         state.market.nudge(b.resourceKey, 1, 0.4);
       }
       n.gdpAccum += revenue;

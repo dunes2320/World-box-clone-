@@ -409,7 +409,14 @@ public class Population {
     for (int[] spot : pendingFoundings) Nation.foundNewNation(state, spot[0], spot[1], null);
   }
 
-  private static final double JOIN_RADIUS = 9;
+  // this used to be a flat absolute distance, tuned for the old 128x128
+  // map - on the bigger map it stayed just as easy to end up "far enough"
+  // from the nearest settlement to qualify as isolated, so wanderers
+  // founded brand new nations far more often just because there was more
+  // empty space to wander into, not because the world was actually more
+  // sparsely settled. Scaling it with map size keeps founding difficulty
+  // consistent regardless of how big the map is.
+  private static final double JOIN_RADIUS = 9.0 * Config.COLS / 128.0;
   private static final int ISOLATION_THRESHOLD = 140;
 
   /** Nation-less humans (spawned as wanderers, or the sole survivors of a
@@ -436,6 +443,7 @@ public class Population {
         h.nationId = nearest.nationId;
         h.settlementId = nearest.id;
         h.state = "wander";
+        h.hasHouse = Settlement.hasHouseRoom(state, nearest);
       }
       return;
     }

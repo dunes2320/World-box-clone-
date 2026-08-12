@@ -31,6 +31,12 @@ public class WorldGrid {
    * last flushed them. */
   public final Set<Integer> dirty = new LinkedHashSet<>();
 
+  /** Cell indices currently on fire, maintained incrementally as cells
+   * ignite/extinguish - lets fire spread be driven by however many cells
+   * are actually burning instead of a full cols*rows scan every tick,
+   * which mattered a lot once the map got a lot bigger. */
+  public final Set<Integer> burningCells = new LinkedHashSet<>();
+
   public WorldGrid() {
     java.util.Arrays.fill(terrain, Config.GRASS);
     java.util.Arrays.fill(ownerNation, -1);

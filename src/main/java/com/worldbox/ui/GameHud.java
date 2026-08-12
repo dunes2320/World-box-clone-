@@ -3,6 +3,7 @@ package com.worldbox.ui;
 import com.jme3.asset.AssetManager;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
+import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
 import com.jme3.renderer.queue.RenderQueue;
 import com.jme3.scene.Geometry;
@@ -59,6 +60,37 @@ public class GameHud {
 
   private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph" | "settings"
   private double lastStatRefresh, lastPanelRefresh;
+
+  // Long lists (dozens of nations, a nation's relations with everyone
+  // else) have no scrollable widget available in this stripped-down Lemur
+  // build, so they're paginated instead - bounded page size keeps the
+  // panel from spilling off the bottom of the screen with no way back.
+  private static final int LIST_PAGE_SIZE = 10;
+  private int listPage = 0;
+  private int listPageKey = Integer.MIN_VALUE;
+
+  private void resetListPage(int key) {
+    if (key != listPageKey) { listPageKey = key; listPage = 0; }
+  }
+
+  /** Adds Prev/Page/Next controls beneath a paginated section. Returns the
+   * [start, end) row range the caller should actually render. */
+  private int[] pager(int totalItems) {
+    int pages = Math.max(1, (totalItems + LIST_PAGE_SIZE - 1) / LIST_PAGE_SIZE);
+    listPage = Math.max(0, Math.min(listPage, pages - 1));
+    int start = listPage * LIST_PAGE_SIZE;
+    int end = Math.min(totalItems, start + LIST_PAGE_SIZE);
+    if (pages > 1) {
+      Container nav = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Button prev = nav.addChild(new Button("< Prev"));
+      prev.addClickCommands(src -> { listPage = Math.max(0, listPage - 1); refreshSidePanel(); });
+      Label pageLbl = nav.addChild(new Label((listPage + 1) + " / " + pages));
+      pageLbl.setColor(MUTED);
+      Button next = nav.addChild(new Button("Next >"));
+      next.addClickCommands(src -> { listPage = Math.min(pages - 1, listPage + 1); refreshSidePanel(); });
+    }
+    return new int[]{start, end};
+  }
 
   // Economy graph: raw jME quads, positioned by hand since Lemur's grid
   // layout has no clean way to anchor bars of varying height to a shared
@@ -482,7 +514,7 @@ public class GameHud {
       statRow("Pegged to", n.goldStandard ? "gold" : "nothing (free-floating fiat)");
       statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
       statRow("Worth vs peg", String.format("%.3fx", n.exchangeRate));
-      statRow("Inflation", String.format("%+.1f%%/window", n.inflationRate * 100));
+      statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
       statRow("Monetary policy", n.monetaryPolicy);
     }
 
@@ -516,6 +548,12 @@ public class GameHud {
 
     Label econHeader = sidePanel.addChild(new Label("ECONOMY"));
     econHeader.setColor(MUTED); econHeader.setFontSize(12);
+    Container cycleRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    Label cycleLbl = cycleRow.addChild(new Label("Business cycle"));
+    cycleLbl.setColor(MUTED);
+    cycleLbl.setPreferredSize(new Vector3f(160, 20, 0));
+    Label cycleVal = cycleRow.addChild(new Label(econCycleLabel(n.econCycle)));
+    cycleVal.setColor(n.econCycle > 1.08 ? GOOD : n.econCycle < 0.92 ? DANGER : TEXT);
     statRow("Ideology", n.ideology);
     Button toggleIdeology = sidePanel.addChild(new Button(
         n.ideology.equals("capitalism") ? "Switch to Communism" : "Switch to Capitalism"));
@@ -546,8 +584,11 @@ public class GameHud {
 
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
     relHeader.setColor(MUTED); relHeader.setFontSize(12);
-    for (Nation other : state.nations.values()) {
-      if (other.id == id) continue;
+    resetListPage(id);
+    java.util.List<Nation> others = new java.util.ArrayList<>();
+    for (Nation other : state.nations.values()) if (other.id != id) others.add(other);
+    int[] range = pager(others.size());
+    for (Nation other : others.subList(range[0], range[1])) {
       String status = state.diplomacy.getStatus(id, other.id);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label name = row.addChild(new Label(other.displayName() + " (" + status + ")"));
@@ -584,9 +625,11 @@ public class GameHud {
       l.setColor(MUTED);
       return;
     }
+    resetListPage(-2); // fixed key: there's only one nations list, unlike per-nation panels
     java.util.List<Nation> sorted = new java.util.ArrayList<>(state.nations.values());
     sorted.sort((a, b) -> Double.compare(b.treasury, a.treasury));
-    for (Nation n : sorted) {
+    int[] range = pager(sorted.size());
+    for (Nation n : sorted.subList(range[0], range[1])) {
       int pop = 0;
       for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) pop += s.populationCount; }
       Button row = sidePanel.addChild(new Button(
@@ -677,13 +720,21 @@ public class GameHud {
 
     Label title = sidePanel.addChild(new Label((isWorld ? "World Economy" : n.displayName()) + " - " + metricPanelTitle(graphMetric)));
     title.setFontSize(17);
-    Button back = sidePanel.addChild(new Button("Back"));
+    Container navRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    Button back = navRow.addChild(new Button("Back"));
     back.addClickCommands(src -> {
       if (isWorld) {
         sidePanelMode = "market";
       } else {
         ctx.setSelection(new GameState.Selection("nation", graphNationId));
       }
+      graphView = null;
+      refreshSidePanel();
+    });
+    Button close = navRow.addChild(new Button("Close"));
+    close.addClickCommands(src -> {
+      sidePanelMode = null;
+      ctx.setSelection(null);
       graphView = null;
       refreshSidePanel();
     });
@@ -707,7 +758,11 @@ public class GameHud {
       double changePct = Math.abs(prev) > 0.001 ? (change / prev) * 100 : 0;
       double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
       for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
-      statRow(metricTabLabel(graphMetric), formatMetric(graphMetric, latest));
+      if ("inflation".equals(graphMetric) && !isWorld) {
+        statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
+      } else {
+        statRow(metricTabLabel(graphMetric), formatMetric(graphMetric, latest));
+      }
       Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label changeLbl = changeRow.addChild(new Label("Change"));
       changeLbl.setColor(MUTED);
@@ -728,16 +783,44 @@ public class GameHud {
     chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + 16, 0));
   }
 
+  /** inflationRate is a smoothed per-sample-window figure (samples every
+   * 20 ticks), which read as a near-meaningless "+0.1%/window" number to
+   * a player. Averaging the last year's worth of windows and annualizing
+   * that turns it into the plain "inflation over the last year" percentage
+   * everyone actually expects from an "Inflation" readout. */
+  private double annualInflation(Nation n) {
+    int windowsPerYear = com.worldbox.util.Calendar.DAYS_PER_YEAR / 20;
+    java.util.ArrayDeque<Double> hist = n.inflationHistory;
+    if (hist.isEmpty()) return n.inflationRate * windowsPerYear;
+    Double[] arr = hist.toArray(new Double[0]);
+    int take = Math.min(windowsPerYear, arr.length);
+    double sum = 0;
+    for (int i = arr.length - take; i < arr.length; i++) sum += arr[i];
+    return (sum / take) * windowsPerYear;
+  }
+
+  private String econCycleLabel(double cycle) {
+    if (cycle > 1.25) return "Booming";
+    if (cycle > 1.08) return "Growing";
+    if (cycle > 0.92) return "Stable";
+    if (cycle > 0.75) return "Slowing";
+    return "Recession";
+  }
+
   private double sumLivingTreasury(GameState state) {
     double total = 0;
     for (Nation n : state.nations.values()) if (n.alive) total += n.treasury;
     return total;
   }
 
-  /** Rebuilds the raw jME bar-chart geometry for the currently selected
-   * graph, positioned by hand beneath the panel's text content. Bars are
-   * colored green/red against the previous sample, like an up/down day on
-   * a stock chart, rather than by absolute magnitude. */
+  /** Rebuilds the raw jME line-chart geometry for the currently selected
+   * graph, positioned by hand beneath the panel's text content. The whole
+   * retained history is shown (not just a recent slice) and always
+   * rescaled to that data's own min/max, so a long-run plateau reads as a
+   * flat line at whatever height it actually sits at instead of looking
+   * like the chart itself has a hard ceiling. Segments are colored
+   * green/red against the previous sample, like an up/down day on a stock
+   * chart, rather than by absolute magnitude. */
   private void layoutChart() {
     for (Geometry g : chartBars) g.removeFromParent();
     chartBars.clear();
@@ -747,32 +830,34 @@ public class GameHud {
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) return;
     java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
-    if (hist == null || hist.isEmpty()) return;
+    if (hist == null || hist.size() < 2) return;
 
     java.util.List<Double> values = new java.util.ArrayList<>(hist);
-    if (values.size() > 60) values = values.subList(values.size() - 60, values.size());
     double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
     for (double v : values) { min = Math.min(min, v); max = Math.max(max, v); }
     double span = Math.max(1.0, max - min);
 
     float originX = sidePanel.getLocalTranslation().x + 16;
     float baselineY = sidePanel.getLocalTranslation().y - CHART_TOP_OFFSET - CHART_HEIGHT;
-    float barW = CHART_WIDTH / values.size();
+    float stepX = CHART_WIDTH / (values.size() - 1);
+    float lineThickness = 2.5f;
 
-    for (int i = 0; i < values.size(); i++) {
-      double v = values.get(i);
-      double prev = i > 0 ? values.get(i - 1) : v;
-      float t = (float) ((v - min) / span);
-      float h = Math.max(2f, t * CHART_HEIGHT);
-      Quad quad = new Quad(Math.max(1f, barW - 1.5f), h);
-      Geometry bar = new Geometry("stockBar" + i, quad);
+    for (int i = 1; i < values.size(); i++) {
+      double v0 = values.get(i - 1), v1 = values.get(i);
+      float x0 = originX + (i - 1) * stepX, y0 = baselineY + (float) ((v0 - min) / span) * CHART_HEIGHT;
+      float x1 = originX + i * stepX, y1 = baselineY + (float) ((v1 - min) / span) * CHART_HEIGHT;
+      float dx = x1 - x0, dy = y1 - y0;
+      float len = Math.max(0.01f, (float) Math.sqrt(dx * dx + dy * dy));
+      Quad quad = new Quad(len, lineThickness);
+      Geometry segment = new Geometry("stockLine" + i, quad);
       Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-      mat.setColor("Color", v >= prev ? GOOD : DANGER);
-      bar.setMaterial(mat);
-      bar.setQueueBucket(RenderQueue.Bucket.Gui);
-      bar.setLocalTranslation(originX + i * barW, baselineY, 2);
-      chartNode.attachChild(bar);
-      chartBars.add(bar);
+      mat.setColor("Color", v1 >= v0 ? GOOD : DANGER);
+      segment.setMaterial(mat);
+      segment.setQueueBucket(RenderQueue.Bucket.Gui);
+      segment.setLocalTranslation(x0, y0 - lineThickness / 2f, 2);
+      segment.rotate(0, 0, FastMath.atan2(dy, dx));
+      chartNode.attachChild(segment);
+      chartBars.add(segment);
     }
 
     Quad baseline = new Quad(CHART_WIDTH, 2f);

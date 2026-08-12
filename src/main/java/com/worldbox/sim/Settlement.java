@@ -72,11 +72,27 @@ public class Settlement {
       double ang = (i / (double) startPop) * Math.PI * 2;
       double hx = x + 0.5 + Math.cos(ang) * 1.5;
       double hz = z + 0.5 + Math.sin(ang) * 1.5;
-      state.humans.add(Population.createHuman(hx, hz, nationId, settlement.id));
+      Human founder = Population.createHuman(hx, hz, nationId, settlement.id);
+      // a fresh settlement's starting housingStock (5 houses, 20 capacity)
+      // comfortably covers its 5 founders - they move into real houses on
+      // day one instead of just existing without one
+      founder.hasHouse = i < settlement.housingStock * PEOPLE_PER_HOUSE;
+      state.humans.add(founder);
     }
 
     claimTerritory(state, settlement);
     return settlement;
+  }
+
+  /** Whether this settlement currently has an unoccupied house to give a
+   * new or joining resident - counts actual housed residents rather than
+   * just populationCount, since a settlement can carry homeless citizens
+   * who are still waiting on one. */
+  public static boolean hasHouseRoom(GameState state, Settlement settlement) {
+    double capacity = settlement.housingStock * PEOPLE_PER_HOUSE;
+    int housed = 0;
+    for (Human h : state.humans) if (h.settlementId == settlement.id && h.hasHouse) housed++;
+    return housed < capacity;
   }
 
   public static void claimTerritory(GameState state, Settlement settlement) {
@@ -187,6 +203,11 @@ public class Settlement {
         settlement.stock.merge("wood", -HOUSE_WOOD_COST, Double::sum);
         settlement.housingStock += 1;
         houseCapacity = settlement.housingStock * PEOPLE_PER_HOUSE;
+        // the house that was just built goes to whoever in this
+        // settlement still doesn't have one
+        for (Human h : state.humans) {
+          if (h.settlementId == settlement.id && !h.hasHouse) { h.hasHouse = true; break; }
+        }
       }
 
       if (settlement.stock.get("food") > Config.SETTLEMENT_BUFFER
@@ -198,10 +219,14 @@ public class Settlement {
           settlement.growthAccum -= 1;
           settlement.stock.merge("food", -18.0, Double::sum);
           double ang = Math.random() * Math.PI * 2;
-          state.humans.add(Population.createHuman(
+          // a birth only happens when populationCount < houseCapacity
+          // above, so there's guaranteed to be room for this one
+          Human baby = Population.createHuman(
               settlement.x + 0.5 + Math.cos(ang) * 1.5,
               settlement.z + 0.5 + Math.sin(ang) * 1.5,
-              settlement.nationId, settlement.id));
+              settlement.nationId, settlement.id);
+          baby.hasHouse = true;
+          state.humans.add(baby);
         }
       }
     }
@@ -209,8 +234,13 @@ public class Settlement {
 
   /** A settlement that just lost its last citizen leaves its nation and
    * releases its territory/farmland back to no-man's-land; its structures
-   * stay physically standing (settlementAt is left alone) but the ruin no
-   * longer contributes population, stock, or territory to the world. */
+   * stay physically standing (settlementAt is left alone, permanently
+   * blocking a new settlement from founding on the exact same spot) but
+   * the record itself is removed from state.settlements below - nothing
+   * else ever looks a settlement up by ID expecting a ruin to still be
+   * there, and leaving thousands of dead entries around over a long game
+   * both inflated every "settlements" count in the UI/logs and leaked
+   * memory that never gets reclaimed. */
   private static void abandon(GameState state, Settlement settlement) {
     settlement.abandoned = true;
     // zero out (rather than clear) so the many call sites that assume the
@@ -237,6 +267,8 @@ public class Settlement {
     List<Integer> deadBusinesses = new ArrayList<>();
     for (Business b : state.businesses.values()) if (b.settlementId == settlement.id) deadBusinesses.add(b.id);
     for (int id : deadBusinesses) state.businesses.remove(id);
+
+    state.settlements.remove(settlement.id);
   }
 
   /** Full re-claim pass across every settlement, nearest-wins. Cheap enough

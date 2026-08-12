@@ -55,13 +55,25 @@ public class EntityRenderer {
 
   private static final int TREE_CAP_SAMPLE = 2600;
   private static final int DEPOSIT_CAP_SAMPLE = 900;
-  private static final int HOUSE_CAP_SAMPLE = 700;
+  // a global cap shared across every settlement on the map - at only 700
+  // it ran out after the first couple dozen settlements in iteration
+  // order, so most settlements (especially the small ones, which were
+  // also excluded outright below) rendered as a single bare marker with
+  // no houses around it at all, reading as "a circle with a square in
+  // it" instead of a village
+  private static final int HOUSE_CAP_SAMPLE = 6000;
   private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
   private static final ColorRGBA RUIN_COLOR = new ColorRGBA(0.32f, 0.3f, 0.28f, 1f);
-  private static final int SETTLEMENT_CAP = 48;
+  // these used to be tuned for a small 128x128 map with a handful of
+  // nations - a long game on the bigger map can easily grow past several
+  // hundred settlements/businesses, and anything beyond the cap used to
+  // just silently never get a rendering slot at all (a settlement or
+  // business that's fully real in the simulation but invisible in the
+  // world - reads exactly like "cities vanishing")
+  private static final int SETTLEMENT_CAP = 400;
   private static final int ARMY_CAP = 96;
-  private static final int BUSINESS_CAP = 96;
-  private static final int BANK_CAP = 32;
+  private static final int BUSINESS_CAP = 600;
+  private static final int BANK_CAP = 80;
   private static final int FIRE_CAP = 48;
   private static final int SPARKLE_CAP = 28;
   private static final ColorRGBA FLAME_A = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
@@ -75,6 +87,7 @@ public class EntityRenderer {
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, humanTemplate, armyTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
+  private final Mesh farmTemplate, marketTemplate, statueTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, housesGeom;
@@ -84,6 +97,7 @@ public class EntityRenderer {
   private final Node humansNode = new Node("humans");
   private final Node businessesNode = new Node("businesses");
   private final Node banksNode = new Node("banks");
+  private final Node statuesNode = new Node("statues");
   private final Node flagsNode = new Node("flags");
   private final Node firesNode = new Node("fires");
   private final Node smokeNode = new Node("smoke");
@@ -93,6 +107,7 @@ public class EntityRenderer {
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
+  private final Geometry[] statuePool = new Geometry[BANK_CAP];
   private final Geometry[] flagPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] firePool = new Geometry[FIRE_CAP];
   private final Geometry[] smokePool = new Geometry[FIRE_CAP];
@@ -104,7 +119,8 @@ public class EntityRenderer {
   private final List<Integer> burningCache = new ArrayList<>();
   private final List<Integer> goldCache = new ArrayList<>();
 
-  private final Geometry monsterGeom;
+  private final Node monsterGeom;
+  private double monsterLastX = Double.NaN, monsterLastZ, monsterYaw = 0;
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
   private final Geometry selectionRing;
   private final Geometry brushRing;
@@ -145,6 +161,21 @@ public class EntityRenderer {
     bankTemplate = MeshUtil.mergeMeshes(
         new Box(0.26f, 0.5f, 0.26f),
         MeshUtil.translatedCopy(new Box(0.34f, 0.12f, 0.34f), 0, 0.62f, 0));
+
+    // a farm reads as low tilled rows, not a generic cube
+    farmTemplate = MeshUtil.mergeMeshes(
+        MeshUtil.mergeMeshes(
+            MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, -0.2f),
+            MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, 0)),
+        MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, 0.2f));
+    // a market stall: a peaked awning over a low counter
+    marketTemplate = MeshUtil.mergeMeshes(
+        new Box(0.24f, 0.14f, 0.24f),
+        MeshUtil.translatedCopy(new Box(0.3f, 0.04f, 0.3f), 0, 0.32f, 0));
+    // a simple plinth-and-obelisk landmark planted at every nation's capital
+    statueTemplate = MeshUtil.mergeMeshes(
+        new Box(0.3f, 0.08f, 0.3f),
+        MeshUtil.translatedCopy(new Box(0.1f, 0.5f, 0.1f), 0, 0.5f, 0));
 
     // nation banner: a slim pole with a small flag near the top, planted
     // beside every settlement so a nation's color reads at a glance.
@@ -225,6 +256,15 @@ public class EntityRenderer {
     }
     root.attachChild(banksNode);
 
+    for (int i = 0; i < BANK_CAP; i++) {
+      Geometry g = new Geometry("Statue" + i, statueTemplate);
+      g.setMaterial(soloColorMaterial(new ColorRGBA(0.75f, 0.75f, 0.78f, 1f)));
+      g.setCullHint(Spatial.CullHint.Always);
+      statuesNode.attachChild(g);
+      statuePool[i] = g;
+    }
+    root.attachChild(statuesNode);
+
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
       Geometry g = new Geometry("Flag" + i, flagTemplate);
       g.setMaterial(soloColorMaterial(ColorRGBA.White));
@@ -270,10 +310,26 @@ public class EntityRenderer {
     }
     root.attachChild(sparklesNode);
 
-    Box monsterBox = new Box(1.3f, 1.3f, 1.3f);
-    monsterGeom = new Geometry("Monster", monsterBox);
+    // a plain floating cube read as an inert "big moving block" rather
+    // than a creature - a body/head/spine silhouette at least reads as
+    // something alive, and it now turns to face its direction of travel
+    // instead of spinning in place for no reason
+    monsterGeom = new Node("Monster");
     Material monsterMat = soloColorMaterial(new ColorRGBA(0.29f, 0.06f, 0.19f, 1f));
-    monsterGeom.setMaterial(monsterMat);
+    Material spikeMat = soloColorMaterial(new ColorRGBA(0.55f, 0.12f, 0.08f, 1f));
+    Geometry monsterBody = new Geometry("MonsterBody", new Box(1.1f, 0.75f, 1.7f));
+    monsterBody.setMaterial(monsterMat);
+    monsterGeom.attachChild(monsterBody);
+    Geometry monsterHead = new Geometry("MonsterHead", new Box(0.65f, 0.55f, 0.65f));
+    monsterHead.setMaterial(monsterMat);
+    monsterHead.setLocalTranslation(0, 0.25f, 1.9f);
+    monsterGeom.attachChild(monsterHead);
+    for (float sz : new float[]{-1.1f, -0.3f, 0.5f, 1.2f}) {
+      Geometry spike = new Geometry("MonsterSpike", new Box(0.15f, 0.5f, 0.15f));
+      spike.setMaterial(spikeMat);
+      spike.setLocalTranslation(0, 0.9f, sz);
+      monsterGeom.attachChild(spike);
+    }
     monsterGeom.setCullHint(Spatial.CullHint.Always);
     root.attachChild(monsterGeom);
 
@@ -408,18 +464,23 @@ public class EntityRenderer {
     List<PropBatcher.Placement> houses = new ArrayList<>();
     for (Settlement s : state.settlements.values()) {
       if (houses.size() >= HOUSE_CAP_SAMPLE) break;
-      if (s.populationCount < 6) continue;
+      if (s.populationCount < 1) continue;
       Nation nation = state.nations.get(s.nationId);
       ColorRGBA color = nation != null ? nationOrFallback(nation.id, HOUSE_FALLBACK) : HOUSE_FALLBACK;
-      int houseCount = Math.min(10, s.populationCount / 6);
+      // even a lone founder gets a couple of houses instead of nothing;
+      // a full-size settlement gets a real cluster instead of topping
+      // out at 10 no matter how big it's grown
+      int houseCount = Math.min(32, 2 + s.populationCount / 3);
       for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
+        // a spiral placement (radius grows with i) reads as an organic
+        // cluster of streets/blocks instead of a single uniform ring
         float angle = i * 2.4f + s.id * 0.7f;
-        float radius = 1.1f + (i % 4) * 0.55f;
+        float radius = 1.0f + (i % 6) * 0.5f + (i / 6) * 0.7f;
         float hx = s.x + 0.5f + (float) Math.cos(angle) * radius;
         float hz = s.z + 0.5f + (float) Math.sin(angle) * radius;
         int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
         float hh = grid.height[grid.idx(gx, gz)];
-        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.6f + (i % 3) * 0.08f, color));
+        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.55f + (i % 4) * 0.09f, color));
       }
     }
     housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));
@@ -432,6 +493,7 @@ public class EntityRenderer {
     updateHumans(state, alpha);
     updateBusinesses(state);
     updateBanks(state);
+    updateStatues(state);
     updateMonster(state);
     updateTornadoes(state);
     updateFires(state);
@@ -556,7 +618,10 @@ public class EntityRenderer {
       float ox = (float) Math.cos(angle) * 1.4f, oz = (float) Math.sin(angle) * 1.4f;
       g.setLocalTranslation(s.x + 0.5f + ox, h + 0.22f, s.z + 0.5f + oz);
       g.setLocalScale((float) (0.7 + Math.min(1.5, b.capital / 60.0)));
-      setSoloColor(g.getMaterial(), BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White));
+      g.setMesh(b.type.equals("farm") ? farmTemplate : b.type.equals("market") ? marketTemplate : businessTemplate);
+      ColorRGBA color = b.type.equals("market") ? new ColorRGBA(0.82f, 0.66f, 0.35f, 1f)
+          : BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White);
+      setSoloColor(g.getMaterial(), color);
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
@@ -578,6 +643,25 @@ public class EntityRenderer {
       i++;
     }
     for (; i < BANK_CAP; i++) bankPool[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  /** A simple plinth-and-obelisk landmark at every nation's capital - a
+   * small bit of civic identity beyond a bare marker+flag, and an easy
+   * way to spot a capital from a distance. */
+  private void updateStatues(GameState state) {
+    int i = 0;
+    for (Nation n : state.nations.values()) {
+      if (i >= BANK_CAP) break;
+      Settlement capital = state.settlements.get(n.capitalSettlementId);
+      if (capital == null) continue;
+      Geometry g = statuePool[i];
+      float h = grid.height[grid.idx(capital.x, capital.z)];
+      g.setLocalTranslation(capital.x + 0.5f + 1.6f, h, capital.z + 0.5f - 1.6f);
+      g.setLocalScale(0.8f);
+      g.setCullHint(Spatial.CullHint.Inherit);
+      i++;
+    }
+    for (; i < BANK_CAP; i++) statuePool[i].setCullHint(Spatial.CullHint.Always);
   }
 
   private void updateArmies(GameState state, float alpha) {
@@ -631,14 +715,20 @@ public class EntityRenderer {
 
   private void updateMonster(GameState state) {
     Monster m = state.monster;
-    if (m == null) { monsterGeom.setCullHint(Spatial.CullHint.Always); return; }
+    if (m == null) { monsterGeom.setCullHint(Spatial.CullHint.Always); monsterLastX = Double.NaN; return; }
     monsterGeom.setCullHint(Spatial.CullHint.Inherit);
     int gx = clampIdx((int) Math.floor(m.x), grid.cols), gz = clampIdx((int) Math.floor(m.z), grid.rows);
     float h = grid.height[grid.idx(gx, gz)];
     float scale = (float) (0.7 + (m.hp / m.maxHp) * 0.6);
-    monsterGeom.setLocalTranslation((float) m.x, h + 1.6f * scale, (float) m.z);
+    monsterGeom.setLocalTranslation((float) m.x, h + 1.1f * scale, (float) m.z);
     monsterGeom.setLocalScale(scale);
-    monsterGeom.rotate(0, 0.02f, 0);
+    if (!Double.isNaN(monsterLastX)) {
+      double dx = m.x - monsterLastX, dz = m.z - monsterLastZ;
+      if (dx * dx + dz * dz > 1e-6) monsterYaw = Math.atan2(dx, dz);
+    }
+    monsterGeom.setLocalRotation(new Quaternion().fromAngleAxis((float) monsterYaw, Vector3f.UNIT_Y));
+    monsterLastX = m.x;
+    monsterLastZ = m.z;
   }
 
   private void updateTornadoes(GameState state) {

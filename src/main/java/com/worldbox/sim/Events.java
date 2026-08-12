@@ -22,6 +22,7 @@ public class Events {
     if (!grid.burning[i] && (grid.terrain[i] == Config.GRASS || grid.resource[i] == Config.RES_FOREST)) {
       grid.burning[i] = true;
       grid.burnTimer[i] = life > 0 ? life : (int) (20 + Math.random() * 25);
+      grid.burningCells.add(i);
       grid.markDirtyIdx(i);
     }
   }
@@ -30,14 +31,15 @@ public class Events {
 
   private static void updateFire(GameState state) {
     WorldGrid grid = state.grid;
-    List<Integer> burningCells = new ArrayList<>();
-    for (int i = 0; i < grid.cols * grid.rows; i++) if (grid.burning[i]) burningCells.add(i);
+    if (grid.burningCells.isEmpty()) return;
+    List<Integer> burningCells = new ArrayList<>(grid.burningCells);
 
     int[][] dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     for (int i : burningCells) {
       grid.burnTimer[i]--;
       if (grid.burnTimer[i] <= 0) {
         grid.burning[i] = false;
+        grid.burningCells.remove(i);
         grid.resource[i] = Config.RES_NONE;
         if (grid.terrain[i] == Config.GRASS) {
           grid.terrain[i] = Config.DIRT;
@@ -107,6 +109,7 @@ public class Events {
         }
         grid.resource[i] = Config.RES_NONE;
         grid.burning[i] = false;
+        grid.burningCells.remove(i);
       } else {
         igniteCell(grid, x, y, (int) (25 + Math.random() * 25));
       }
@@ -179,7 +182,7 @@ public class Events {
     WorldGrid grid = state.grid;
     grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
       int i = grid.idx(x, y);
-      if (grid.burning[i]) { grid.burning[i] = false; grid.markDirtyIdx(i); }
+      if (grid.burning[i]) { grid.burning[i] = false; grid.burningCells.remove(i); grid.markDirtyIdx(i); }
     });
     for (Settlement s : state.settlements.values()) {
       if (!s.abandoned && Math.hypot(s.x - cx, s.z - cy) <= radius) {

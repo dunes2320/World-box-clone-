@@ -53,6 +53,13 @@ public class Diplomacy {
         // not be fully ready for; a cautious one waits for a clearer edge
         double ambition = nation.leader != null ? nation.leader.personality.ambition : 0.5;
         if (status.equals(Config.PEACE)) {
+          // neighbors compete for the same land and resources - without
+          // some steady friction here, the relationship score only ever
+          // moves via a tiny random walk that would take millions of
+          // ticks to organically drift past the war threshold below, so
+          // wars in practice never happened on their own and every army
+          // just sat home forever with nothing to do
+          dip.adjustScore(nation.id, other.id, -0.4);
           if (score > 55 && Math.random() < 0.5) {
             dip.setStatus(nation.id, other.id, Config.ALLIANCE);
             dip.adjustScore(nation.id, other.id, 10);

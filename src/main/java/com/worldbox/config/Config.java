@@ -8,8 +8,13 @@ import java.util.Map;
 public final class Config {
   private Config() {}
 
-  public static final int COLS = 128;
-  public static final int ROWS = 128;
+  // 4x the area of the old 128x128 map - tested clean at this size and at
+  // 384x384; 384 caused a severe tick-rate collapse even in this
+  // pessimistic software-rendered test sandbox (real player hardware
+  // would do better, but not worth the risk of it chugging on a
+  // low-end machine)
+  public static final int COLS = 256;
+  public static final int ROWS = 256;
 
   // terrain types
   public static final byte WATER = 0;
@@ -90,10 +95,18 @@ public final class Config {
   public static final String TRUCE = "truce";
   public static final int DECISION_INTERVAL = 45;
 
+  // only 12 colors used to mean any game with more than 12 nations alive
+  // at once (routine by mid-game) got color collisions between unrelated
+  // nations - two neighbors sharing a color makes their shared border
+  // blend away to nothing, which read as "borders are unstable". 28
+  // distinct colors gives a lot more headroom before that repeats.
   public static final int[] NATION_COLORS = {
       0xe6553f, 0x3f8ee6, 0x4fbf5a, 0xe6c53f, 0xa35fe6,
       0xe67f3f, 0x3fd0c0, 0xd63f8e, 0x8fbf3f, 0x5f6fe6,
-      0xe63f3f, 0x3fe67f,
+      0xe63f3f, 0x3fe67f, 0xc93fe6, 0x3fa8e6, 0xe6a03f,
+      0x4fe6a0, 0xe63f5f, 0x7f3fe6, 0xa0e63f, 0x3fe6d0,
+      0xe63fb0, 0x8fe63f, 0x3f5fe6, 0xe6703f, 0x5fe63f,
+      0xe63fe0, 0x3fe650, 0xe6d03f,
   };
 
   public static final long WORLD_SEED = 1337;

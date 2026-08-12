@@ -42,9 +42,18 @@ public class WorldGen {
         // up despite this field existing.
         double moisture = fbm.fbm(x * 0.045 + 400, y * 0.045 + 400, 4, 2, 0.5);
 
-        if (h < -1.0) {
+        // VoxelWorld voxelizes a land column's height as
+        // round(grid.height[i]) + Y_OFFSET, and water is a *fixed* plane
+        // at WATER_LEVEL = Y_OFFSET - 1. A land cell only comes out flush
+        // with that fixed water surface when its own height rounds to 0
+        // (i.e. sits in [-0.5, 0.5)) - the old thresholds here (water
+        // below -1.0, sand below -0.15) classified "dry" sand across a
+        // band that was still well below that flush point, so nearly
+        // every beach tile voxelized as fully submerged, one block under
+        // the water surface, instead of meeting it at the shoreline.
+        if (h < -0.5) {
           grid.terrain[i] = Config.WATER;
-        } else if (h < -0.15) {
+        } else if (h < 0.5) {
           grid.terrain[i] = Config.SAND;
         } else if (h > 5.2) {
           grid.terrain[i] = Config.STONE;

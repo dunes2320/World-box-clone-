@@ -96,8 +96,12 @@ public class Government {
     }
   }
 
+  // 900 samples at the 20-tick sampling interval below is ~50 years of
+  // history - long enough that the economy graph shows a game's actual
+  // lifetime trend instead of just the last ~7 years, which made a long
+  // plateau look like the chart itself had a hard ceiling
   private static void trim(java.util.ArrayDeque<Double> dq) {
-    while (dq.size() > 120) dq.removeFirst();
+    while (dq.size() > 900) dq.removeFirst();
   }
 
   /** Inflation is measured the way it actually happens: new money entering

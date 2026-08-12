@@ -120,6 +120,13 @@ public class Nation {
   /** revenue generated this sampling window (business output + national
    * trade), reset to 0 every time it's rolled into gdpHistory. */
   public double gdpAccum = 0;
+  /** A slow-drifting, mean-reverting business-cycle multiplier on real
+   * trade/production revenue - without it, a mature economy with a
+   * saturated population just settles into one static equilibrium GDP
+   * forever, with nothing but the rare price-crash to disturb it. Real
+   * economies have actual multi-year expansions and recessions even once
+   * "grown up"; this is what gives this one the same. */
+  public double econCycle = 1.0;
   /** the nation's currency name, e.g. "Valendorian Crown" - cosmetic, but
    * ties the currency-vs-gold graph to something with a name. */
   public String currencyName;

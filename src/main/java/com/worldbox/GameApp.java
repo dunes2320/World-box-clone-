@@ -338,19 +338,28 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       speed = 4;
       boolean skipDisasters = "true".equals(System.getProperty("worldbox.skipScript"));
       testScript.put(0.3, () -> {
-        // find a shoreline cell (sand next to water) for a close-up debug shot
+        // find a shoreline cell (sand next to water) for a close-up debug
+        // shot, and aim the camera - looking from the land side toward
+        // the water side - at the actual shared edge, not just near it,
+        // since a top-down or misaimed shot can hide a real gap
         outer:
         for (int y = 0; y < state.grid.rows; y++) {
           for (int x = 0; x < state.grid.cols; x++) {
             int i = state.grid.idx(x, y);
             if (state.grid.terrain[i] != Config.SAND) continue;
-            boolean nearWater = (x + 1 < state.grid.cols && state.grid.terrain[state.grid.idx(x + 1, y)] == Config.WATER)
-                || (y + 1 < state.grid.rows && state.grid.terrain[state.grid.idx(x, y + 1)] == Config.WATER);
-            if (nearWater) {
+            boolean waterEast = x + 1 < state.grid.cols && state.grid.terrain[state.grid.idx(x + 1, y)] == Config.WATER;
+            boolean waterSouth = y + 1 < state.grid.rows && state.grid.terrain[state.grid.idx(x, y + 1)] == Config.WATER;
+            if (waterEast || waterSouth) {
+              // stay on the sand cell itself, not the water cell - the
+              // camera's ground-follow logic re-samples terrain height at
+              // camTarget's xz every frame, and sampling into the water
+              // column pulls the pivot down to the seabed instead of the
+              // beach, tilting the shot away from the water surface
               float h = state.grid.height[i];
               camTarget.set(x + 0.5f, h, y + 0.5f);
-              camDistance = camDistanceTarget = 10f;
-              camPitch = 1.1f;
+              camYaw = waterEast ? -FastMath.HALF_PI : FastMath.PI;
+              camDistance = camDistanceTarget = 6f;
+              camPitch = 0.35f; // low, near player-eye angle - a top-down shot can hide a real vertical gap
               break outer;
             }
           }
@@ -516,10 +525,15 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       totalDebt += h.debt;
     }
     int n = Math.max(1, state.humans.size());
+    int atWar = 0, allied = 0;
+    for (var r : state.diplomacy.relations.values()) {
+      if (com.worldbox.config.Config.WAR.equals(r.status)) atWar++;
+      else if (com.worldbox.config.Config.ALLIANCE.equals(r.status)) allied++;
+    }
     System.out.println(String.format(
-        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f",
+        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f atWar=%d allied=%d armies=%d",
         years, state.tick, state.humans.size(), state.nations.size(), Nation.totalFounded(),
-        state.settlements.size(), homeless, totalWealth / n, totalDebt / n));
+        state.settlements.size(), homeless, totalWealth / n, totalDebt / n, atWar, allied, state.armies.size()));
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
       int pop = 0;
