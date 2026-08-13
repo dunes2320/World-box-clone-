@@ -71,6 +71,47 @@ public class MeshUtil {
     return m;
   }
 
+  /** Rotates a mesh's position+normal buffers in place around Y - lets a
+   * primitive built axis-aligned (like Box, which can't be built rotated)
+   * get jumbled into an irregular cluster afterward. */
+  public static void rotateYInPlace(Mesh mesh, float angle) {
+    Quaternion rot = new Quaternion().fromAngleAxis(angle, Vector3f.UNIT_Y);
+    for (VertexBuffer.Type type : new VertexBuffer.Type[]{VertexBuffer.Type.Position, VertexBuffer.Type.Normal}) {
+      FloatBuffer buf = mesh.getFloatBuffer(type);
+      if (buf == null) continue;
+      Vector3f v = new Vector3f();
+      for (int i = 0; i < buf.limit() / 3; i++) {
+        v.set(buf.get(i * 3), buf.get(i * 3 + 1), buf.get(i * 3 + 2));
+        rot.multLocal(v);
+        buf.put(i * 3, v.x);
+        buf.put(i * 3 + 1, v.y);
+        buf.put(i * 3 + 2, v.z);
+      }
+    }
+    mesh.updateBound();
+  }
+
+  /** A jumbled boulder cluster - three overlapping, differently-sized and
+   * -rotated boxes instead of one smooth "gem", so a stone deposit reads
+   * as a rough rock pile instead of a polished blob. Bottom sits at y=0
+   * so ground placement works the same as any other origin-centered
+   * template (lift by half its overall height). */
+  public static Mesh buildRockCluster(float baseRadius) {
+    Mesh big = new com.jme3.scene.shape.Box(baseRadius * 0.5f, baseRadius * 0.38f, baseRadius * 0.46f);
+    rotateYInPlace(big, 0.35f);
+    Mesh bigP = translatedCopy(big, 0, baseRadius * 0.38f, 0);
+
+    Mesh mid = new com.jme3.scene.shape.Box(baseRadius * 0.36f, baseRadius * 0.3f, baseRadius * 0.32f);
+    rotateYInPlace(mid, -0.7f);
+    Mesh midP = translatedCopy(mid, baseRadius * 0.32f, baseRadius * 0.28f, -baseRadius * 0.18f);
+
+    Mesh small = new com.jme3.scene.shape.Box(baseRadius * 0.26f, baseRadius * 0.22f, baseRadius * 0.24f);
+    rotateYInPlace(small, 1.1f);
+    Mesh smallP = translatedCopy(small, -baseRadius * 0.3f, baseRadius * 0.2f, baseRadius * 0.22f);
+
+    return mergeMeshes(mergeMeshes(bigP, midP), smallP);
+  }
+
   /** A slim pillar with a flared cap - used for a nation's bank/vault. */
   public static Mesh buildPillar(float baseRadius, float capRadius, float height) {
     Mesh shaft = new com.jme3.scene.shape.Cylinder(2, 5, baseRadius, baseRadius * 0.8f, height, true, false);

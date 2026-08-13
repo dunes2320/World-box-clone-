@@ -386,6 +386,8 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(5.5, () -> screenshotState.takeScreenshot());
       testScript.put(6.5, () -> hud.debugSetPanelMode("settings"));
       testScript.put(7.0, () -> screenshotState.takeScreenshot());
+      testScript.put(7.2, () -> hud.debugSetPanelMode("log"));
+      testScript.put(7.4, () -> screenshotState.takeScreenshot());
       testScript.put(7.5, () -> hud.debugSetPanelMode(null));
       testScript.put(8.0, () -> {
         if (!state.humans.isEmpty()) setSelection(new GameState.Selection("human", state.humans.get(0).id));

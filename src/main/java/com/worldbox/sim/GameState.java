@@ -33,6 +33,9 @@ public class GameState {
   public Monster monster;
   public int tick = 0;
   public Rng rng;
+  /** Recorded world events (wars, disasters, nations rising/falling) for
+   * the HUD log book - see EventLog. */
+  public final java.util.ArrayDeque<WorldEvent> eventLog = new java.util.ArrayDeque<>();
 
   public static class Selection {
     public final String type; // "settlement" | "nation"

@@ -27,6 +27,7 @@ import com.worldbox.sim.Government;
 import com.worldbox.sim.Military;
 import com.worldbox.sim.Nation;
 import com.worldbox.sim.Settlement;
+import com.worldbox.sim.WorldEvent;
 import com.worldbox.tools.GodTools;
 
 import java.util.ArrayDeque;
@@ -58,8 +59,16 @@ public class GameHud {
   private Slider zoomSlider;
   private Label zoomLabel;
 
-  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph" | "settings"
+  private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph" | "settings" | "log"
   private double lastStatRefresh, lastPanelRefresh;
+
+  // a brief on-screen toast whenever a new world event lands (war, disaster,
+  // a nation rising or falling) - the log book (see renderLog) is where a
+  // player goes looking for history, but they shouldn't have to keep it
+  // open just to notice something happened in the first place
+  private final Label toastLabel;
+  private double toastTimer = 0;
+  private int lastSeenEventCount = 0;
 
   // Long lists (dozens of nations, a nation's relations with everyone
   // else) have no scrollable widget available in this stripped-down Lemur
@@ -160,6 +169,14 @@ public class GameHud {
     Button worldEconBtn = topBar.addChild(new Button("Market Index"));
     worldEconBtn.addClickCommands(src -> showGraph("world", -1));
     topBar.addChild(spacer(6));
+    Button logBtn = topBar.addChild(new Button("Log"));
+    logBtn.addClickCommands(src -> {
+      sidePanelMode = "log".equals(sidePanelMode) ? null : "log";
+      ctx.setSelection(null);
+      resetListPage(-999);
+      refreshSidePanel();
+    });
+    topBar.addChild(spacer(6));
     Button settingsBtn = topBar.addChild(new Button("Settings"));
     settingsBtn.addClickCommands(src -> {
       sidePanelMode = "settings".equals(sidePanelMode) ? null : "settings";
@@ -179,6 +196,16 @@ public class GameHud {
     chartNode.setQueueBucket(RenderQueue.Bucket.Gui);
     chartNode.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(chartNode);
+
+    toastLabel = new Label(" ");
+    toastLabel.setFontSize(15);
+    toastLabel.setColor(TEXT);
+    toastLabel.setBackground(new QuadBackgroundComponent(new ColorRGBA(0.08f, 0.09f, 0.12f, 0.88f)));
+    toastLabel.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
+    toastLabel.setPreferredSize(new Vector3f(520, 34, 0));
+    toastLabel.setLocalTranslation(width / 2f - 260, height - TOPBAR_HEIGHT - 14, 5);
+    toastLabel.setCullHint(Spatial.CullHint.Always);
+    guiNode.attachChild(toastLabel);
   }
 
   private static String speedLabel(int s) {
@@ -324,6 +351,22 @@ public class GameHud {
       statLabel.setText("Pop: " + state.humans.size() + "   Nations: " + state.nations.size()
           + "   " + com.worldbox.util.Calendar.dateString(state.tick));
     }
+
+    GameState st = ctx.getState();
+    if (st.eventLog.size() > lastSeenEventCount) {
+      lastSeenEventCount = st.eventLog.size();
+      WorldEvent latest = st.eventLog.peekLast();
+      if (latest != null) {
+        toastLabel.setText(latest.message);
+        toastLabel.setColor(logCategoryColor(latest.category));
+        toastTimer = 6.0;
+        toastLabel.setCullHint(Spatial.CullHint.Inherit);
+      }
+    }
+    if (toastTimer > 0) {
+      toastTimer -= tpf;
+      if (toastTimer <= 0) toastLabel.setCullHint(Spatial.CullHint.Always);
+    }
     // "settings" is deliberately excluded from the periodic auto-refresh -
     // rebuilding the panel every second would recreate the slider mid-drag
     // and reset it out from under the player's mouse
@@ -350,6 +393,7 @@ public class GameHud {
     else if ("human".equals(mode) && sel != null) renderHuman(state, sel.id);
     else if ("nationsList".equals(mode)) renderNationsList(state);
     else if ("market".equals(mode)) renderMarket(state);
+    else if ("log".equals(mode)) renderLog(state);
     else if ("graph".equals(mode)) renderGraph(state);
     else if ("settings".equals(mode)) renderSettings();
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
@@ -652,6 +696,43 @@ public class GameHud {
       row.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
       final int nid = n.id;
       row.addClickCommands(src -> { ctx.setSelection(new GameState.Selection("nation", nid)); refreshSidePanel(); });
+    }
+  }
+
+  private static final ColorRGBA DISASTER_COLOR = new ColorRGBA(0.95f, 0.6f, 0.25f, 1f);
+
+  private ColorRGBA logCategoryColor(String category) {
+    switch (category) {
+      case "war": return DANGER;
+      case "disaster": return DISASTER_COLOR;
+      case "economy": return DANGER;
+      default: return TEXT;
+    }
+  }
+
+  private void renderLog(GameState state) {
+    Label title = sidePanel.addChild(new Label("World Log (" + state.eventLog.size() + ")"));
+    title.setFontSize(17);
+    closeButton();
+    if (state.eventLog.isEmpty()) {
+      Label l = sidePanel.addChild(new Label("Nothing has happened yet."));
+      l.setColor(MUTED);
+      return;
+    }
+    resetListPage(-3); // fixed key: one log, unlike per-nation panels
+    // newest first
+    java.util.List<WorldEvent> events = new java.util.ArrayList<>(state.eventLog);
+    java.util.Collections.reverse(events);
+    int[] range = pager(events.size());
+    for (WorldEvent e : events.subList(range[0], range[1])) {
+      Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Label dateLbl = row.addChild(new Label(com.worldbox.util.Calendar.dateString(e.tick)));
+      dateLbl.setColor(MUTED);
+      dateLbl.setFontSize(12);
+      dateLbl.setPreferredSize(new Vector3f(110, 18, 0));
+      Label msg = row.addChild(new Label(e.message));
+      msg.setColor(logCategoryColor(e.category));
+      msg.setFontSize(12);
     }
   }
 

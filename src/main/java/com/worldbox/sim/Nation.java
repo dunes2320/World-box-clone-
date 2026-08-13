@@ -168,6 +168,7 @@ public class Nation {
     state.nations.put(nation.id, nation);
     capitalSettlement.nationId = nation.id;
     for (Human h : state.humans) if (h.settlementId == capitalSettlement.id) h.nationId = nation.id;
+    EventLog.log(state, "nation", nation.name + " was founded");
     return nation;
   }
 
@@ -353,6 +354,7 @@ public class Nation {
       if (a != null) a.dead = true;
     }
     state.nations.remove(nation.id);
+    EventLog.log(state, "nation", nation.name + " has fallen");
   }
 
   /** Redraws every nation's road network from scratch each cycle - a

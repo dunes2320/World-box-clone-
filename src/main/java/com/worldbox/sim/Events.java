@@ -29,10 +29,23 @@ public class Events {
 
   public static void igniteCell(WorldGrid grid, int x, int y) { igniteCell(grid, x, y, 0); }
 
+  // a burning cell used to have a >1 expected number of neighbors it went
+  // on to ignite over its lifetime (4 neighbors x 10%/tick x ~30 ticks),
+  // which is an exponentially GROWING fire with no natural ceiling - on a
+  // map where grass is no longer artificially broken up by center-biased
+  // stone (see WorldGen), that meant one spark could eventually consume
+  // every reachable field and forest in the world. A real wildfire still
+  // spreads fast locally, but stops growing once it's already a big fire
+  // - MAX_SIMULTANEOUS_FIRE acts as "the whole world's worth of bad luck
+  // meeting itself", a hard ceiling on how much can be burning at once
+  // regardless of how much fuel is still out there.
+  private static final int MAX_SIMULTANEOUS_FIRE = 220;
+
   private static void updateFire(GameState state) {
     WorldGrid grid = state.grid;
     if (grid.burningCells.isEmpty()) return;
     List<Integer> burningCells = new ArrayList<>(grid.burningCells);
+    boolean canSpread = grid.burningCells.size() < MAX_SIMULTANEOUS_FIRE;
 
     int[][] dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     for (int i : burningCells) {
@@ -48,6 +61,7 @@ public class Events {
         grid.markDirtyIdx(i);
         continue;
       }
+      if (!canSpread) continue;
       int x = i % grid.cols, y = i / grid.cols;
       for (int[] d : dirs) {
         int nx = x + d[0], ny = y + d[1];
@@ -55,9 +69,24 @@ public class Events {
         int ni = grid.idx(nx, ny);
         if (grid.burning[ni]) continue;
         boolean flammable = grid.terrain[ni] == Config.GRASS || grid.resource[ni] == Config.RES_FOREST;
-        if (flammable && Math.random() < 0.1) igniteCell(grid, nx, ny, (int) (20 + Math.random() * 25));
+        if (flammable && Math.random() < 0.045) igniteCell(grid, nx, ny, (int) (20 + Math.random() * 25));
       }
     }
+  }
+
+  /** Puts fires out in a brush area without touching the terrain
+   * underneath (unlike painting water over it) - a real firefighting
+   * action, not a workaround. */
+  public static void extinguish(WorldGrid grid, int cx, int cy, double radius) {
+    grid.forEachInRadius(cx, cy, radius, (x, y, d) -> {
+      int i = grid.idx(x, y);
+      if (grid.burning[i]) {
+        grid.burning[i] = false;
+        grid.burnTimer[i] = 0;
+        grid.burningCells.remove(i);
+        grid.markDirtyIdx(i);
+      }
+    });
   }
 
   private static boolean hasGrassNeighbor(WorldGrid grid, int x, int y) {
@@ -207,6 +236,7 @@ public class Events {
         converted++;
       }
     }
+    if (converted > 0) EventLog.log(state, "disaster", "A zombie outbreak turned " + converted + " " + nearbyPlaceDescription(state, cx, cy));
   }
 
   public static void spawnTornado(GameState state, double x, double z) {
@@ -240,6 +270,7 @@ public class Events {
   public static boolean spawnMonster(GameState state, double x, double z) {
     if (state.monster != null) return false;
     state.monster = new Monster(x, z, Config.MONSTER_HP, Config.MONSTER_LIFETIME);
+    EventLog.log(state, "disaster", "A kaiju emerged " + nearbyPlaceDescription(state, x, z));
     return true;
   }
 
@@ -297,5 +328,47 @@ public class Events {
     updateVegetation(state);
     updateTornadoes(state);
     updateMonster(state);
+    updateAutoDisasters(state);
+  }
+
+  /** A world with god tools but nothing happening on its own doesn't feel
+   * alive - real earthquakes and lightning-strike wildfires happen without
+   * the player lifting a finger, same as wars/revolts/booms and busts
+   * already do. No meteors here on purpose - those stay a deliberate
+   * player action, not something that falls out of the sky at random. */
+  private static String nearbyPlaceDescription(GameState state, double x, double z) {
+    Settlement best = null;
+    double bestD = Double.MAX_VALUE;
+    for (Settlement s : state.settlements.values()) {
+      if (s.abandoned) continue;
+      double d = Math.hypot(s.x - x, s.z - z);
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (best != null && bestD < 18) return "near " + best.name;
+    return "in the wilderness";
+  }
+
+  private static void updateAutoDisasters(GameState state) {
+    WorldGrid grid = state.grid;
+    if (Math.random() < 0.0016) {
+      int x = (int) (Math.random() * grid.cols), y = (int) (Math.random() * grid.rows);
+      if (grid.inBounds(x, y) && grid.terrain[grid.idx(x, y)] != Config.WATER) {
+        double cx = x + 0.5, cz = y + 0.5;
+        String where = nearbyPlaceDescription(state, cx, cz);
+        earthquake(state, cx, cz, 3 + Math.random() * 4);
+        EventLog.log(state, "disaster", "An earthquake struck " + where);
+      }
+    }
+    if (Math.random() < 0.0022) {
+      for (int attempt = 0; attempt < 8; attempt++) {
+        int x = (int) (Math.random() * grid.cols), y = (int) (Math.random() * grid.rows);
+        int i = grid.idx(x, y);
+        if (grid.inBounds(x, y) && (grid.terrain[i] == Config.GRASS || grid.resource[i] == Config.RES_FOREST)) {
+          igniteCell(grid, x, y);
+          EventLog.log(state, "disaster", "A wildfire broke out " + nearbyPlaceDescription(state, x + 0.5, y + 0.5));
+          break;
+        }
+      }
+    }
   }
 }

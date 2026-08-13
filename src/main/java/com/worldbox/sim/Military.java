@@ -41,6 +41,7 @@ public class Military {
       army.units.put(key, Math.max(0, (int) Math.floor(army.units.get(key) * (1 - ratio))));
     }
     army.strength = armyStrength(army);
+    army.combatFlashTimer = 18;
     if (armyUnitCount(army) <= 0) killArmy(state, army);
   }
 
@@ -164,7 +165,20 @@ public class Military {
           if (target != null) { army.targetSettlementId = target.id; army.state = "marching"; }
         }
 
-        if (nation.treasury > 260 && Math.random() < 0.35 && !nation.settlementIds.isEmpty()) {
+        // a nation actually at war and with nothing to fight with was the
+        // core of "wars are broken, nobody fights" - the old flat
+        // treasury>260/35% gate was well above what even a militia batch
+        // costs (6 x 15 gold), so most nations sat at war for its whole
+        // duration without ever fielding a single unit. A nation under
+        // real threat now raises much more readily than one that's just
+        // idly stockpiling for eventual conquest.
+        boolean atWar = false;
+        for (DiplomacyManager.PairInfo p : state.diplomacy.pairsInvolving(nation.id)) {
+          if (p.relation.status.equals(Config.WAR)) { atWar = true; break; }
+        }
+        double raiseThreshold = atWar ? 60 : 150;
+        double raiseChance = atWar ? 0.7 : 0.35;
+        if (nation.treasury > raiseThreshold && Math.random() < raiseChance && !nation.settlementIds.isEmpty()) {
           List<Integer> sids = new ArrayList<>(nation.settlementIds);
           int sid = sids.get((int) (Math.random() * sids.size()));
           String cheapest = nation.treasury > 600 ? "knight" : nation.treasury > 350 ? "swordsman" : "militia";
@@ -177,6 +191,7 @@ public class Military {
       if (army.dead) continue;
       army.prevX = army.x; army.prevZ = army.z;
       army.strength = armyStrength(army);
+      if (army.combatFlashTimer > 0) army.combatFlashTimer--;
       double tx = army.targetX, tz = army.targetZ;
       if (army.targetSettlementId != null) {
         Settlement s = state.settlements.get(army.targetSettlementId);
@@ -226,10 +241,15 @@ public class Military {
         Army winner = attackers.get(0);
         for (Army a : attackers) if (armyStrength(a) > armyStrength(winner)) winner = a;
         int oldNationId = settlement.nationId;
+        Nation winnerNation = state.nations.get(winner.nationId);
+        Nation loserNation = state.nations.get(oldNationId);
         Nation.transferSettlement(state, settlement, winner.nationId);
         settlement.siegeProgress = 0;
         winner.targetSettlementId = null;
         Diplomacy.onConquest(state, winner.nationId, oldNationId);
+        EventLog.log(state, "war", (winnerNation != null ? winnerNation.name : "An unknown power")
+            + " conquered " + settlement.name
+            + (loserNation != null ? " from " + loserNation.name : ""));
       }
     }
   }

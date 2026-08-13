@@ -17,6 +17,10 @@ public class Army {
   public String state = "idle";
   public double strength = 0;
   public boolean dead = false;
+  /** Ticks left to show a "we're actually fighting right now" visual -
+   * without this a battle was just two numbers quietly shrinking with no
+   * way to tell from looking at the world that anything was happening. */
+  public int combatFlashTimer = 0;
 
   public Army(int nationId, int homeSettlementId, double x, double z) {
     this.id = nextId++;

@@ -79,7 +79,7 @@ public class Government {
         // does that
         n.moneySupply += Math.max(0, n.gdpAccum) * 0.15;
 
-        updateInflationAndExchangeRate(n);
+        updateInflationAndExchangeRate(state, n);
         n.gdpAccum = 0;
 
         n.currencyHistory.addLast(n.exchangeRate);
@@ -114,7 +114,7 @@ public class Government {
    * currency that hyperinflates past recognition collapses for good -
    * exactly like a real currency that loses all public confidence never
    * gets it back. */
-  private static void updateInflationAndExchangeRate(Nation n) {
+  private static void updateInflationAndExchangeRate(GameState state, Nation n) {
     if (n.currencyCollapsed) {
       n.exchangeRate = 0;
       n.printedThisWindow = 0;
@@ -138,6 +138,7 @@ public class Government {
       n.currencyCollapsed = true;
       n.exchangeRate = 0;
       n.treasury *= 0.1; // hyperinflation wipes out real savings, not just the number on paper
+      EventLog.log(state, "economy", "The " + n.currencyName + " has collapsed - hyperinflation wipes out savings across " + n.name);
     }
   }
 
@@ -232,11 +233,15 @@ public class Government {
     n.treasury *= 0.7;
 
     if (n.settlementIds.size() > 1 && !n.government.equals(AUTOCRACY) && Math.random() < 0.35) {
+      String oldName = n.name;
       secede(state, n);
+      EventLog.log(state, "nation", "A breakaway settlement seceded from " + oldName);
     } else {
+      String oldGov = n.government;
       n.government = nextGovernmentAfterUnrest(n.government);
       n.leader = new Leader(n.government); // a coup/revolt installs a new leader
       n.issueNewCurrency(); // ...and the new regime issues its own currency
+      EventLog.log(state, "nation", n.name + " was rocked by revolt - " + oldGov + " gave way to " + n.government);
     }
     n.stability = 40;
   }

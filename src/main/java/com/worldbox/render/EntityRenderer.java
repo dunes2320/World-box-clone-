@@ -74,7 +74,11 @@ public class EntityRenderer {
   private static final int ARMY_CAP = 96;
   private static final int BUSINESS_CAP = 600;
   private static final int BANK_CAP = 80;
-  private static final int FIRE_CAP = 48;
+  // matches Events.MAX_SIMULTANEOUS_FIRE - a fire that big is now the hard
+  // ceiling on how much can ever be burning at once, so this guarantees
+  // every burning cell actually gets a flame/smoke prop instead of the
+  // fire silently continuing to spread past what's visible
+  private static final int FIRE_CAP = 220;
   private static final int SPARKLE_CAP = 28;
   private static final ColorRGBA FLAME_A = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FLAME_B = new ColorRGBA(1f, 0.82f, 0.25f, 1f);
@@ -85,12 +89,12 @@ public class EntityRenderer {
   private final NationColorLookup nationColor;
   private WorldGrid grid;
 
-  private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, humanTemplate, armyTemplate;
+  private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
 
-  private final Geometry treesGeom, treeTrunksGeom, depositsGeom, housesGeom;
+  private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
 
   private final Node settlementsNode = new Node("settlements");
   private final Node armiesNode = new Node("armies");
@@ -147,6 +151,10 @@ public class EntityRenderer {
         MeshUtil.translatedCopy(new Box(0.38f, 0.32f, 0.38f), 0, 0.55f, 0));
     treeTrunkTemplate = new Box(0.15f, 0.42f, 0.15f);
     depositTemplate = MeshUtil.buildGem(0.4f, 0.55f);
+    // stone used to share the same smooth "gem" mesh as iron/gold ore,
+    // which reads fine as a polished crystal but looks like a bland blob
+    // for plain rock - a jumbled boulder cluster instead
+    stoneDepositTemplate = MeshUtil.buildRockCluster(0.5f);
     humanTemplate = MeshUtil.mergeMeshes(
         new Box(0.15f, 0.5f, 0.12f),
         MeshUtil.translatedCopy(new Box(0.13f, 0.13f, 0.13f), 0, 0.63f, 0));
@@ -212,6 +220,10 @@ public class EntityRenderer {
     depositsGeom = new Geometry("Deposits", depositTemplate.deepClone());
     depositsGeom.setMaterial(vertexColorMaterial());
     root.attachChild(depositsGeom);
+
+    stoneDepositsGeom = new Geometry("StoneDeposits", stoneDepositTemplate.deepClone());
+    stoneDepositsGeom.setMaterial(vertexColorMaterial());
+    root.attachChild(stoneDepositsGeom);
 
     housesGeom = new Geometry("Houses", houseTemplate.deepClone());
     housesGeom.setMaterial(vertexColorMaterial());
@@ -433,12 +445,26 @@ public class EntityRenderer {
     return fallback;
   }
 
+  /** Deterministic per-cell offset so trees/deposits don't all sit dead
+   * center in their grid cell, which read as an obvious planted-in-rows
+   * grid from any distance. Same hash-and-fold trick as
+   * VoxelChunkRenderer's block mottling - stable across rebuilds (no
+   * popping/resettling every time statics refresh) without needing to
+   * store anything per-cell. */
+  private static float jitterAxis(int x, int y, int salt) {
+    int h = x * 374761393 + y * 668265263 + salt * 2147483647;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    return ((h & 0xFFFF) / 65535f - 0.5f) * 0.62f;
+  }
+
   /** Trees/deposits/houses barely move; rebuild their instance lists on a
    * slow cadence instead of every frame. */
   public void rebuildStatics(GameState state) {
     List<PropBatcher.Placement> canopies = new ArrayList<>();
     List<PropBatcher.Placement> trunks = new ArrayList<>();
     List<PropBatcher.Placement> deposits = new ArrayList<>();
+    List<PropBatcher.Placement> stoneDeposits = new ArrayList<>();
     burningCache.clear();
     goldCache.clear();
     for (int y = 0; y < grid.rows; y++) {
@@ -448,17 +474,31 @@ public class EntityRenderer {
         if (res == Config.RES_FOREST && canopies.size() < TREE_CAP_SAMPLE) {
           float scale = 0.6f + Math.min(1f, grid.resourceAmount[i] / 48f) * 0.6f;
           float rotY = (float) ((x * 7 + y * 13) % 6.28);
+          float jx = x + 0.5f + jitterAxis(x, y, 1);
+          float jz = y + 0.5f + jitterAxis(x, y, 2);
           // trunkTemplate is centered at its own origin (half-height
           // 0.42), so it needs to be lifted by half its (scaled) height
           // to actually sit on the ground instead of being buried in it
           float trunkHalf = 0.42f * scale;
           float trunkTop = grid.height[i] + trunkHalf * 2;
-          trunks.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + trunkHalf, y + 0.5f, rotY, scale, TRUNK_COLOR));
-          canopies.add(new PropBatcher.Placement(x + 0.5f, trunkTop, y + 0.5f, rotY, scale, TREE_COLOR));
+          trunks.add(new PropBatcher.Placement(jx, grid.height[i] + trunkHalf, jz, rotY, scale, TRUNK_COLOR));
+          canopies.add(new PropBatcher.Placement(jx, trunkTop, jz, rotY, scale, TREE_COLOR));
+        } else if (res == Config.RES_STONE && stoneDeposits.size() < DEPOSIT_CAP_SAMPLE) {
+          float rotY = (float) ((x * 3 + y * 5) % 6.28);
+          ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
+          float jx = x + 0.5f + jitterAxis(x, y, 3);
+          float jz = y + 0.5f + jitterAxis(x, y, 4);
+          // buildRockCluster's boxes are each lifted by their own half
+          // height already, so the cluster's bottom sits flush at local
+          // y=0 - no extra ground offset needed, unlike the origin-
+          // centered gem template below
+          stoneDeposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (res != Config.RES_NONE && res != Config.RES_FOREST && deposits.size() < DEPOSIT_CAP_SAMPLE) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
-          deposits.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + 0.28f, y + 0.5f, rotY, 1f, c));
+          float jx = x + 0.5f + jitterAxis(x, y, 3);
+          float jz = y + 0.5f + jitterAxis(x, y, 4);
+          deposits.add(new PropBatcher.Placement(jx, grid.height[i] + 0.28f, jz, rotY, 1f, c));
         }
         if (res == Config.RES_GOLD && goldCache.size() < SPARKLE_CAP) goldCache.add(i);
         if (grid.burning[i] && burningCache.size() < FIRE_CAP) burningCache.add(i);
@@ -470,6 +510,8 @@ public class EntityRenderer {
     treeTrunksGeom.setCullHint(trunks.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     depositsGeom.setMesh(PropBatcher.bake(depositTemplate, deposits));
     depositsGeom.setCullHint(deposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    stoneDepositsGeom.setMesh(PropBatcher.bake(stoneDepositTemplate, stoneDeposits));
+    stoneDepositsGeom.setCullHint(stoneDeposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
 
     // one pass over every human to count actual housed residents per
     // settlement - cheap here (throttled to every 20 ticks) and avoids an
@@ -718,11 +760,19 @@ public class EntityRenderer {
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float h = grid.height[grid.idx(gx, gz)];
       float scale = (float) (0.5 + Math.min(1.4, (a.strength > 0 ? a.strength : 1) / 40));
-      g.setLocalTranslation((float) x, h + 0.55f * scale, (float) z);
+      // a battle used to be two numbers quietly shrinking with nothing to
+      // see - an army actually trading blows this tick now visibly flares
+      // and jitters instead of just standing there
+      boolean fighting = a.combatFlashTimer > 0;
+      float flash = fighting ? a.combatFlashTimer / 18f : 0f;
+      if (fighting) scale *= 1f + flash * 0.35f;
+      g.setLocalTranslation((float) x + (fighting ? (float) (Math.random() - 0.5) * 0.15f : 0f),
+          h + 0.55f * scale, (float) z + (fighting ? (float) (Math.random() - 0.5) * 0.15f : 0f));
       g.setLocalScale(scale);
       g.setLocalRotation(new Quaternion().fromAngleAxis(state.tick * 0.05f, Vector3f.UNIT_Y));
       Nation nation = state.nations.get(a.nationId);
       ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
+      if (fighting) c = c.clone().interpolateLocal(new ColorRGBA(1f, 0.15f, 0.05f, 1f), flash);
       setSoloColor(g.getMaterial(), c);
       g.setUserData("armyId", a.id);
       g.setCullHint(Spatial.CullHint.Inherit);

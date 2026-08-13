@@ -36,6 +36,7 @@ public class GodTools {
       new ToolDef("monster", "Kaiju", "Creatures"),
       new ToolDef("zombie", "Outbreak", "Creatures"),
       new ToolDef("fire", "Fire", "Disasters"),
+      new ToolDef("extinguish", "Extinguish", "Disasters"),
       new ToolDef("meteor", "Meteor", "Disasters"),
       new ToolDef("nuke", "Nuke", "Disasters"),
       new ToolDef("earthquake", "Earthquake", "Disasters"),
@@ -44,7 +45,7 @@ public class GodTools {
   );
 
   public static final Set<String> CONTINUOUS_TOOLS = new LinkedHashSet<>(List.of(
-      "water", "sand", "grass", "dirt", "stone", "dig", "build", "forest", "fire"));
+      "water", "sand", "grass", "dirt", "stone", "dig", "build", "forest", "fire", "extinguish"));
 
   private interface CellFn { void apply(int x, int y); }
 
@@ -134,6 +135,10 @@ public class GodTools {
 
       case "fire":
         forEachInBrush(grid, cx, cz, brushSize, (x, y) -> Events.igniteCell(grid, x, y));
+        return true;
+
+      case "extinguish":
+        Events.extinguish(grid, cx, cz, brushRadius(brushSize) + 1);
         return true;
 
       case "meteor":
