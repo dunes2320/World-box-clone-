@@ -36,6 +36,12 @@ public class WorldGrid {
    * are actually burning instead of a full cols*rows scan every tick,
    * which mattered a lot once the map got a lot bigger. */
   public final Set<Integer> burningCells = new LinkedHashSet<>();
+  /** How many consecutive ticks a large fire has been sustained - once a
+   * wildfire has been raging a while, see Events.updateFire, its odds of
+   * burning itself out start climbing so it's guaranteed to eventually
+   * stop at some (unpredictable) point instead of just holding steady
+   * against its spread cap forever. */
+  public int fireStreak = 0;
 
   public WorldGrid() {
     java.util.Arrays.fill(terrain, Config.GRASS);

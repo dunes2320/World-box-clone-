@@ -16,7 +16,6 @@ import com.simsilica.lemur.Container;
 import com.simsilica.lemur.DefaultRangedValueModel;
 import com.simsilica.lemur.Label;
 import com.simsilica.lemur.Slider;
-import com.simsilica.lemur.component.QuadBackgroundComponent;
 import com.simsilica.lemur.component.SpringGridLayout;
 import com.worldbox.config.Config;
 import com.worldbox.sim.Business;
@@ -35,7 +34,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class GameHud {
-  private static final ColorRGBA BG = new ColorRGBA(0.11f, 0.13f, 0.17f, 0.92f);
   private static final ColorRGBA ACTIVE = new ColorRGBA(0.31f, 0.64f, 1f, 1f);
   private static final ColorRGBA TEXT = new ColorRGBA(0.91f, 0.93f, 0.96f, 1f);
   private static final ColorRGBA MUTED = new ColorRGBA(0.55f, 0.59f, 0.66f, 1f);
@@ -134,9 +132,8 @@ public class GameHud {
     this.screenH = height;
 
     topBar.setLocalTranslation(0, height, 1);
-    topBar.setBackground(new QuadBackgroundComponent(BG));
+    topBar.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(topBar);
-    guiNode.attachChild(accentStrip(width, height - TOPBAR_HEIGHT));
 
     Label title = topBar.addChild(new Label("WORLD BOX 3D"));
     title.setFontSize(20);
@@ -185,11 +182,11 @@ public class GameHud {
     });
 
     toolbar.setLocalTranslation(0, height - 46, 1);
-    toolbar.setBackground(new QuadBackgroundComponent(BG));
+    toolbar.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(toolbar);
     buildToolbar();
 
-    sidePanel.setBackground(new QuadBackgroundComponent(BG));
+    sidePanel.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(sidePanel);
     sidePanel.setCullHint(Spatial.CullHint.Always);
 
@@ -200,7 +197,7 @@ public class GameHud {
     toastLabel = new Label(" ");
     toastLabel.setFontSize(15);
     toastLabel.setColor(TEXT);
-    toastLabel.setBackground(new QuadBackgroundComponent(new ColorRGBA(0.08f, 0.09f, 0.12f, 0.88f)));
+    toastLabel.setBackground(UiTextures.panelBackground());
     toastLabel.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
     toastLabel.setPreferredSize(new Vector3f(520, 34, 0));
     toastLabel.setLocalTranslation(width / 2f - 260, height - TOPBAR_HEIGHT - 14, 5);
@@ -216,20 +213,6 @@ public class GameHud {
     Label l = new Label(" ");
     l.setPreferredSize(new Vector3f(width, 1, 0));
     return l;
-  }
-
-  /** A thin accent-colored rule under the top bar - the one branding touch
-   * that separates "a row of gray buttons" from something that reads as a
-   * designed app. */
-  private Geometry accentStrip(float width, float y) {
-    Quad quad = new Quad(width, 2.5f);
-    Geometry g = new Geometry("hudAccent", quad);
-    Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-    mat.setColor("Color", ACTIVE);
-    g.setMaterial(mat);
-    g.setLocalTranslation(0, y, 2);
-    g.setQueueBucket(RenderQueue.Bucket.Gui);
-    return g;
   }
 
   private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters"};

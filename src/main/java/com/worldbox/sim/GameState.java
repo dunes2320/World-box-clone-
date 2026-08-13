@@ -30,6 +30,7 @@ public class GameState {
   public GlobalMarket market = new GlobalMarket();
   public DiplomacyManager diplomacy = new DiplomacyManager();
   public List<Tornado> tornadoes = new ArrayList<>();
+  public List<Cloud> clouds = new ArrayList<>();
   public Monster monster;
   public int tick = 0;
   public Rng rng;

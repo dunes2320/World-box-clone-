@@ -41,14 +41,36 @@ public class Events {
   // regardless of how much fuel is still out there.
   private static final int MAX_SIMULTANEOUS_FIRE = 220;
 
+  // a fire holding at the MAX_SIMULTANEOUS_FIRE cap for a long stretch
+  // would otherwise just sit there indefinitely (spread blocked, but
+  // individual cells still replaced by fresh ignitions as old ones burn
+  // out) - a real wildfire eventually burns itself out, runs out of
+  // easy fuel, or the weather turns on it, so a fire that's been raging
+  // this big for this long starts picking up random forced-out cells
+  // each tick, an escalating chance that guarantees it's fully dead
+  // within a bounded (but not exactly predictable) further stretch.
+  private static final int SIZABLE_FIRE = 40;
+  private static final int BURNOUT_ONSET_TICKS = 300;
+
   private static void updateFire(GameState state) {
     WorldGrid grid = state.grid;
-    if (grid.burningCells.isEmpty()) return;
+    if (grid.burningCells.isEmpty()) { grid.fireStreak = 0; return; }
     List<Integer> burningCells = new ArrayList<>(grid.burningCells);
     boolean canSpread = grid.burningCells.size() < MAX_SIMULTANEOUS_FIRE;
 
+    if (grid.burningCells.size() >= SIZABLE_FIRE) grid.fireStreak++; else grid.fireStreak = 0;
+    double burnoutChance = grid.fireStreak > BURNOUT_ONSET_TICKS
+        ? Math.min(0.02, (grid.fireStreak - BURNOUT_ONSET_TICKS) * 0.00005) : 0;
+
     int[][] dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     for (int i : burningCells) {
+      if (burnoutChance > 0 && Math.random() < burnoutChance) {
+        grid.burning[i] = false;
+        grid.burningCells.remove(i);
+        grid.burnTimer[i] = 0;
+        grid.markDirtyIdx(i);
+        continue;
+      }
       grid.burnTimer[i]--;
       if (grid.burnTimer[i] <= 0) {
         grid.burning[i] = false;

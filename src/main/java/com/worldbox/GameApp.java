@@ -81,22 +81,26 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     camTarget.set(Config.COLS / 2f, 0, Config.ROWS / 2f);
 
     viewPort.setBackgroundColor(new ColorRGBA(0.56f, 0.78f, 0.91f, 1f));
-    // Kept deliberately dim: Lighting.j3md just adds ambient+diffuse and
-    // clamps at 1.0 with no tonemapping, so a bright ambient+directional
-    // combo saturates every surface to white regardless of its own color.
-    // This headroom (ambient+full-facing-diffuse tops out ~1.05) keeps
-    // color variation intact while still giving real directional shading.
-    rootNode.addLight(new AmbientLight(new ColorRGBA(0.4f, 0.42f, 0.46f, 1f)));
+    // Lighting.j3md just adds ambient+diffuse and clamps at 1.0 with no
+    // tonemapping, so a bright ambient+directional combo saturates every
+    // surface to white regardless of its own color - that headroom is why
+    // this stays modest rather than a naive "just make it brighter". The
+    // actual fix for "lighting reads as flat" is contrast, not brightness:
+    // pulling the ambient floor down (0.4 -> 0.3) leaves much more of the
+    // 0-1 range for the directional term to actually carve out, so a lit
+    // block and a shadowed block read as visibly different instead of
+    // both sitting close to the same washed-out ambient-dominated value.
+    rootNode.addLight(new AmbientLight(new ColorRGBA(0.3f, 0.32f, 0.36f, 1f)));
     DirectionalLight sun = new DirectionalLight();
     sun.setDirection(new Vector3f(-0.5f, -1f, -0.4f).normalizeLocal());
-    sun.setColor(new ColorRGBA(0.66f, 0.63f, 0.55f, 1f));
+    sun.setColor(new ColorRGBA(0.78f, 0.74f, 0.64f, 1f));
     rootNode.addLight(sun);
 
     rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
     com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
-        new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 1024, 2);
+        new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 2048, 3);
     shadowRenderer.setLight(sun);
-    shadowRenderer.setShadowIntensity(0.45f);
+    shadowRenderer.setShadowIntensity(0.6f);
     shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
     viewPort.addProcessor(shadowRenderer);
 

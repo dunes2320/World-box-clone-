@@ -16,6 +16,7 @@ import com.worldbox.config.Config;
 import com.worldbox.sim.Army;
 import com.worldbox.sim.Bank;
 import com.worldbox.sim.Business;
+import com.worldbox.sim.Cloud;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Human;
 import com.worldbox.sim.Military;
@@ -43,6 +44,13 @@ public class EntityRenderer {
   }
   private static final ColorRGBA TREE_COLOR = new ColorRGBA(0.137f, 0.361f, 0.157f, 1f);
   private static final ColorRGBA TRUNK_COLOR = new ColorRGBA(0.365f, 0.259f, 0.157f, 1f);
+  private static final ColorRGBA FOLIAGE_COLOR = new ColorRGBA(0.29f, 0.52f, 0.22f, 1f);
+  private static final ColorRGBA[] FLOWER_COLORS = {
+      new ColorRGBA(0.95f, 0.85f, 0.25f, 1f), // yellow
+      new ColorRGBA(0.92f, 0.35f, 0.4f, 1f),  // red-pink
+      new ColorRGBA(0.95f, 0.95f, 0.95f, 1f), // white
+      new ColorRGBA(0.62f, 0.42f, 0.85f, 1f), // purple
+  };
   private static final ColorRGBA BANK_COLOR = new ColorRGBA(0.85f, 0.72f, 0.25f, 1f);
   private static final Map<String, ColorRGBA> BUSINESS_COLORS = new HashMap<>();
   static {
@@ -62,6 +70,7 @@ public class EntityRenderer {
   // no houses around it at all, reading as "a circle with a square in
   // it" instead of a village
   private static final int HOUSE_CAP_SAMPLE = 6000;
+  private static final int FOLIAGE_CAP_SAMPLE = 4500;
   private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
   private static final ColorRGBA RUIN_COLOR = new ColorRGBA(0.32f, 0.3f, 0.28f, 1f);
   // these used to be tuned for a small 128x128 map with a handful of
@@ -80,6 +89,7 @@ public class EntityRenderer {
   // fire silently continuing to spread past what's visible
   private static final int FIRE_CAP = 220;
   private static final int SPARKLE_CAP = 28;
+  private static final int RAIN_CAP = 140;
   private static final ColorRGBA FLAME_A = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FLAME_B = new ColorRGBA(1f, 0.82f, 0.25f, 1f);
   private static final ColorRGBA SPARKLE_COLOR = new ColorRGBA(1f, 0.95f, 0.6f, 1f);
@@ -93,8 +103,10 @@ public class EntityRenderer {
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
+  private final Mesh cloudTemplate, rainTemplate, foliageTemplate, flowerTemplate;
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
+  private final Geometry foliageGeom, flowersGeom;
 
   private final Node settlementsNode = new Node("settlements");
   private final Node armiesNode = new Node("armies");
@@ -106,6 +118,8 @@ public class EntityRenderer {
   private final Node firesNode = new Node("fires");
   private final Node smokeNode = new Node("smoke");
   private final Node sparklesNode = new Node("sparkles");
+  private final Node rainNode = new Node("rain");
+  private final Node cloudsNode = new Node("clouds");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] armyPool = new Geometry[ARMY_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
@@ -116,6 +130,8 @@ public class EntityRenderer {
   private final Geometry[] firePool = new Geometry[FIRE_CAP];
   private final Geometry[] smokePool = new Geometry[FIRE_CAP];
   private final Geometry[] sparklePool = new Geometry[SPARKLE_CAP];
+  private final Geometry[] rainPool = new Geometry[RAIN_CAP];
+  private final List<Geometry> cloudGeoms = new ArrayList<>();
 
   /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
    * trees/deposits in rebuildStatics() and consumed every frame by the
@@ -203,6 +219,24 @@ public class EntityRenderer {
 
     sparkleTemplate = MeshUtil.buildGem(0.13f, 0.25f);
 
+    // a puffy cloud: three overlapping flat boxes so it doesn't read as
+    // one obvious slab from below
+    cloudTemplate = MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(
+        new Box(1.6f, 0.32f, 1.1f),
+        MeshUtil.translatedCopy(new Box(1f, 0.26f, 0.9f), 1.1f, 0.08f, 0.2f)),
+        MeshUtil.translatedCopy(new Box(0.9f, 0.24f, 0.85f), -1f, 0.05f, -0.15f));
+    rainTemplate = new Box(0.02f, 0.32f, 0.02f);
+
+    // ground-level foliage: two thin crossed blades reading as a little
+    // tuft of grass/weeds from any angle, not just a flat card that
+    // vanishes edge-on. Bottom sits at local y=0 like the rock cluster.
+    Mesh bladeA = MeshUtil.translatedCopy(new Box(0.11f, 0.09f, 0.015f), 0, 0.09f, 0);
+    Mesh bladeB = new Box(0.015f, 0.09f, 0.11f);
+    MeshUtil.rotateYInPlace(bladeB, 0.3f);
+    bladeB = MeshUtil.translatedCopy(bladeB, 0, 0.09f, 0);
+    foliageTemplate = MeshUtil.mergeMeshes(bladeA, bladeB);
+    flowerTemplate = MeshUtil.buildGem(0.045f, 0.09f);
+
     // small satellite houses scattered around a settlement's main building
     // - the town-hall marker alone read as a single icon, not a village
     houseTemplate = MeshUtil.mergeMeshes(
@@ -224,6 +258,16 @@ public class EntityRenderer {
     stoneDepositsGeom = new Geometry("StoneDeposits", stoneDepositTemplate.deepClone());
     stoneDepositsGeom.setMaterial(vertexColorMaterial());
     root.attachChild(stoneDepositsGeom);
+
+    foliageGeom = new Geometry("Foliage", foliageTemplate.deepClone());
+    foliageGeom.setMaterial(vertexColorMaterial());
+    foliageGeom.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+    root.attachChild(foliageGeom);
+
+    flowersGeom = new Geometry("Flowers", flowerTemplate.deepClone());
+    flowersGeom.setMaterial(vertexColorMaterial());
+    flowersGeom.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+    root.attachChild(flowersGeom);
 
     housesGeom = new Geometry("Houses", houseTemplate.deepClone());
     housesGeom.setMaterial(vertexColorMaterial());
@@ -327,6 +371,23 @@ public class EntityRenderer {
       sparklePool[i] = g;
     }
     root.attachChild(sparklesNode);
+
+    ColorRGBA rainColor = new ColorRGBA(0.62f, 0.72f, 0.85f, 0.6f);
+    for (int i = 0; i < RAIN_CAP; i++) {
+      Geometry g = new Geometry("Rain" + i, rainTemplate);
+      Material rainMat = new Material(assets, "Common/MatDefs/Misc/Unshaded.j3md");
+      rainMat.setColor("Color", rainColor);
+      rainMat.setTransparent(true);
+      rainMat.getAdditionalRenderState().setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+      g.setMaterial(rainMat);
+      g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+      g.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+      g.setCullHint(Spatial.CullHint.Always);
+      rainNode.attachChild(g);
+      rainPool[i] = g;
+    }
+    root.attachChild(rainNode);
+    root.attachChild(cloudsNode);
 
     // a plain floating cube read as an inert "big moving block" rather
     // than a creature - a body/head/spine silhouette at least reads as
@@ -432,6 +493,8 @@ public class EntityRenderer {
     this.grid = state.grid;
     for (Geometry g : tornadoGeoms) g.removeFromParent();
     tornadoGeoms.clear();
+    for (Geometry g : cloudGeoms) g.removeFromParent();
+    cloudGeoms.clear();
     monsterGeom.setCullHint(Spatial.CullHint.Always);
     rebuildStatics(state);
   }
@@ -458,6 +521,17 @@ public class EntityRenderer {
     return ((h & 0xFFFF) / 65535f - 0.5f) * 0.62f;
   }
 
+  /** Same hash family as jitterAxis but folded to a plain 0..1 - used for
+   * per-cell yes/no decisions (does this grass cell get a foliage tuft,
+   * is it a flower) that need to be stable across rebuilds, not another
+   * position offset. */
+  private static float hash01(int x, int y, int salt) {
+    int h = x * 374761393 + y * 668265263 + salt * 2147483647;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    return (h & 0xFFFF) / 65535f;
+  }
+
   /** Trees/deposits/houses barely move; rebuild their instance lists on a
    * slow cadence instead of every frame. */
   public void rebuildStatics(GameState state) {
@@ -465,6 +539,8 @@ public class EntityRenderer {
     List<PropBatcher.Placement> trunks = new ArrayList<>();
     List<PropBatcher.Placement> deposits = new ArrayList<>();
     List<PropBatcher.Placement> stoneDeposits = new ArrayList<>();
+    List<PropBatcher.Placement> foliage = new ArrayList<>();
+    List<PropBatcher.Placement> flowers = new ArrayList<>();
     burningCache.clear();
     goldCache.clear();
     for (int y = 0; y < grid.rows; y++) {
@@ -499,6 +575,22 @@ public class EntityRenderer {
           float jx = x + 0.5f + jitterAxis(x, y, 3);
           float jz = y + 0.5f + jitterAxis(x, y, 4);
           deposits.add(new PropBatcher.Placement(jx, grid.height[i] + 0.28f, jz, rotY, 1f, c));
+        } else if (grid.terrain[i] == Config.GRASS && res == Config.RES_NONE
+            && foliage.size() < FOLIAGE_CAP_SAMPLE && hash01(x, y, 6) < 0.14f) {
+          // sparse, patchy coverage rather than every single grass block -
+          // real ground cover grows in clumps, not a uniform carpet, and a
+          // literal every-cell carpet would blow well past a sane vertex
+          // budget on a 256x256 map anyway
+          float rotY = hash01(x, y, 7) * 6.28f;
+          float jx = x + 0.5f + jitterAxis(x, y, 8);
+          float jz = y + 0.5f + jitterAxis(x, y, 9);
+          float scale = 0.7f + hash01(x, y, 10) * 0.7f;
+          ColorRGBA tuftColor = FOLIAGE_COLOR.clone().interpolateLocal(TREE_COLOR, hash01(x, y, 11) * 0.4f);
+          foliage.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, scale, tuftColor));
+          if (hash01(x, y, 12) < 0.1f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
+            ColorRGBA fc = FLOWER_COLORS[(int) (hash01(x, y, 13) * FLOWER_COLORS.length) % FLOWER_COLORS.length];
+            flowers.add(new PropBatcher.Placement(jx, grid.height[i] + 0.14f * scale, jz, rotY, scale, fc));
+          }
         }
         if (res == Config.RES_GOLD && goldCache.size() < SPARKLE_CAP) goldCache.add(i);
         if (grid.burning[i] && burningCache.size() < FIRE_CAP) burningCache.add(i);
@@ -512,6 +604,10 @@ public class EntityRenderer {
     depositsGeom.setCullHint(deposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     stoneDepositsGeom.setMesh(PropBatcher.bake(stoneDepositTemplate, stoneDeposits));
     stoneDepositsGeom.setCullHint(stoneDeposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    foliageGeom.setMesh(PropBatcher.bake(foliageTemplate, foliage));
+    foliageGeom.setCullHint(foliage.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    flowersGeom.setMesh(PropBatcher.bake(flowerTemplate, flowers));
+    flowersGeom.setCullHint(flowers.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
 
     // one pass over every human to count actual housed residents per
     // settlement - cheap here (throttled to every 20 ticks) and avoids an
@@ -570,6 +666,7 @@ public class EntityRenderer {
     updateFires(state);
     updateSmoke(state);
     updateSparkles(state);
+    updateWeather(state);
   }
 
   private Mesh tierTemplate(int population) {
@@ -823,6 +920,58 @@ public class EntityRenderer {
     monsterGeom.setLocalRotation(new Quaternion().fromAngleAxis((float) monsterYaw, Vector3f.UNIT_Y));
     monsterLastX = m.x;
     monsterLastZ = m.z;
+  }
+
+  private static final ColorRGBA CLOUD_COLOR = new ColorRGBA(0.96f, 0.97f, 0.99f, 0.85f);
+  private static final ColorRGBA STORM_COLOR = new ColorRGBA(0.42f, 0.45f, 0.5f, 0.92f);
+  private static final float CLOUD_HEIGHT = 15f;
+
+  private void updateWeather(GameState state) {
+    while (cloudGeoms.size() < state.clouds.size()) {
+      Geometry g = new Geometry("Cloud", cloudTemplate);
+      g.setMaterial(soloColorMaterial(CLOUD_COLOR));
+      g.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+      cloudsNode.attachChild(g);
+      cloudGeoms.add(g);
+    }
+    while (cloudGeoms.size() > state.clouds.size()) {
+      cloudGeoms.remove(cloudGeoms.size() - 1).removeFromParent();
+    }
+    List<Cloud> stormClouds = new ArrayList<>();
+    for (int i = 0; i < state.clouds.size(); i++) {
+      Cloud c = state.clouds.get(i);
+      Geometry g = cloudGeoms.get(i);
+      float scale = (float) (c.radius / 5.0);
+      g.setLocalTranslation((float) c.x, CLOUD_HEIGHT, (float) c.z);
+      g.setLocalScale(scale);
+      setSoloColor(g.getMaterial(), c.stormy ? STORM_COLOR : CLOUD_COLOR);
+      if (c.stormy) stormClouds.add(c);
+    }
+
+    // rain: split the shared drop budget across however many storms are
+    // actually active right now, each drop falling on a loop from cloud
+    // height down to the ground, its horizontal spot within the storm's
+    // radius picked once (per slot) via the same hash-scatter trick used
+    // for tree/deposit jitter so it doesn't shimmer between frames
+    int slot = 0;
+    if (!stormClouds.isEmpty()) {
+      int perStorm = RAIN_CAP / stormClouds.size();
+      for (Cloud c : stormClouds) {
+        int gx = clampIdx((int) Math.floor(c.x), grid.cols), gz = clampIdx((int) Math.floor(c.z), grid.rows);
+        float groundH = grid.height[grid.idx(gx, gz)];
+        for (int j = 0; j < perStorm && slot < RAIN_CAP; j++, slot++) {
+          float ox = (jitterAxis(c.id * 97 + j, 11, 5)) * (float) c.radius * 1.6f;
+          float oz = (jitterAxis(c.id * 97 + j, 13, 7)) * (float) c.radius * 1.6f;
+          float fallSpan = CLOUD_HEIGHT - groundH;
+          float phase = ((state.tick * 3 + j * 37) % 100) / 100f;
+          float y = CLOUD_HEIGHT - phase * fallSpan;
+          Geometry g = rainPool[slot];
+          g.setLocalTranslation((float) c.x + ox, y, (float) c.z + oz);
+          g.setCullHint(Spatial.CullHint.Inherit);
+        }
+      }
+    }
+    for (; slot < RAIN_CAP; slot++) rainPool[slot].setCullHint(Spatial.CullHint.Always);
   }
 
   private void updateTornadoes(GameState state) {

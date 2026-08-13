@@ -54,5 +54,6 @@ public class Simulation {
     Military.update(state);
     Diplomacy.update(state);
     Events.update(state);
+    Weather.update(state);
   }
 }

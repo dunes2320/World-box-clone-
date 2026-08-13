@@ -5,6 +5,7 @@ import com.worldbox.sim.Events;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Nation;
 import com.worldbox.sim.Population;
+import com.worldbox.sim.Weather;
 import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
@@ -37,6 +38,7 @@ public class GodTools {
       new ToolDef("zombie", "Outbreak", "Creatures"),
       new ToolDef("fire", "Fire", "Disasters"),
       new ToolDef("extinguish", "Extinguish", "Disasters"),
+      new ToolDef("storm", "Call Storm", "Disasters"),
       new ToolDef("meteor", "Meteor", "Disasters"),
       new ToolDef("nuke", "Nuke", "Disasters"),
       new ToolDef("earthquake", "Earthquake", "Disasters"),
@@ -139,6 +141,10 @@ public class GodTools {
 
       case "extinguish":
         Events.extinguish(grid, cx, cz, brushRadius(brushSize) + 1);
+        return true;
+
+      case "storm":
+        Weather.triggerStorm(state, cx + 0.5, cz + 0.5);
         return true;
 
       case "meteor":

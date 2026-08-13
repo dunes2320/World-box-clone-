@@ -292,7 +292,12 @@ public class VoxelChunkRenderer {
   }
 
   private boolean borderNeighborDiffers(int x, int z, int owner) {
-    if (!grid.inBounds(x, z)) return true;
+    // the literal edge of the map isn't a real border with anyone - this
+    // used to treat "off the map" as "definitely a different owner",
+    // which painted a bright accent-colored line along the entire outer
+    // edge of the world for any nation whose territory reached it (read
+    // as a stray rendering glitch, not a real border)
+    if (!grid.inBounds(x, z)) return false;
     return grid.ownerNation[grid.idx(x, z)] != owner;
   }
 
