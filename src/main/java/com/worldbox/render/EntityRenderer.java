@@ -461,16 +461,31 @@ public class EntityRenderer {
     depositsGeom.setMesh(PropBatcher.bake(depositTemplate, deposits));
     depositsGeom.setCullHint(deposits.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
 
+    // one pass over every human to count actual housed residents per
+    // settlement - cheap here (throttled to every 20 ticks) and avoids an
+    // O(settlements x humans) scan below
+    Map<Integer, Integer> housedBySettlement = new HashMap<>();
+    for (Human h : state.humans) {
+      if (h.hasHouse) housedBySettlement.merge(h.settlementId, 1, Integer::sum);
+    }
+
     List<PropBatcher.Placement> houses = new ArrayList<>();
     for (Settlement s : state.settlements.values()) {
       if (houses.size() >= HOUSE_CAP_SAMPLE) break;
       if (s.populationCount < 1) continue;
       Nation nation = state.nations.get(s.nationId);
       ColorRGBA color = nation != null ? nationOrFallback(nation.id, HOUSE_FALLBACK) : HOUSE_FALLBACK;
+      // a vacant house reads as an obviously washed-out, duller version
+      // of the nation's color instead of looking identical to an
+      // occupied one
+      ColorRGBA vacantColor = color.clone().interpolateLocal(ColorRGBA.White, 0.65f);
+      vacantColor.a = 0.75f;
+      int housed = housedBySettlement.getOrDefault(s.id, 0);
+      int occupiedHouses = (int) Math.ceil(housed / Settlement.PEOPLE_PER_HOUSE);
       // even a lone founder gets a couple of houses instead of nothing;
       // a full-size settlement gets a real cluster instead of topping
       // out at 10 no matter how big it's grown
-      int houseCount = Math.min(32, 2 + s.populationCount / 3);
+      int houseCount = Math.min(32, Math.max(2 + s.populationCount / 3, occupiedHouses));
       for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
         // a spiral placement (radius grows with i) reads as an organic
         // cluster of streets/blocks instead of a single uniform ring
@@ -480,7 +495,8 @@ public class EntityRenderer {
         float hz = s.z + 0.5f + (float) Math.sin(angle) * radius;
         int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
         float hh = grid.height[grid.idx(gx, gz)];
-        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.55f + (i % 4) * 0.09f, color));
+        ColorRGBA c = i < occupiedHouses ? color : vacantColor;
+        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.55f + (i % 4) * 0.09f, c));
       }
     }
     housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));

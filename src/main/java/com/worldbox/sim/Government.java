@@ -20,7 +20,11 @@ public class Government {
   public static String random() { return TYPES[(int) (Math.random() * TYPES.length)]; }
 
   public static void update(GameState state) {
-    boolean sample = state.tick % 20 == 0;
+    // once a month, not every 20 ticks - a monthly cadence paired with
+    // the 10-year retention window below gives a graph with real,
+    // legible resolution instead of a nearly-continuous firehose of
+    // samples that just piles up forever
+    boolean sample = state.tick % com.worldbox.util.Calendar.DAYS_PER_MONTH == 0;
     double worldTreasury = 0;
     double worldMarketCap = 0;
     double worldGdp = 0;
@@ -96,12 +100,11 @@ public class Government {
     }
   }
 
-  // 900 samples at the 20-tick sampling interval below is ~50 years of
-  // history - long enough that the economy graph shows a game's actual
-  // lifetime trend instead of just the last ~7 years, which made a long
-  // plateau look like the chart itself had a hard ceiling
+  // 120 monthly samples = a rolling 10-year window, per the game's own
+  // request: recent trend detail matters more than the whole game's
+  // history piling up in one chart forever
   private static void trim(java.util.ArrayDeque<Double> dq) {
-    while (dq.size() > 900) dq.removeFirst();
+    while (dq.size() > 120) dq.removeFirst();
   }
 
   /** Inflation is measured the way it actually happens: new money entering

@@ -789,7 +789,7 @@ public class GameHud {
    * that turns it into the plain "inflation over the last year" percentage
    * everyone actually expects from an "Inflation" readout. */
   private double annualInflation(Nation n) {
-    int windowsPerYear = com.worldbox.util.Calendar.DAYS_PER_YEAR / 20;
+    int windowsPerYear = com.worldbox.util.Calendar.MONTHS_PER_YEAR;
     java.util.ArrayDeque<Double> hist = n.inflationHistory;
     if (hist.isEmpty()) return n.inflationRate * windowsPerYear;
     Double[] arr = hist.toArray(new Double[0]);
