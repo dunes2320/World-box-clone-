@@ -155,7 +155,7 @@ public class VoxelChunkRenderer {
             if (y == VoxelWorld.WATER_LEVEL) shoreline = isShoreline(x, z);
             color = shoreline ? FOAM_COLOR : WATER_COLOR;
           } else {
-            color = BLOCK_COLOR.get(b);
+            color = mottle(BLOCK_COLOR.get(b), x, y, z);
           }
           addVisibleFaces(mb, x, y, z, b, color);
         }
@@ -175,6 +175,26 @@ public class VoxelChunkRenderer {
       waterBasePositions.remove(ci);
     }
   }
+
+  /** No texture atlas/UV mapping in this renderer, so every block of a
+   * given type used to be one perfectly flat, identical color across an
+   * entire mountain or plain - which is what read as "stone looks dumb,
+   * add some texture". A cheap deterministic per-block hash gives each
+   * individual block its own small brightness offset instead, breaking
+   * the flatness up into a mottled, textured-looking surface for free -
+   * same block position always gets the same offset, so it doesn't
+   * shimmer or change between frames. */
+  private static ColorRGBA mottle(ColorRGBA base, int x, int y, int z) {
+    int h = x * 374761393 + y * 668265263 + z * 2147483647;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    float t = (h & 0xFFFF) / 65535f; // 0..1, deterministic per block
+    float offset = (t - 0.5f) * 0.16f;
+    return new ColorRGBA(
+        clamp01(base.r + offset), clamp01(base.g + offset), clamp01(base.b + offset), base.a);
+  }
+
+  private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
 
   /** A water column counts as shoreline if any orthogonal neighbor is dry
    * land near the waterline - used to tint a light foam ring around
