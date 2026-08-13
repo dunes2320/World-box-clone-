@@ -19,6 +19,15 @@ public class Human {
    * driven by tick-of-day and industriousness; see Population.updateRoutine. */
   public String routine = "work";
   public double targetX, targetZ;
+  /** Current facing/travel direction in radians, turned gradually toward
+   * wherever the target actually is instead of snapping instantly - see
+   * Population.moveToward. Starts pointed in a random direction so a
+   * crowd of people don't all pop into motion facing the same way. */
+  public double heading = Math.random() * Math.PI * 2;
+  /** Phase for the small side-to-side meander in moveToward - increments
+   * steadily every tick spent moving, independent of position, so the
+   * wobble is smooth instead of jumping around with each step size. */
+  public double walkPhase = Math.random() * Math.PI * 2;
   public int gatherX = -1, gatherY = -1, gatherTimer = 0;
   public String carryingType;
   public double carryingAmount;
@@ -35,6 +44,11 @@ public class Human {
    * nation) starts with nothing. It's what the bank repossesses and sells
    * if they default on a loan they can't pay back. */
   public boolean hasHouse = false;
+  /** Growth used to be a settlement-level accumulator that spawned a new
+   * citizen out of nowhere once enough food/housing existed - no parents
+   * involved. Population now only grows from an actual mature
+   * male/female pair; see Settlement.update(). */
+  public final boolean female = Math.random() < 0.5;
 
   public Human(double x, double z, int nationId, int settlementId) {
     this.id = nextId++;

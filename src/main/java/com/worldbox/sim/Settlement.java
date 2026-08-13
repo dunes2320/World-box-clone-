@@ -129,9 +129,18 @@ public class Settlement {
 
   public static void update(GameState state) {
     for (Settlement s : state.settlements.values()) s.populationCount = 0;
+    // one pass over every human to figure out which settlements actually
+    // have a mature male and a mature female resident - growth below only
+    // fires for settlements with a real pair, not just enough stored food
+    Map<Integer, Boolean> hasMatureMale = new HashMap<>();
+    Map<Integer, Boolean> hasMatureFemale = new HashMap<>();
     for (Human h : state.humans) {
       Settlement s = state.settlements.get(h.settlementId);
       if (s != null) s.populationCount++;
+      if (h.age >= Config.MATURE_AGE) {
+        if (h.female) hasMatureFemale.put(h.settlementId, true);
+        else hasMatureMale.put(h.settlementId, true);
+      }
     }
 
     List<Settlement> toAbandon = null;
@@ -210,11 +219,19 @@ public class Settlement {
         }
       }
 
+      // a hard requirement (zero growth without a same-settlement pair)
+      // turned any settlement that randomly skewed to one gender - common
+      // once war/starvation shrinks a population down to a few people -
+      // into a death spiral with no way back, since it could then never
+      // grow again on its own. A real pair still grows the settlement far
+      // faster, but a settlement without one isn't stuck at zero forever.
+      boolean canReproduce = hasMatureMale.getOrDefault(settlement.id, false)
+          && hasMatureFemale.getOrDefault(settlement.id, false);
       if (settlement.stock.get("food") > Config.SETTLEMENT_BUFFER
           && settlement.populationCount < POP_CAP_PER_SETTLEMENT
           && settlement.populationCount < houseCapacity
           && state.humans.size() < Config.MAX_HUMANS) {
-        settlement.growthAccum += 0.015;
+        settlement.growthAccum += canReproduce ? 0.02 : 0.003;
         if (settlement.growthAccum >= 1) {
           settlement.growthAccum -= 1;
           settlement.stock.merge("food", -18.0, Double::sum);

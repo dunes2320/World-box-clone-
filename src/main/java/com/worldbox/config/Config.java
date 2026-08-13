@@ -51,9 +51,13 @@ public final class Config {
   public static final int TICK_MS = 220;
   // was 420 - too tight a ceiling to see real multi-year growth play out;
   // a 10-15 year run hit this cap by year 8 and sat flat for the rest
-  public static final int MAX_HUMANS = 600;
-  public static final int MAX_AGE = 3200;
-  public static final int MATURE_AGE = 70;
+  public static final int MAX_HUMANS = 3000;
+  // age is tracked in days (1 tick = 1 day, 360 days/year - see
+  // Population's OLD_AGE_START/SPAN, which run a realistic 60-90 year
+  // lifespan), so adulthood has to be years of days too - this was left
+  // at a stale "70" from before anything actually read it, which would
+  // have let a 70-day-old infant qualify as a reproductive adult
+  public static final int MATURE_AGE = 16 * 360;
 
   // economy
   public static final Map<String, Double> BASE_PRICES = new HashMap<>();

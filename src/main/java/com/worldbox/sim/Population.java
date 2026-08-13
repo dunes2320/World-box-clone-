@@ -123,7 +123,24 @@ public class Population {
   private static void applyLivingCost(GameState state, Human h) {
     h.wealth -= 0.05;
     resolveFinances(state, h);
-    if (!h.hasHouse) maybeBuyHouse(state.nations.get(h.nationId), h);
+    if (!h.hasHouse) {
+      maybeBuyHouse(state.nations.get(h.nationId), h);
+      if (!h.hasHouse) applyHomelessness(h);
+    }
+  }
+
+  /** Being homeless has to actually cost something beyond an ugly color
+   * on a house that isn't theirs. No roof and no job means no reliable
+   * warmth or food, which is a real, if slow, risk of dying out on the
+   * street. No roof but still working carries its own steady risk - no
+   * way to clean up or keep a fixed address chips away at whether they
+   * get to keep that job. */
+  private static void applyHomelessness(Human h) {
+    if (h.job == null) {
+      if (Math.random() < 0.0008) h.dead = true;
+    } else if (Math.random() < 0.0005) {
+      h.job = null;
+    }
   }
 
   /** Losing a house to repossession shouldn't be a life sentence - once a
@@ -221,13 +238,34 @@ public class Population {
     resolveFinances(state, h);
   }
 
+  /** Walking dead-straight at a target and snapping to face it instantly
+   * every tick reads as a puppet on rails, not a person - this steers
+   * the current heading toward the target gradually (a real turn rate,
+   * not an instant snap) and adds a small side-to-side wobble so a
+   * crowd's paths curve and meander instead of every path being a laser
+   * line. Direction of travel and facing (heading) are the same thing
+   * here, so the wobble shows up as actual footpath curvature, not just
+   * a cosmetic shimmy layered on top of straight-line movement. */
   private static double moveToward(WorldGrid grid, Human h, double speed) {
     double dx = h.targetX - h.x, dz = h.targetZ - h.z;
     double dist = Math.hypot(dx, dz);
     if (dist < 0.05) return dist;
+
+    double desired = Math.atan2(dx, dz);
+    double turn = Math.atan2(Math.sin(desired - h.heading), Math.cos(desired - h.heading));
+    double maxTurn = 0.35; // radians/tick - fast enough to not feel sluggish, slow enough to curve
+    h.heading += clamp(turn, -maxTurn, maxTurn);
+
+    // a gentle per-person wobble, distinct in rate per individual (seeded
+    // off their id) so a crowd doesn't all sway in lockstep - phase
+    // advances steadily rather than tracking position, so it stays
+    // smooth regardless of how far a given step actually moves them
+    h.walkPhase += 0.12 + (h.id % 7) * 0.01;
+    double wobble = Math.sin(h.walkPhase) * 0.12;
+    double moveAngle = h.heading + wobble;
     double step = Math.min(dist, speed);
-    double nx = h.x + (dx / dist) * step;
-    double nz = h.z + (dz / dist) * step;
+    double nx = h.x + Math.sin(moveAngle) * step;
+    double nz = h.z + Math.cos(moveAngle) * step;
     if (passable(grid, nx, nz)) { h.x = nx; h.z = nz; }
     else pickWanderTarget(grid, h);
     return dist;
