@@ -12,23 +12,49 @@ public class WorldGen {
     Noise fbm = new Noise((int) seed);
     Rng rng = new Rng(seed * 7 + 3);
     int cols = grid.cols, rows = grid.rows;
+    int n = cols * rows;
+
+    // Pass 1: raw multi-scale elevation, no bias applied yet. The
+    // dominant term is low-frequency ("continents"), and a map this size
+    // only spans a handful of its wavelengths, so its average value
+    // drifts noticeably from seed to seed - without correcting for that
+    // one seed could come out almost all ocean and another almost all
+    // mountain. Measuring this map's own actual mean first and
+    // calibrating against it keeps land/water proportions consistent
+    // regardless of seed.
+    double[] rawElevation = new double[n];
+    double sum = 0;
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        int i = grid.idx(x, y);
+        double continents = fbm.fbm(x * 0.01 + 1000, y * 0.01 + 1000, 4, 2, 0.5);
+        double base = fbm.fbm(x * 0.06, y * 0.06, 5, 2, 0.5);
+        double warp = fbm.fbm(x * 0.02 + 50, y * 0.02 + 50, 3, 2, 0.5);
+        double e = continents * 1.3 + base * 0.55 + warp * 0.3;
+        rawElevation[i] = e;
+        sum += e;
+      }
+    }
+    double mean = sum / n;
 
     for (int y = 0; y < rows; y++) {
       for (int x = 0; x < cols; x++) {
         int i = grid.idx(x, y);
         double nx = (double) x / cols - 0.5;
         double ny = (double) y / rows - 0.5;
-        // domain-warp the radial falloff with slow noise so the coastline
-        // comes out as bays/peninsulas instead of one clean circular blob
-        double coastWarpX = fbm.fbm(x * 0.015 + 700, y * 0.015 + 700, 3, 2, 0.5) - 0.5;
-        double coastWarpY = fbm.fbm(x * 0.015 + 900, y * 0.015 + 900, 3, 2, 0.5) - 0.5;
-        double radial = Math.sqrt(
-            (nx + coastWarpX * 0.35) * (nx + coastWarpX * 0.35)
-                + (ny + coastWarpY * 0.35) * (ny + coastWarpY * 0.35)) * 2;
 
-        double base = fbm.fbm(x * 0.06, y * 0.06, 5, 2, 0.5);
-        double warp = fbm.fbm(x * 0.02 + 50, y * 0.02 + 50, 3, 2, 0.5);
-        double elevation = base * 0.75 + warp * 0.25 - radial * 0.55;
+        // only the outer ~8% of the map tapers toward water, so the
+        // border reads as a coastline instead of terrain cutting off -
+        // unlike the old radial term this doesn't touch anywhere else,
+        // so mountains/forests can appear anywhere in the interior
+        double edgeDist = 0.5 - Math.max(Math.abs(nx), Math.abs(ny));
+        double edgeFade = Math.min(1.0, edgeDist / 0.08);
+
+        // +0.12 relative to this map's own mean keeps land somewhat more
+        // common than water without depending on absolute noise output,
+        // which is what made the water/land split swing wildly by seed
+        double elevation = (rawElevation[i] - mean) + 0.28;
+        elevation = elevation * edgeFade - (1 - edgeFade) * 1.2;
 
         double h = elevation * 14;
         grid.height[i] = (float) h;
@@ -55,9 +81,9 @@ public class WorldGen {
           grid.terrain[i] = Config.WATER;
         } else if (h < 0.5) {
           grid.terrain[i] = Config.SAND;
-        } else if (h > 5.2) {
+        } else if (h > 8.5) {
           grid.terrain[i] = Config.STONE;
-        } else if (h > 3.6 && fbm.fbm(x * 0.1 + 200, y * 0.1 + 200, 2, 2, 0.5) > 0.55) {
+        } else if (h > 6.5 && fbm.fbm(x * 0.1 + 200, y * 0.1 + 200, 2, 2, 0.5) > 0.6) {
           grid.terrain[i] = Config.STONE;
         } else if (moisture < 0.32) {
           grid.terrain[i] = Config.DIRT;
