@@ -269,6 +269,7 @@ public class Events {
         for (Human h : state.humans) if (h.settlementId == target.id) victims.add(h);
         for (int i = 0; i < 2 && !victims.isEmpty(); i++) {
           victims.get((int) (Math.random() * victims.size())).dead = true;
+          DeathStats.monster++;
         }
         target.stock.put("food", Math.max(0, target.stock.get("food") - 15));
         target.stock.put("wood", Math.max(0, target.stock.get("wood") - 8));

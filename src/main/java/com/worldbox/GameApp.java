@@ -534,21 +534,24 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       else if (com.worldbox.config.Config.ALLIANCE.equals(r.status)) allied++;
     }
     System.out.println(String.format(
-        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f atWar=%d allied=%d armies=%d",
+        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f atWar=%d allied=%d armies=%d deaths[%s]",
         years, state.tick, state.humans.size(), state.nations.size(), Nation.totalFounded(),
-        state.settlements.size(), homeless, totalWealth / n, totalDebt / n, atWar, allied, state.armies.size()));
+        state.settlements.size(), homeless, totalWealth / n, totalDebt / n, atWar, allied, state.armies.size(),
+        com.worldbox.sim.DeathStats.summary()));
+    com.worldbox.sim.DeathStats.reset();
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
       int pop = 0;
+      double food = 0; int farmCells = 0; int starveTicks = 0;
       for (int sid : nation.settlementIds) {
         com.worldbox.sim.Settlement s = state.settlements.get(sid);
-        if (s != null) pop += s.populationCount;
+        if (s != null) { pop += s.populationCount; food += s.stock.get("food"); farmCells += s.farmCells; starveTicks += s.starveTicks; }
       }
       System.out.println(String.format(
-          "  NATION %s pop=%d gov=%s treasury=%.0f bankReserves=%.0f bankLoans=%.0f moneySupply=%.0f gdp=%.0f unemployment=%.2f inflation=%.3f exchangeRate=%.2f collapsed=%b stability=%.0f",
+          "  NATION %s pop=%d gov=%s treasury=%.0f bankReserves=%.0f bankLoans=%.0f moneySupply=%.0f gdp=%.0f unemployment=%.2f inflation=%.3f exchangeRate=%.2f collapsed=%b stability=%.0f food=%.0f farmCells=%d starveTicks=%d",
           nation.name, pop, nation.government, nation.treasury, nation.bank.reserves, nation.bank.loans,
           nation.moneySupply, nation.gdpHistory.isEmpty() ? 0 : nation.gdpHistory.peekLast(), nation.unemploymentRate,
-          nation.inflationRate, nation.exchangeRate, nation.currencyCollapsed, nation.stability));
+          nation.inflationRate, nation.exchangeRate, nation.currencyCollapsed, nation.stability, food, farmCells, starveTicks));
     }
   }
 

@@ -127,6 +127,7 @@ public class GameHud {
     topBar.setLocalTranslation(0, height, 1);
     topBar.setBackground(new QuadBackgroundComponent(BG));
     guiNode.attachChild(topBar);
+    guiNode.attachChild(accentStrip(width, height - TOPBAR_HEIGHT));
 
     Label title = topBar.addChild(new Label("WORLD BOX 3D"));
     title.setFontSize(20);
@@ -188,6 +189,20 @@ public class GameHud {
     Label l = new Label(" ");
     l.setPreferredSize(new Vector3f(width, 1, 0));
     return l;
+  }
+
+  /** A thin accent-colored rule under the top bar - the one branding touch
+   * that separates "a row of gray buttons" from something that reads as a
+   * designed app. */
+  private Geometry accentStrip(float width, float y) {
+    Quad quad = new Quad(width, 2.5f);
+    Geometry g = new Geometry("hudAccent", quad);
+    Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+    mat.setColor("Color", ACTIVE);
+    g.setMaterial(mat);
+    g.setLocalTranslation(0, y, 2);
+    g.setQueueBucket(RenderQueue.Bucket.Gui);
+    return g;
   }
 
   private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters"};

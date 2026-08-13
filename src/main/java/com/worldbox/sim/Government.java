@@ -224,6 +224,7 @@ public class Government {
       if (losses == 0 && !residents.isEmpty()) losses = 1;
       for (int i = 0; i < losses && !residents.isEmpty(); i++) {
         residents.remove((int) (Math.random() * residents.size())).dead = true;
+        DeathStats.revolt++;
       }
       s.stock.merge("food", -s.stock.getOrDefault("food", 0.0) * 0.3, Double::sum);
     }

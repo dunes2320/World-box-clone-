@@ -19,6 +19,19 @@ public class Population {
     return new Human(x, z, nationId, settlementId);
   }
 
+  /** Initial settlers (a founding population, or the wanderers the world
+   * starts with) shouldn't all be newborns - nobody would ever reach
+   * Config.MATURE_AGE (16 years) for the first 16 years of any game, which
+   * would make real pair-based reproduction effectively dead on arrival.
+   * Only babies actually born in-sim (see Settlement.update) should start
+   * at age 0; everyone else starts already grown, spread across a
+   * realistic working-adult range. */
+  public static Human createAdult(double x, double z, int nationId, int settlementId) {
+    Human h = new Human(x, z, nationId, settlementId);
+    h.age = Config.MATURE_AGE + (int) (Math.random() * 20 * com.worldbox.util.Calendar.DAYS_PER_YEAR);
+    return h;
+  }
+
   private static boolean passable(WorldGrid grid, double x, double z) {
     int gx = (int) Math.floor(x), gz = (int) Math.floor(z);
     if (!grid.inBounds(gx, gz)) return false;
@@ -137,9 +150,10 @@ public class Population {
    * get to keep that job. */
   private static void applyHomelessness(Human h) {
     if (h.job == null) {
-      if (Math.random() < 0.0008) h.dead = true;
+      if (Math.random() < 0.0008) { h.dead = true; DeathStats.homeless++; }
     } else if (Math.random() < 0.0005) {
       h.job = null;
+      DeathStats.jobLossHomeless++;
     }
   }
 
@@ -324,6 +338,45 @@ public class Population {
     }
   }
 
+  /** The settlement's market, if it has one - a business isn't just a
+   * capital number on a graph, it's a stall a citizen can actually be seen
+   * walking to. Same scatter-around-the-settlement offset the renderer
+   * uses to place the market prop itself (EntityRenderer.updateBusinesses),
+   * so a shopper's route ends where the stall is actually drawn instead of
+   * just at the settlement's center tile. */
+  private static Business findMarket(GameState state, int settlementId) {
+    for (Business b : state.businesses.values()) {
+      if (b.settlementId == settlementId && b.type.equals("market")) return b;
+    }
+    return null;
+  }
+
+  private static double marketX(Settlement s, Business market) {
+    float angle = market.id * 2.399963f;
+    return s.x + 0.5 + Math.cos(angle) * 1.4;
+  }
+
+  private static double marketZ(Settlement s, Business market) {
+    float angle = market.id * 2.399963f;
+    return s.z + 0.5 + Math.sin(angle) * 1.4;
+  }
+
+  private static final double SHOP_PRICE = 2.5;
+
+  /** A trip to market is a real errand: walk there, spend a bit, walk
+   * back to whatever leisure was doing before. Nothing to buy without a
+   * market, or without a little spare wealth to spend. */
+  private static void maybeGoShopping(GameState state, Human h) {
+    if (h.wealth < SHOP_PRICE * 2 || Math.random() >= 0.006) return;
+    Settlement s = state.settlements.get(h.settlementId);
+    if (s == null) return;
+    Business market = findMarket(state, h.settlementId);
+    if (market == null) return;
+    h.state = "shopping";
+    h.targetX = marketX(s, market);
+    h.targetZ = marketZ(s, market);
+  }
+
   public static void update(GameState state) {
     WorldGrid grid = state.grid;
     List<Human> next = new ArrayList<>(state.humans.size());
@@ -341,14 +394,14 @@ public class Population {
         continue;
       }
 
-      if (diesOfOldAge(h)) continue;
+      if (diesOfOldAge(h)) { DeathStats.oldAge++; continue; }
 
       // no nation means no money and no debt - a wanderer has nothing to
       // spend and nothing to owe until they actually join or found one
       if (h.nationId >= 0) applyLivingCost(state, h);
 
       int ci = grid.idx(clampCoord((int) Math.floor(h.x), grid.cols), clampCoord((int) Math.floor(h.z), grid.rows));
-      if (grid.burning[ci] && Math.random() < 0.35) continue; // burned to death
+      if (grid.burning[ci] && Math.random() < 0.35) { DeathStats.burn++; continue; } // burned to death
 
       if (grid.burning[ci] || nearbyFire(grid, h.x, h.z)) {
         h.state = "flee";
@@ -374,7 +427,15 @@ public class Population {
 
       updateRoutine(state, h);
 
-      if (h.state.equals("gather")) {
+      if (h.state.equals("shopping")) {
+        double dist = moveToward(grid, h, SPEED * 0.8);
+        if (dist < 0.3) {
+          h.wealth -= SHOP_PRICE;
+          Business market = findMarket(state, h.settlementId);
+          if (market != null) market.capital += SHOP_PRICE * 0.7;
+          h.state = "wander";
+        }
+      } else if (h.state.equals("gather")) {
         double dist = moveToward(grid, h, SPEED);
         if (dist < 0.15) {
           h.gatherTimer++;
@@ -437,6 +498,7 @@ public class Population {
         }
         moveToward(grid, h, SPEED * 0.7);
       } else { // leisure - off on a trip further from home
+        maybeGoShopping(state, h);
         if (Math.random() < 0.015 || moveToward(grid, h, SPEED * 0.85) < 0.1) pickLeisureTarget(grid, h);
       }
 

@@ -39,7 +39,7 @@ public class Simulation {
       int x = (int) state.rng.range(0, grid.cols);
       int y = (int) state.rng.range(0, grid.rows);
       if (!grid.inBounds(x, y) || grid.terrain[grid.idx(x, y)] == Config.WATER) continue;
-      state.humans.add(Population.createHuman(x + 0.5, y + 0.5, -1, -1));
+      state.humans.add(Population.createAdult(x + 0.5, y + 0.5, -1, -1));
       spawned++;
     }
   }

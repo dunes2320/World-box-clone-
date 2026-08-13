@@ -72,7 +72,7 @@ public class Settlement {
       double ang = (i / (double) startPop) * Math.PI * 2;
       double hx = x + 0.5 + Math.cos(ang) * 1.5;
       double hz = z + 0.5 + Math.sin(ang) * 1.5;
-      Human founder = Population.createHuman(hx, hz, nationId, settlement.id);
+      Human founder = Population.createAdult(hx, hz, nationId, settlement.id);
       // a fresh settlement's starting housingStock (5 houses, 20 capacity)
       // comfortably covers its 5 founders - they move into real houses on
       // day one instead of just existing without one
@@ -195,6 +195,7 @@ public class Settlement {
           int killCount = Math.min(victims.size(), 1 + (int) (Math.random() * 2));
           for (int i = 0; i < killCount && !victims.isEmpty(); i++) {
             victims.get((int) (Math.random() * victims.size())).dead = true;
+            DeathStats.starve++;
           }
           state.humans.removeIf(h -> h.dead);
           settlement.starveTicks = 0;
@@ -227,9 +228,19 @@ public class Settlement {
       // faster, but a settlement without one isn't stuck at zero forever.
       boolean canReproduce = hasMatureMale.getOrDefault(settlement.id, false)
           && hasMatureFemale.getOrDefault(settlement.id, false);
+      // growth used to only check the food buffer at this exact instant,
+      // not whether the settlement could actually go on FEEDING the new
+      // mouth - a settlement with little or no farmland would grow past
+      // what its passive trickle production could sustain, go negative,
+      // and get its population violently cut back down by the starvation
+      // kill below, then grow right back into the same wall. Capping
+      // growth at what farmCells can support (plus the trickle's own
+      // small headroom) keeps population growth a steady climb instead of
+      // that boom-and-starve sawtooth.
       if (settlement.stock.get("food") > Config.SETTLEMENT_BUFFER
           && settlement.populationCount < POP_CAP_PER_SETTLEMENT
           && settlement.populationCount < houseCapacity
+          && settlement.populationCount < settlement.farmCells + 4
           && state.humans.size() < Config.MAX_HUMANS) {
         settlement.growthAccum += canReproduce ? 0.02 : 0.003;
         if (settlement.growthAccum >= 1) {
