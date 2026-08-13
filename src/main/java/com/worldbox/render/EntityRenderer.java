@@ -135,65 +135,71 @@ public class EntityRenderer {
 
     // Every prop below is built from stacked/merged boxes instead of
     // rounded cones/cylinders/toruses - the whole world reads as voxel
-    // construction, not just the ground.
+    // construction, not just the ground. Sized against a 1x1x1 terrain
+    // block: a person used to stand less than half a block tall (like an
+    // ant on a paving stone), trees barely topped a person's height, and
+    // a "city" marker was already over 2 blocks tall while a "hut" was
+    // under 1 - none of it read as one consistent world. A person is now
+    // a believable ~0.8 of a block tall, and every other prop is scaled
+    // relative to that, not to its own disconnected old number.
     treeCanopyTemplate = MeshUtil.mergeMeshes(
-        new Box(0.32f, 0.2f, 0.32f),
-        MeshUtil.translatedCopy(new Box(0.22f, 0.16f, 0.22f), 0, 0.28f, 0));
-    treeTrunkTemplate = new Box(0.09f, 0.2f, 0.09f);
-    depositTemplate = MeshUtil.buildGem(0.32f, 0.5f);
+        new Box(0.55f, 0.42f, 0.55f),
+        MeshUtil.translatedCopy(new Box(0.38f, 0.32f, 0.38f), 0, 0.55f, 0));
+    treeTrunkTemplate = new Box(0.15f, 0.42f, 0.15f);
+    depositTemplate = MeshUtil.buildGem(0.4f, 0.55f);
     humanTemplate = MeshUtil.mergeMeshes(
-        new Box(0.09f, 0.25f, 0.07f),
-        MeshUtil.translatedCopy(new Box(0.075f, 0.075f, 0.075f), 0, 0.325f, 0));
+        new Box(0.15f, 0.5f, 0.12f),
+        MeshUtil.translatedCopy(new Box(0.13f, 0.13f, 0.13f), 0, 0.63f, 0));
     armyTemplate = MeshUtil.mergeMeshes(
-        new Box(0.16f, 0.28f, 0.14f),
-        MeshUtil.translatedCopy(new Box(0.1f, 0.1f, 0.1f), 0, 0.38f, 0));
+        new Box(0.24f, 0.55f, 0.2f),
+        MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.16f), 0, 0.7f, 0));
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
     hutTemplate = MeshUtil.mergeMeshes(
-        new Box(0.42f, 0.28f, 0.42f),
-        MeshUtil.translatedCopy(new Box(0.32f, 0.18f, 0.32f), 0, 0.46f, 0));
-    townTemplate = new Box(0.55f, 0.5f, 0.55f);
+        new Box(0.65f, 0.45f, 0.65f),
+        MeshUtil.translatedCopy(new Box(0.5f, 0.28f, 0.5f), 0, 0.73f, 0));
+    townTemplate = new Box(0.85f, 0.8f, 0.85f);
     cityTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.translatedCopy(new Box(0.6f, 0.7f, 0.6f), 0, 0.7f, 0),
-        MeshUtil.translatedCopy(new Box(0.4f, 0.45f, 0.4f), 0, 1.85f, 0));
+        MeshUtil.translatedCopy(new Box(0.95f, 1.1f, 0.95f), 0, 1.1f, 0),
+        MeshUtil.translatedCopy(new Box(0.62f, 0.7f, 0.62f), 0, 2.9f, 0));
 
-    businessTemplate = new Box(0.22f, 0.22f, 0.22f);
+    businessTemplate = new Box(0.34f, 0.34f, 0.34f);
     bankTemplate = MeshUtil.mergeMeshes(
-        new Box(0.26f, 0.5f, 0.26f),
-        MeshUtil.translatedCopy(new Box(0.34f, 0.12f, 0.34f), 0, 0.62f, 0));
+        new Box(0.4f, 0.78f, 0.4f),
+        MeshUtil.translatedCopy(new Box(0.52f, 0.18f, 0.52f), 0, 0.96f, 0));
 
     // a farm reads as low tilled rows, not a generic cube
     farmTemplate = MeshUtil.mergeMeshes(
         MeshUtil.mergeMeshes(
-            MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, -0.2f),
-            MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, 0)),
-        MeshUtil.translatedCopy(new Box(0.32f, 0.05f, 0.09f), 0, 0.05f, 0.2f));
+            MeshUtil.translatedCopy(new Box(0.5f, 0.08f, 0.14f), 0, 0.08f, -0.32f),
+            MeshUtil.translatedCopy(new Box(0.5f, 0.08f, 0.14f), 0, 0.08f, 0)),
+        MeshUtil.translatedCopy(new Box(0.5f, 0.08f, 0.14f), 0, 0.08f, 0.32f));
     // a market stall: a peaked awning over a low counter
     marketTemplate = MeshUtil.mergeMeshes(
-        new Box(0.24f, 0.14f, 0.24f),
-        MeshUtil.translatedCopy(new Box(0.3f, 0.04f, 0.3f), 0, 0.32f, 0));
+        new Box(0.37f, 0.22f, 0.37f),
+        MeshUtil.translatedCopy(new Box(0.47f, 0.06f, 0.47f), 0, 0.5f, 0));
     // a simple plinth-and-obelisk landmark planted at every nation's capital
     statueTemplate = MeshUtil.mergeMeshes(
-        new Box(0.3f, 0.08f, 0.3f),
-        MeshUtil.translatedCopy(new Box(0.1f, 0.5f, 0.1f), 0, 0.5f, 0));
+        new Box(0.47f, 0.13f, 0.47f),
+        MeshUtil.translatedCopy(new Box(0.16f, 0.78f, 0.16f), 0, 0.78f, 0));
 
     // nation banner: a slim pole with a small flag near the top, planted
     // beside every settlement so a nation's color reads at a glance.
-    Mesh pole = MeshUtil.translatedCopy(new Box(0.035f, 0.575f, 0.035f), 0, 0.58f, 0);
-    Mesh cloth = MeshUtil.translatedCopy(new Box(0.15f, 0.09f, 0.02f), 0.15f, 0.98f, 0);
+    Mesh pole = MeshUtil.translatedCopy(new Box(0.05f, 0.85f, 0.05f), 0, 0.86f, 0);
+    Mesh cloth = MeshUtil.translatedCopy(new Box(0.22f, 0.13f, 0.03f), 0.22f, 1.45f, 0);
     flagTemplate = MeshUtil.mergeMeshes(pole, cloth);
 
     fireTemplate = MeshUtil.mergeMeshes(
-        new Box(0.13f, 0.16f, 0.13f),
-        MeshUtil.translatedCopy(new Box(0.07f, 0.12f, 0.07f), 0, 0.26f, 0));
+        new Box(0.2f, 0.24f, 0.2f),
+        MeshUtil.translatedCopy(new Box(0.11f, 0.18f, 0.11f), 0, 0.4f, 0));
 
-    sparkleTemplate = MeshUtil.buildGem(0.09f, 0.17f);
+    sparkleTemplate = MeshUtil.buildGem(0.13f, 0.25f);
 
     // small satellite houses scattered around a settlement's main building
     // - the town-hall marker alone read as a single icon, not a village
     houseTemplate = MeshUtil.mergeMeshes(
-        new Box(0.22f, 0.14f, 0.22f),
-        MeshUtil.translatedCopy(new Box(0.16f, 0.09f, 0.16f), 0, 0.23f, 0));
+        new Box(0.34f, 0.22f, 0.34f),
+        MeshUtil.translatedCopy(new Box(0.25f, 0.14f, 0.25f), 0, 0.36f, 0));
 
     treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
     treesGeom.setMaterial(vertexColorMaterial());
@@ -381,7 +387,7 @@ public class EntityRenderer {
     if (!nationLabelText.getText().equals(text)) nationLabelText.setText(text);
     float width = nationLabelText.getLineWidth();
     nationLabelText.setLocalTranslation(-width / 2f, 0, 0);
-    nationLabelNode.setLocalTranslation(x, h + 2.6f, z);
+    nationLabelNode.setLocalTranslation(x, h + 4.2f, z);
   }
 
   private Material vertexColorMaterial() {
@@ -442,8 +448,12 @@ public class EntityRenderer {
         if (res == Config.RES_FOREST && canopies.size() < TREE_CAP_SAMPLE) {
           float scale = 0.6f + Math.min(1f, grid.resourceAmount[i] / 48f) * 0.6f;
           float rotY = (float) ((x * 7 + y * 13) % 6.28);
-          float trunkTop = grid.height[i] + 0.38f * scale;
-          trunks.add(new PropBatcher.Placement(x + 0.5f, grid.height[i], y + 0.5f, rotY, scale, TRUNK_COLOR));
+          // trunkTemplate is centered at its own origin (half-height
+          // 0.42), so it needs to be lifted by half its (scaled) height
+          // to actually sit on the ground instead of being buried in it
+          float trunkHalf = 0.42f * scale;
+          float trunkTop = grid.height[i] + trunkHalf * 2;
+          trunks.add(new PropBatcher.Placement(x + 0.5f, grid.height[i] + trunkHalf, y + 0.5f, rotY, scale, TRUNK_COLOR));
           canopies.add(new PropBatcher.Placement(x + 0.5f, trunkTop, y + 0.5f, rotY, scale, TREE_COLOR));
         } else if (res != Config.RES_NONE && res != Config.RES_FOREST && deposits.size() < DEPOSIT_CAP_SAMPLE) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
@@ -496,7 +506,10 @@ public class EntityRenderer {
         int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
         float hh = grid.height[grid.idx(gx, gz)];
         ColorRGBA c = i < occupiedHouses ? color : vacantColor;
-        houses.add(new PropBatcher.Placement(hx, hh, hz, angle, 0.55f + (i % 4) * 0.09f, c));
+        float houseScale = 0.55f + (i % 4) * 0.09f;
+        // houseTemplate's base box is centered at its own origin (half-
+        // height 0.22) so it needs lifting by half its scaled height
+        houses.add(new PropBatcher.Placement(hx, hh + 0.22f * houseScale, hz, angle, houseScale, c));
       }
     }
     housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));
@@ -523,6 +536,15 @@ public class EntityRenderer {
     return hutTemplate;
   }
 
+  // each tier's base box is centered at its own local origin, so it needs
+  // to be lifted by half its own height to sit on the ground rather than
+  // being buried - hut/town/city all have different base heights
+  private float tierGroundOffset(int population) {
+    if (population >= 35) return 1.1f;
+    if (population >= 15) return 0.8f;
+    return 0.45f;
+  }
+
   private void updateSettlements(GameState state) {
     int i = 0;
     for (Settlement s : state.settlements.values()) {
@@ -531,7 +553,7 @@ public class EntityRenderer {
       float h = grid.height[grid.idx(s.x, s.z)];
       float scale = (float) (0.55 + Math.sqrt(Math.max(1, s.populationCount)) * 0.13);
       g.setMesh(tierTemplate(s.populationCount));
-      g.setLocalTranslation(s.x + 0.5f, h, s.z + 0.5f);
+      g.setLocalTranslation(s.x + 0.5f, h + tierGroundOffset(s.populationCount) * scale, s.z + 0.5f);
       g.setLocalScale(scale);
       Geometry flag = flagPool[i];
       if (s.abandoned) {
@@ -568,8 +590,9 @@ public class EntityRenderer {
       Geometry g = firePool[i];
       float h = grid.height[cell];
       float flicker = (float) Math.sin(state.tick * 0.4 + i * 1.7) * 0.5f + 0.5f;
-      g.setLocalTranslation(gx + 0.5f, h, gz + 0.5f);
-      g.setLocalScale(0.8f + flicker * 0.5f);
+      float fireScale = 0.8f + flicker * 0.5f;
+      g.setLocalTranslation(gx + 0.5f, h + 0.24f * fireScale, gz + 0.5f);
+      g.setLocalScale(fireScale);
       setSoloColor(g.getMaterial(), lerpColor(FLAME_A, FLAME_B, flicker));
       g.setCullHint(Spatial.CullHint.Inherit);
     }
@@ -632,8 +655,13 @@ public class EntityRenderer {
       // scatter around the settlement a bit so multiple businesses don't overlap
       float angle = (b.id * 2.399963f);
       float ox = (float) Math.cos(angle) * 1.4f, oz = (float) Math.sin(angle) * 1.4f;
-      g.setLocalTranslation(s.x + 0.5f + ox, h + 0.22f, s.z + 0.5f + oz);
-      g.setLocalScale((float) (0.7 + Math.min(1.5, b.capital / 60.0)));
+      float scale = (float) (0.7 + Math.min(1.5, b.capital / 60.0));
+      // farmTemplate is already ground-anchored at construction; market's
+      // and the default extraction cube's base boxes are centered on
+      // their own origin and need lifting by half their own height
+      float groundOffset = b.type.equals("farm") ? 0f : b.type.equals("market") ? 0.22f : 0.34f;
+      g.setLocalTranslation(s.x + 0.5f + ox, h + groundOffset * scale, s.z + 0.5f + oz);
+      g.setLocalScale(scale);
       g.setMesh(b.type.equals("farm") ? farmTemplate : b.type.equals("market") ? marketTemplate : businessTemplate);
       ColorRGBA color = b.type.equals("market") ? new ColorRGBA(0.82f, 0.66f, 0.35f, 1f)
           : BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White);
@@ -652,7 +680,7 @@ public class EntityRenderer {
       if (capital == null) continue;
       Geometry g = bankPool[i];
       float h = grid.height[grid.idx(capital.x, capital.z)];
-      g.setLocalTranslation(capital.x + 0.5f - 1.6f, h, capital.z + 0.5f - 1.6f);
+      g.setLocalTranslation(capital.x + 0.5f - 1.6f, h + 0.4f * 0.7f, capital.z + 0.5f - 1.6f);
       g.setLocalScale(0.7f);
       setSoloColor(g.getMaterial(), n.bank.justCrashed ? ColorRGBA.Red : BANK_COLOR);
       g.setCullHint(Spatial.CullHint.Inherit);
@@ -672,7 +700,7 @@ public class EntityRenderer {
       if (capital == null) continue;
       Geometry g = statuePool[i];
       float h = grid.height[grid.idx(capital.x, capital.z)];
-      g.setLocalTranslation(capital.x + 0.5f + 1.6f, h, capital.z + 0.5f - 1.6f);
+      g.setLocalTranslation(capital.x + 0.5f + 1.6f, h + 0.13f * 0.8f, capital.z + 0.5f - 1.6f);
       g.setLocalScale(0.8f);
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
@@ -690,7 +718,7 @@ public class EntityRenderer {
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float h = grid.height[grid.idx(gx, gz)];
       float scale = (float) (0.5 + Math.min(1.4, (a.strength > 0 ? a.strength : 1) / 40));
-      g.setLocalTranslation((float) x, h + 0.6f, (float) z);
+      g.setLocalTranslation((float) x, h + 0.55f * scale, (float) z);
       g.setLocalScale(scale);
       g.setLocalRotation(new Quaternion().fromAngleAxis(state.tick * 0.05f, Vector3f.UNIT_Y));
       Nation nation = state.nations.get(a.nationId);
@@ -713,7 +741,7 @@ public class EntityRenderer {
       double z = h.prevZ + (h.z - h.prevZ) * alpha;
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float hgt = grid.height[grid.idx(gx, gz)];
-      g.setLocalTranslation((float) x, hgt + 0.25f, (float) z);
+      g.setLocalTranslation((float) x, hgt + 0.5f, (float) z);
       double dx = h.x - h.prevX, dz = h.z - h.prevZ;
       if (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5) {
         float yaw = (float) Math.atan2(dx, dz);
