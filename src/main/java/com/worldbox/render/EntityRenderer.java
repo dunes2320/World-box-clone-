@@ -81,6 +81,14 @@ public class EntityRenderer {
   // world - reads exactly like "cities vanishing")
   private static final int SETTLEMENT_CAP = 400;
   private static final int ARMY_CAP = 96;
+  // WorldBox-style combat doesn't render every single unit in an army (a
+  // large war would be thousands of tiny figures) - a capped, sampled
+  // handful of individual soldiers per army reads as "actual people
+  // fighting" without the cost of one geometry per unit.
+  private static final int SOLDIERS_PER_ARMY = 8;
+  private static final int SOLDIER_CAP = ARMY_CAP * SOLDIERS_PER_ARMY;
+  private static final int SIEGE_LABEL_CAP = 20;
+  private static final int LANDMARK_CAP = 120;
   private static final int BUSINESS_CAP = 600;
   private static final int BANK_CAP = 80;
   // matches Events.MAX_SIMULTANEOUS_FIRE - a fire that big is now the hard
@@ -93,6 +101,9 @@ public class EntityRenderer {
   private static final ColorRGBA FLAME_A = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FLAME_B = new ColorRGBA(1f, 0.82f, 0.25f, 1f);
   private static final ColorRGBA SPARKLE_COLOR = new ColorRGBA(1f, 0.95f, 0.6f, 1f);
+  private static final ColorRGBA MONUMENT_COLOR = new ColorRGBA(0.68f, 0.6f, 0.42f, 1f);
+  private static final ColorRGBA MILITARY_BASE_COLOR = new ColorRGBA(0.35f, 0.38f, 0.26f, 1f);
+  private static final ColorRGBA SIEGE_LABEL_COLOR = new ColorRGBA(1f, 0.28f, 0.18f, 1f);
 
   private final AssetManager assets;
   private final Node root;
@@ -101,9 +112,15 @@ public class EntityRenderer {
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
-  private final Mesh farmTemplate, marketTemplate, statueTemplate;
+  private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
   private final Mesh cloudTemplate, rainTemplate, foliageTemplate, flowerTemplate;
+  /** one merged body(+carried weapon, or full vehicle silhouette for
+   * tank/cannon/artillery) mesh per unit type, keyed by Config.UNIT_TYPES'
+   * key - swapped onto a soldierPool slot's Geometry per frame so each
+   * individual soldier actually looks like what it's fighting with. */
+  private final Map<String, Mesh> soldierTemplates = new HashMap<>();
+  private final Map<String, Boolean> soldierIsVehicle = new HashMap<>();
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
   private final Geometry foliageGeom, flowersGeom;
@@ -114,24 +131,31 @@ public class EntityRenderer {
   private final Node businessesNode = new Node("businesses");
   private final Node banksNode = new Node("banks");
   private final Node statuesNode = new Node("statues");
+  private final Node monumentsNode = new Node("monuments");
+  private final Node militaryBasesNode = new Node("militaryBases");
   private final Node flagsNode = new Node("flags");
   private final Node firesNode = new Node("fires");
   private final Node smokeNode = new Node("smoke");
   private final Node sparklesNode = new Node("sparkles");
   private final Node rainNode = new Node("rain");
   private final Node cloudsNode = new Node("clouds");
+  private final Node siegeLabelsNode = new Node("siegeLabels");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
-  private final Geometry[] armyPool = new Geometry[ARMY_CAP];
+  private final Geometry[] soldierPool = new Geometry[SOLDIER_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
   private final Geometry[] statuePool = new Geometry[BANK_CAP];
+  private final Geometry[] monumentPool = new Geometry[LANDMARK_CAP];
+  private final Geometry[] militaryBasePool = new Geometry[LANDMARK_CAP];
   private final Geometry[] flagPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] firePool = new Geometry[FIRE_CAP];
   private final Geometry[] smokePool = new Geometry[FIRE_CAP];
   private final Geometry[] sparklePool = new Geometry[SPARKLE_CAP];
   private final Geometry[] rainPool = new Geometry[RAIN_CAP];
   private final List<Geometry> cloudGeoms = new ArrayList<>();
+  private final Node[] siegeLabelNodes = new Node[SIEGE_LABEL_CAP];
+  private final com.jme3.font.BitmapText[] siegeLabels = new com.jme3.font.BitmapText[SIEGE_LABEL_CAP];
 
   /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
    * trees/deposits in rebuildStatics() and consumed every frame by the
@@ -207,6 +231,20 @@ public class EntityRenderer {
     statueTemplate = MeshUtil.mergeMeshes(
         new Box(0.47f, 0.13f, 0.47f),
         MeshUtil.translatedCopy(new Box(0.16f, 0.78f, 0.16f), 0, 0.78f, 0));
+    // a grander stepped-plinth monument for any settlement that's grown
+    // into a real city - a distinct, wider silhouette from the capital's
+    // thin obelisk statue above
+    monumentTemplate = MeshUtil.mergeMeshes(
+        MeshUtil.mergeMeshes(
+            new Box(0.6f, 0.14f, 0.6f),
+            MeshUtil.translatedCopy(new Box(0.42f, 0.14f, 0.42f), 0, 0.28f, 0)),
+        MeshUtil.translatedCopy(new Box(0.22f, 0.5f, 0.22f), 0, 0.85f, 0));
+    // a squat fortified compound with a watchtower corner - planted at
+    // every nation's capital and any settlement currently garrisoning a
+    // standing army
+    militaryBaseTemplate = MeshUtil.mergeMeshes(
+        new Box(0.72f, 0.3f, 0.5f),
+        MeshUtil.translatedCopy(new Box(0.16f, 0.45f, 0.16f), 0.5f, 0.45f, 0.3f));
 
     // nation banner: a slim pole with a small flag near the top, planted
     // beside every settlement so a nation's color reads at a glance.
@@ -281,12 +319,23 @@ public class EntityRenderer {
     }
     root.attachChild(settlementsNode);
 
-    for (int i = 0; i < ARMY_CAP; i++) {
-      Geometry g = new Geometry("Army" + i, armyTemplate);
+    // one merged body+weapon (or vehicle) mesh per unit type - built once
+    // here and swapped onto whichever soldierPool slot needs it each
+    // frame, the same "swap the mesh, not the geometry" trick already
+    // used for settlement tiers/business types below
+    for (Map.Entry<String, Config.UnitSpec> e : Config.UNIT_TYPES.entrySet()) {
+      String weapon = e.getValue().weapon;
+      boolean vehicle = isVehicleWeapon(weapon);
+      Mesh mesh = vehicle ? vehicleMesh(weapon) : MeshUtil.mergeMeshes(armyTemplate.deepClone(), weaponMesh(weapon));
+      soldierTemplates.put(e.getKey(), mesh);
+      soldierIsVehicle.put(e.getKey(), vehicle);
+    }
+    for (int i = 0; i < SOLDIER_CAP; i++) {
+      Geometry g = new Geometry("Soldier" + i, armyTemplate);
       g.setMaterial(soloColorMaterial(ColorRGBA.White));
       g.setCullHint(Spatial.CullHint.Always);
       armiesNode.attachChild(g);
-      armyPool[i] = g;
+      soldierPool[i] = g;
     }
     root.attachChild(armiesNode);
 
@@ -325,6 +374,24 @@ public class EntityRenderer {
       statuePool[i] = g;
     }
     root.attachChild(statuesNode);
+
+    for (int i = 0; i < LANDMARK_CAP; i++) {
+      Geometry g = new Geometry("Monument" + i, monumentTemplate);
+      g.setMaterial(soloColorMaterial(MONUMENT_COLOR));
+      g.setCullHint(Spatial.CullHint.Always);
+      monumentsNode.attachChild(g);
+      monumentPool[i] = g;
+    }
+    root.attachChild(monumentsNode);
+
+    for (int i = 0; i < LANDMARK_CAP; i++) {
+      Geometry g = new Geometry("MilitaryBase" + i, militaryBaseTemplate);
+      g.setMaterial(soloColorMaterial(MILITARY_BASE_COLOR));
+      g.setCullHint(Spatial.CullHint.Always);
+      militaryBasesNode.attachChild(g);
+      militaryBasePool[i] = g;
+    }
+    root.attachChild(militaryBasesNode);
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
       Geometry g = new Geometry("Flag" + i, flagTemplate);
@@ -448,6 +515,98 @@ public class EntityRenderer {
     nationLabelNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     nationLabelNode.setCullHint(Spatial.CullHint.Always);
     root.attachChild(nationLabelNode);
+
+    // a floating "CITY FALLING n%" billboard over any settlement whose
+    // garrison has been wiped out/routed and is actively being captured -
+    // the WorldBox-style capture-percentage readout the player asked for,
+    // built from the same billboarded-text trick as the nation-name label
+    // above rather than a 2D UI overlay
+    for (int i = 0; i < SIEGE_LABEL_CAP; i++) {
+      com.jme3.font.BitmapText t = new com.jme3.font.BitmapText(font);
+      t.setSize(0.3f);
+      t.setColor(SIEGE_LABEL_COLOR);
+      Node n = new Node("SiegeLabel" + i);
+      n.attachChild(t);
+      n.addControl(new com.jme3.scene.control.BillboardControl());
+      n.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+      n.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+      n.setCullHint(Spatial.CullHint.Always);
+      siegeLabelsNode.attachChild(n);
+      siegeLabelNodes[i] = n;
+      siegeLabels[i] = t;
+    }
+    root.attachChild(siegeLabelsNode);
+  }
+
+  private static boolean isVehicleWeapon(String weapon) {
+    return weapon.equals("tank") || weapon.equals("artillery") || weapon.equals("cannon");
+  }
+
+  /** Builds a carried-weapon mesh, positioned/angled near a soldier's hand,
+   * to be merged onto the humanoid body template - the silhouette (not the
+   * color, since a soldier stays solid nation-colored) is what tells spear
+   * apart from sword apart from rifle. */
+  private Mesh weaponMesh(String weapon) {
+    Mesh w;
+    switch (weapon) {
+      case "spear":
+        w = MeshUtil.mergeMeshes(new Box(0.03f, 0.42f, 0.03f),
+            MeshUtil.translatedCopy(new Box(0.06f, 0.08f, 0.06f), 0, 0.42f, 0));
+        MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.5f, Vector3f.UNIT_Z));
+        return MeshUtil.translatedCopy(w, 0.22f, 0.55f, 0.05f);
+      case "sword":
+        w = MeshUtil.mergeMeshes(new Box(0.025f, 0.26f, 0.06f),
+            MeshUtil.translatedCopy(new Box(0.05f, 0.06f, 0.05f), 0, -0.26f, 0));
+        MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(-0.6f, Vector3f.UNIT_Z));
+        return MeshUtil.translatedCopy(w, 0.2f, 0.5f, 0.08f);
+      case "bow":
+        w = MeshUtil.mergeMeshes(new Box(0.02f, 0.24f, 0.02f),
+            MeshUtil.translatedCopy(new Box(0.09f, 0.02f, 0.02f), 0, 0.2f, 0));
+        return MeshUtil.translatedCopy(w, 0.24f, 0.55f, 0.04f);
+      case "lance":
+        w = new Box(0.035f, 0.6f, 0.035f);
+        MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.65f, Vector3f.UNIT_Z));
+        return MeshUtil.translatedCopy(w, 0.26f, 0.6f, 0.05f);
+      case "musket":
+      case "rifle":
+        w = MeshUtil.mergeMeshes(new Box(0.03f, 0.32f, 0.03f),
+            MeshUtil.translatedCopy(new Box(0.04f, 0.08f, 0.05f), 0, -0.32f, 0));
+        MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.35f, Vector3f.UNIT_Z));
+        return MeshUtil.translatedCopy(w, 0.22f, 0.5f, 0.1f);
+      default:
+        return MeshUtil.translatedCopy(new Box(0.03f, 0.2f, 0.03f), 0.2f, 0.5f, 0.05f);
+    }
+  }
+
+  /** A blocky vehicle silhouette (no humanoid body) for the modern-era
+   * crew-served weapons - a cannon carriage, a turreted tank, or a towed
+   * artillery piece, each reading as a distinct shape at a glance. */
+  private Mesh vehicleMesh(String weapon) {
+    switch (weapon) {
+      case "cannon": {
+        Mesh carriage = new Box(0.22f, 0.16f, 0.16f);
+        Mesh wheelA = MeshUtil.translatedCopy(new Box(0.05f, 0.14f, 0.14f), -0.2f, -0.02f, 0);
+        Mesh wheelB = MeshUtil.translatedCopy(new Box(0.05f, 0.14f, 0.14f), 0.2f, -0.02f, 0);
+        Mesh barrel = MeshUtil.translatedCopy(new Box(0.06f, 0.06f, 0.32f), 0, 0.1f, 0.3f);
+        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(carriage, wheelA), MeshUtil.mergeMeshes(wheelB, barrel));
+      }
+      case "tank": {
+        Mesh hull = new Box(0.32f, 0.18f, 0.5f);
+        Mesh turret = MeshUtil.translatedCopy(new Box(0.2f, 0.12f, 0.24f), 0, 0.3f, -0.05f);
+        Mesh barrel = MeshUtil.translatedCopy(new Box(0.04f, 0.04f, 0.34f), 0, 0.3f, 0.4f);
+        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(hull, turret), barrel);
+      }
+      case "artillery": {
+        Mesh chassis = new Box(0.3f, 0.14f, 0.55f);
+        Mesh mount = MeshUtil.translatedCopy(new Box(0.14f, 0.14f, 0.14f), 0, 0.22f, -0.1f);
+        Mesh barrel = new Box(0.05f, 0.05f, 0.5f);
+        MeshUtil.rotateInPlace(barrel, new Quaternion().fromAngleAxis(-0.5f, Vector3f.UNIT_X));
+        Mesh barrelP = MeshUtil.translatedCopy(barrel, 0, 0.4f, 0.15f);
+        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(chassis, mount), barrelP);
+      }
+      default:
+        return new Box(0.3f, 0.2f, 0.3f);
+    }
   }
 
   /** Shows `text` floating above (x,h,z), billboarded to always face the
@@ -664,6 +823,8 @@ public class EntityRenderer {
     updateBusinesses(state);
     updateBanks(state);
     updateStatues(state);
+    updateLandmarks(state);
+    updateSiegeIndicators(state);
     updateMonster(state);
     updateTornadoes(state);
     updateFires(state, animTime);
@@ -863,35 +1024,154 @@ public class EntityRenderer {
     for (; i < BANK_CAP; i++) statuePool[i].setCullHint(Spatial.CullHint.Always);
   }
 
-  private void updateArmies(GameState state, float alpha) {
+  /** Monuments (any settlement that's grown into a real city) and military
+   * bases (every capital, plus any settlement currently garrisoning a
+   * standing army) - the new building types the player asked for beyond
+   * the existing per-capital statue. */
+  private void updateLandmarks(GameState state) {
+    Map<Integer, Boolean> garrisoned = new HashMap<>();
+    for (Army a : state.armies.values()) if (!a.dead) garrisoned.put(a.homeSettlementId, true);
+
+    int mi = 0, bi = 0;
+    for (Settlement s : state.settlements.values()) {
+      if (s.abandoned) continue;
+      float h = grid.height[grid.idx(s.x, s.z)];
+      Nation nation = state.nations.get(s.nationId);
+      ColorRGBA color = nation != null ? nationOrFallback(nation.id, MONUMENT_COLOR) : MONUMENT_COLOR;
+
+      if (s.populationCount >= 30 && mi < LANDMARK_CAP) {
+        Geometry g = monumentPool[mi++];
+        g.setLocalTranslation(s.x + 0.5f - 2.0f, h + 0.14f * 0.9f, s.z + 0.5f + 2.0f);
+        g.setLocalScale(0.9f);
+        setSoloColor(g.getMaterial(), MONUMENT_COLOR.clone().interpolateLocal(color, 0.25f));
+        g.setCullHint(Spatial.CullHint.Inherit);
+      }
+
+      boolean isCapital = nation != null && nation.capitalSettlementId == s.id;
+      if (nation != null && (isCapital || garrisoned.getOrDefault(s.id, false)) && bi < LANDMARK_CAP) {
+        Geometry g = militaryBasePool[bi++];
+        g.setLocalTranslation(s.x + 0.5f - 2.4f, h + 0.15f, s.z + 0.5f - 2.4f);
+        g.setLocalScale(0.85f);
+        setSoloColor(g.getMaterial(), MILITARY_BASE_COLOR.clone().interpolateLocal(color, 0.2f));
+        g.setCullHint(Spatial.CullHint.Inherit);
+      }
+    }
+    for (; mi < LANDMARK_CAP; mi++) monumentPool[mi].setCullHint(Spatial.CullHint.Always);
+    for (; bi < LANDMARK_CAP; bi++) militaryBasePool[bi].setCullHint(Spatial.CullHint.Always);
+  }
+
+  /** Floating "CITY FALLING n%" readout over any settlement whose garrison
+   * has already been wiped out or routed and is actively being captured -
+   * only shows once there's genuinely no one left defending, matching
+   * "the city starts to fall" rather than every skirmish at the gates. */
+  private void updateSiegeIndicators(GameState state) {
     int i = 0;
-    for (Army a : state.armies.values()) {
-      if (i >= ARMY_CAP || a.dead) continue;
-      Geometry g = armyPool[i];
-      double x = a.prevX + (a.x - a.prevX) * alpha;
-      double z = a.prevZ + (a.z - a.prevZ) * alpha;
-      int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
-      float h = grid.height[grid.idx(gx, gz)];
-      float scale = (float) (0.5 + Math.min(1.4, (a.strength > 0 ? a.strength : 1) / 40));
-      // a battle used to be two numbers quietly shrinking with nothing to
-      // see - an army actually trading blows this tick now visibly flares
-      // and jitters instead of just standing there
-      boolean fighting = a.combatFlashTimer > 0;
-      float flash = fighting ? a.combatFlashTimer / 18f : 0f;
-      if (fighting) scale *= 1f + flash * 0.35f;
-      g.setLocalTranslation((float) x + (fighting ? (float) (Math.random() - 0.5) * 0.15f : 0f),
-          h + 0.55f * scale, (float) z + (fighting ? (float) (Math.random() - 0.5) * 0.15f : 0f));
-      g.setLocalScale(scale);
-      g.setLocalRotation(new Quaternion().fromAngleAxis(state.tick * 0.05f, Vector3f.UNIT_Y));
-      Nation nation = state.nations.get(a.nationId);
-      ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
-      if (fighting) c = c.clone().interpolateLocal(new ColorRGBA(1f, 0.15f, 0.05f, 1f), flash);
-      setSoloColor(g.getMaterial(), c);
-      g.setUserData("armyId", a.id);
-      g.setCullHint(Spatial.CullHint.Inherit);
+    for (Settlement s : state.settlements.values()) {
+      if (i >= SIEGE_LABEL_CAP) break;
+      if (s.abandoned || s.siegeProgress <= 0.5) continue;
+      Node n = siegeLabelNodes[i];
+      com.jme3.font.BitmapText t = siegeLabels[i];
+      float h = grid.height[grid.idx(s.x, s.z)];
+      String text = "CITY FALLING " + (int) Math.min(100, s.siegeProgress) + "%";
+      if (!t.getText().equals(text)) t.setText(text);
+      float width = t.getLineWidth();
+      t.setLocalTranslation(-width / 2f, 0, 0);
+      n.setLocalTranslation(s.x + 0.5f, h + 3.4f, s.z + 0.5f);
+      n.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
-    for (; i < ARMY_CAP; i++) armyPool[i].setCullHint(Spatial.CullHint.Always);
+    for (; i < SIEGE_LABEL_CAP; i++) siegeLabelNodes[i].setCullHint(Spatial.CullHint.Always);
+  }
+
+  /** Deterministic per-slot offset within an army's "scrum" cluster - a
+   * loose huddle around the army's actual (x,z), not a rigid grid
+   * formation, matching how WorldBox's own soldiers cluster loosely
+   * around a rally point rather than marching in ranks. Stable per
+   * (armyId, slot) so an individual soldier doesn't jitter to a new spot
+   * every frame. */
+  private static float scrumOffset(int armyId, int slot, int axis) {
+    return jitterAxis(armyId * 31 + slot, axis, 41) * 1.6f;
+  }
+
+  private void updateArmies(GameState state, float alpha) {
+    int slot = 0;
+    for (Army a : state.armies.values()) {
+      if (a.dead) continue;
+      int totalUnits = 0;
+      for (int c : a.units.values()) totalUnits += c;
+      if (totalUnits <= 0) continue;
+
+      double x = a.prevX + (a.x - a.prevX) * alpha;
+      double z = a.prevZ + (a.z - a.prevZ) * alpha;
+      boolean fighting = a.combatFlashTimer > 0;
+      float flash = fighting ? a.combatFlashTimer / 18f : 0f;
+      Nation nation = state.nations.get(a.nationId);
+      ColorRGBA baseColor = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
+      ColorRGBA color = fighting ? baseColor.clone().interpolateLocal(new ColorRGBA(1f, 0.15f, 0.05f, 1f), flash) : baseColor;
+
+      // face the army's actual heading; a fighting army instead squares up
+      // toward whatever it's engaged with so combat reads as two sides
+      // facing off, not a formation mid-stride
+      double dx = a.x - a.prevX, dz = a.z - a.prevZ;
+      float marchYaw = (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5) ? (float) Math.atan2(dx, dz) : 0f;
+
+      int visible = Math.min(SOLDIERS_PER_ARMY, Math.max(1, (int) Math.ceil(totalUnits / 4.0)));
+      // sample which unit type each visible slot represents, weighted by
+      // the army's actual composition, so a mixed army shows a mix of
+      // spearmen/archers/knights/etc rather than only its first unit type
+      for (int slotIdx = 0; slotIdx < visible && slot < SOLDIER_CAP; slotIdx++, slot++) {
+        String unitType = pickUnitForSlot(a, totalUnits, armySlotSeed(a.id, slotIdx));
+        Mesh mesh = soldierTemplates.get(unitType);
+        boolean vehicle = soldierIsVehicle.getOrDefault(unitType, false);
+        Geometry g = soldierPool[slot];
+        g.setMesh(mesh);
+
+        float ox = scrumOffset(a.id, slotIdx, 101);
+        float oz = scrumOffset(a.id, slotIdx, 103);
+        float px = (float) x + ox, pz = (float) z + oz;
+        int gx = clampIdx((int) Math.floor(px), grid.cols), gz = clampIdx((int) Math.floor(pz), grid.rows);
+        float h = grid.height[grid.idx(gx, gz)];
+        float scale = vehicle ? 0.9f : 0.85f;
+        if (fighting) {
+          px += (float) (Math.random() - 0.5) * 0.2f;
+          pz += (float) (Math.random() - 0.5) * 0.2f;
+          scale *= 1f + flash * 0.2f;
+        }
+        float groundOffset = vehicle ? 0.18f : 0.55f;
+        g.setLocalTranslation(px, h + groundOffset * scale, pz);
+        g.setLocalScale(scale);
+        g.setLocalRotation(new Quaternion().fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
+        setSoloColor(g.getMaterial(), color);
+        g.setUserData("armyId", a.id);
+        g.setCullHint(Spatial.CullHint.Inherit);
+      }
+    }
+    for (; slot < SOLDIER_CAP; slot++) soldierPool[slot].setCullHint(Spatial.CullHint.Always);
+  }
+
+  /** Deterministic pseudo-random 0..1 for picking which unit type a given
+   * (armyId, slot) represents - stable across frames so a soldier doesn't
+   * flicker between unit types, but still varies slot-to-slot. */
+  private static float armySlotSeed(int armyId, int slot) {
+    return hash01(armyId * 17 + slot, slot * 7 + 3, 71);
+  }
+
+  /** Walks the army's unit composition in insertion order (weakest-to-
+   * strongest, matching Config.UNIT_TYPES) and picks whichever type the
+   * seed falls into, weighted by that type's share of the army's total
+   * headcount - so a mostly-militia army with a few knights shows mostly
+   * spearmen and only occasionally a knight. */
+  private static String pickUnitForSlot(Army army, int totalUnits, float seed) {
+    float target = seed * totalUnits;
+    float acc = 0;
+    String last = "militia";
+    for (Map.Entry<String, Integer> e : army.units.entrySet()) {
+      if (e.getValue() <= 0) continue;
+      last = e.getKey();
+      acc += e.getValue();
+      if (target <= acc) return e.getKey();
+    }
+    return last;
   }
 
   private void updateHumans(GameState state, float alpha) {

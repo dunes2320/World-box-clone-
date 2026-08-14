@@ -8,11 +8,11 @@ import com.jme3.scene.VertexBuffer;
 import java.nio.FloatBuffer;
 
 public class MeshUtil {
-  /** jME's Cylinder/Cone-like primitives are built along the Z axis; this
-   * rotates a template's position+normal buffers in place so "up" becomes
-   * +Y, matching how we place things on the terrain. */
-  public static void reorientZToY(Mesh mesh) {
-    Quaternion rot = new Quaternion().fromAngleAxis(-com.jme3.math.FastMath.HALF_PI, Vector3f.UNIT_X);
+  /** Rotates a template's position+normal buffers in place by an arbitrary
+   * quaternion - the shared primitive behind reorientZToY/rotateYInPlace
+   * below, and also used directly (e.g. tilting a weapon mesh forward on
+   * a diagonal) where a plain Y-yaw isn't enough. */
+  public static void rotateInPlace(Mesh mesh, Quaternion rot) {
     for (VertexBuffer.Type type : new VertexBuffer.Type[]{VertexBuffer.Type.Position, VertexBuffer.Type.Normal}) {
       FloatBuffer buf = mesh.getFloatBuffer(type);
       if (buf == null) continue;
@@ -26,6 +26,13 @@ public class MeshUtil {
       }
     }
     mesh.updateBound();
+  }
+
+  /** jME's Cylinder/Cone-like primitives are built along the Z axis; this
+   * rotates a template's position+normal buffers in place so "up" becomes
+   * +Y, matching how we place things on the terrain. */
+  public static void reorientZToY(Mesh mesh) {
+    rotateInPlace(mesh, new Quaternion().fromAngleAxis(-com.jme3.math.FastMath.HALF_PI, Vector3f.UNIT_X));
   }
 
   private static float[] computeSmoothNormals(float[] positions, int[] indices) {
@@ -75,20 +82,7 @@ public class MeshUtil {
    * primitive built axis-aligned (like Box, which can't be built rotated)
    * get jumbled into an irregular cluster afterward. */
   public static void rotateYInPlace(Mesh mesh, float angle) {
-    Quaternion rot = new Quaternion().fromAngleAxis(angle, Vector3f.UNIT_Y);
-    for (VertexBuffer.Type type : new VertexBuffer.Type[]{VertexBuffer.Type.Position, VertexBuffer.Type.Normal}) {
-      FloatBuffer buf = mesh.getFloatBuffer(type);
-      if (buf == null) continue;
-      Vector3f v = new Vector3f();
-      for (int i = 0; i < buf.limit() / 3; i++) {
-        v.set(buf.get(i * 3), buf.get(i * 3 + 1), buf.get(i * 3 + 2));
-        rot.multLocal(v);
-        buf.put(i * 3, v.x);
-        buf.put(i * 3 + 1, v.y);
-        buf.put(i * 3 + 2, v.z);
-      }
-    }
-    mesh.updateBound();
+    rotateInPlace(mesh, new Quaternion().fromAngleAxis(angle, Vector3f.UNIT_Y));
   }
 
   /** A jumbled boulder cluster - three overlapping, differently-sized and

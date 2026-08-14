@@ -41,6 +41,13 @@ public class Settlement {
   public double growthAccum = 0;
   public int starveTicks = 0;
   public double siegeProgress = 0;
+  /** current defender manpower - depletes as attackers fight through it.
+   * -1 means "not yet initialized", lazily set on first contact (see
+   * Military.resolveSieges) so a settlement's garrison always reflects
+   * its population/era at the moment it's actually attacked. Once this
+   * hits 0 every defender is dead or has fled and the city starts to
+   * fall (siegeProgress then measures the physical capture, not combat). */
+  public double garrisonHp = -1;
   public final int founded;
   /** True once population has hit 0 - the settlement leaves its nation
    * and territory but its structures stay standing as a visible ruin. */

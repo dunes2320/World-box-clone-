@@ -608,7 +608,14 @@ public class GameHud {
     statRow("Population", String.valueOf(s.populationCount));
     statRow("Housing", s.populationCount + " / " + (int) (s.housingStock * Settlement.PEOPLE_PER_HOUSE));
     statRow("Territory radius", String.format("%.1f", s.radius));
-    statRow("Under siege", s.siegeProgress > 0.5 ? "yes" : "no");
+    boolean underAttack = s.garrisonHp >= 0 && s.garrisonHp < com.worldbox.sim.Military.garrisonMax(s);
+    if (s.garrisonHp <= 0 && underAttack) {
+      statRow("Garrison", "wiped out - city falling! (" + (int) s.siegeProgress + "%)");
+    } else if (underAttack) {
+      statRow("Garrison", (int) s.garrisonHp + " / " + (int) com.worldbox.sim.Military.garrisonMax(s));
+    } else {
+      statRow("Under siege", "no");
+    }
 
     Label stockHeader = sidePanel.addChild(new Label("STOCKPILE"));
     stockHeader.setColor(MUTED); stockHeader.setFontSize(fs(12));
@@ -616,11 +623,13 @@ public class GameHud {
       statRow(e.getKey(), String.valueOf((int) Math.floor(e.getValue())));
     }
 
-    Label raiseHeader = sidePanel.addChild(new Label("RAISE ARMY"));
+    int era = nation != null ? Nation.era(state, nation) : Config.ERA_ANCIENT;
+    Label raiseHeader = sidePanel.addChild(new Label("RAISE ARMY (" + Config.ERA_NAMES[era] + " Era)"));
     raiseHeader.setColor(MUTED); raiseHeader.setFontSize(fs(12));
     Label msg = new Label("");
     msg.setColor(MUTED);
     for (Config.UnitSpec spec : Config.UNIT_TYPES.values()) {
+      if (spec.era > era) continue;
       String unitKey = keyForSpec(spec);
       Button b = sidePanel.addChild(new Button(spec.name + " (" + spec.cost.getOrDefault("gold", 0.0).intValue() + "g)"));
       b.addClickCommands(src -> {

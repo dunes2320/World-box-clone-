@@ -86,22 +86,47 @@ public final class Config {
   public static final double MARKET_ELASTICITY = 0.02;
 
   // military
+  // Eras gate which units a nation can raise, keyed off nation age (see
+  // Nation.era()) so every war naturally starts at spears/swords and, if it
+  // runs long enough, escalates all the way to tanks/artillery - "spear to
+  // gun/tank/artillery" progression the player asked for, driven by time
+  // rather than a separate tech-research system that doesn't exist yet.
+  public static final int ERA_ANCIENT = 0;
+  public static final int ERA_MEDIEVAL = 1;
+  public static final int ERA_GUNPOWDER = 2;
+  public static final int ERA_MODERN = 3;
+  public static final String[] ERA_NAMES = {"Ancient", "Medieval", "Gunpowder", "Modern"};
+  // age (in ticks; 1 tick = 1 day) at which a nation advances to each era
+  public static final int[] ERA_AGE_TICKS = {0, 10 * 360, 24 * 360, 45 * 360};
+
   public static final class UnitSpec {
     public final String name;
     public final double power;
     public final Map<String, Double> cost;
     public final double upkeep;
     public final double speed;
-    public UnitSpec(String name, double power, Map<String, Double> cost, double upkeep, double speed) {
+    /** which era unlocks this unit - see ERA_* constants above. */
+    public final int era;
+    /** carried-weapon silhouette used by EntityRenderer to build the
+     * soldier's held weapon mesh; also drives whether the unit renders as
+     * a foot soldier or a vehicle (tank/cannon/artillery). */
+    public final String weapon;
+    public UnitSpec(String name, double power, Map<String, Double> cost, double upkeep, double speed, int era, String weapon) {
       this.name = name; this.power = power; this.cost = cost; this.upkeep = upkeep; this.speed = speed;
+      this.era = era; this.weapon = weapon;
     }
   }
   public static final Map<String, UnitSpec> UNIT_TYPES = new java.util.LinkedHashMap<>();
   static {
-    UNIT_TYPES.put("militia", new UnitSpec("Militia", 3, mapOf("gold", 15.0, "wood", 5.0), 0.05, 0.09));
-    UNIT_TYPES.put("swordsman", new UnitSpec("Swordsman", 7, mapOf("gold", 35.0, "iron", 8.0), 0.12, 0.08));
-    UNIT_TYPES.put("archer", new UnitSpec("Archer", 6, mapOf("gold", 30.0, "wood", 10.0), 0.11, 0.09));
-    UNIT_TYPES.put("knight", new UnitSpec("Knight", 14, mapOf("gold", 70.0, "iron", 15.0), 0.25, 0.13));
+    UNIT_TYPES.put("militia", new UnitSpec("Militia", 3, mapOf("gold", 15.0, "wood", 5.0), 0.05, 0.09, ERA_ANCIENT, "spear"));
+    UNIT_TYPES.put("archer", new UnitSpec("Archer", 6, mapOf("gold", 30.0, "wood", 10.0), 0.11, 0.09, ERA_ANCIENT, "bow"));
+    UNIT_TYPES.put("swordsman", new UnitSpec("Swordsman", 7, mapOf("gold", 35.0, "iron", 8.0), 0.12, 0.08, ERA_MEDIEVAL, "sword"));
+    UNIT_TYPES.put("knight", new UnitSpec("Knight", 14, mapOf("gold", 70.0, "iron", 15.0), 0.25, 0.13, ERA_MEDIEVAL, "lance"));
+    UNIT_TYPES.put("musketeer", new UnitSpec("Musketeer", 22, mapOf("gold", 110.0, "iron", 20.0), 0.34, 0.1, ERA_GUNPOWDER, "musket"));
+    UNIT_TYPES.put("cannoneer", new UnitSpec("Cannon crew", 40, mapOf("gold", 220.0, "iron", 45.0), 0.55, 0.06, ERA_GUNPOWDER, "cannon"));
+    UNIT_TYPES.put("rifleman", new UnitSpec("Rifleman", 60, mapOf("gold", 340.0, "iron", 30.0), 0.8, 0.12, ERA_MODERN, "rifle"));
+    UNIT_TYPES.put("tank", new UnitSpec("Tank crew", 160, mapOf("gold", 900.0, "iron", 120.0), 2.1, 0.16, ERA_MODERN, "tank"));
+    UNIT_TYPES.put("artillery", new UnitSpec("Artillery crew", 210, mapOf("gold", 1100.0, "iron", 140.0), 2.6, 0.05, ERA_MODERN, "artillery"));
   }
   public static final int RAISE_BATCH = 6;
 

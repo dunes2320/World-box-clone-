@@ -109,6 +109,23 @@ public class Military {
     return new RaiseResult(true, null, count);
   }
 
+  /** The strongest unit type this nation's era unlocks that it can
+   * comfortably afford a full raise batch of - falls back to the weakest
+   * unlocked unit (still gated by era, never below it) so an AI nation's
+   * armies naturally escalate from spears through guns to tanks as it
+   * ages instead of raising knights forever. */
+  private static String pickRaiseUnit(GameState state, Nation nation) {
+    int era = Nation.era(state, nation);
+    String choice = "militia";
+    for (Map.Entry<String, Config.UnitSpec> e : Config.UNIT_TYPES.entrySet()) {
+      Config.UnitSpec spec = e.getValue();
+      if (spec.era > era) continue;
+      double goldCost = spec.cost.getOrDefault("gold", 0.0) * Config.RAISE_BATCH;
+      if (nation.treasury > goldCost * 1.6) choice = e.getKey();
+    }
+    return choice;
+  }
+
   private static Settlement nearestEnemySettlement(GameState state, Nation nation) {
     Settlement best = null;
     double bestD = Double.MAX_VALUE;
@@ -181,8 +198,7 @@ public class Military {
         if (nation.treasury > raiseThreshold && Math.random() < raiseChance && !nation.settlementIds.isEmpty()) {
           List<Integer> sids = new ArrayList<>(nation.settlementIds);
           int sid = sids.get((int) (Math.random() * sids.size()));
-          String cheapest = nation.treasury > 600 ? "knight" : nation.treasury > 350 ? "swordsman" : "militia";
-          raiseArmy(state, sid, cheapest);
+          raiseArmy(state, sid, pickRaiseUnit(state, nation));
         }
       }
     }
@@ -211,9 +227,26 @@ public class Military {
     }
   }
 
+  /** How much defender manpower a settlement fields once attacked - scales
+   * with population like the old flat "defense" stat used to, but now
+   * persists across ticks as real manpower that gets worn down instead of
+   * being recomputed fresh every tick. */
+  public static double garrisonMax(Settlement settlement) {
+    return settlement.populationCount * 0.5 + 6;
+  }
+
+  /** A city is taken by killing or routing everyone defending it, not by a
+   * detached siege-progress number: while any garrison remains the two
+   * sides just grind each other down, and only once the last defender is
+   * dead or has fled does the city actually start to fall (siegeProgress
+   * then tracks that final capture, ticking up fast since there's no one
+   * left to stop it). */
   private static void resolveSieges(GameState state) {
     for (Settlement settlement : state.settlements.values()) {
       if (settlement.abandoned) continue;
+      double maxGarrison = garrisonMax(settlement);
+      if (settlement.garrisonHp < 0) settlement.garrisonHp = maxGarrison;
+
       List<Army> attackers = new ArrayList<>();
       for (Army army : state.armies.values()) {
         if (army.dead || army.nationId == settlement.nationId) continue;
@@ -222,22 +255,39 @@ public class Military {
         if (d <= ENGAGE_RANGE) attackers.add(army);
       }
       if (attackers.isEmpty()) {
-        settlement.siegeProgress = Math.max(0, settlement.siegeProgress - 0.5);
+        // no one at the gates: the garrison slowly reforms and any
+        // in-progress capture stalls back out
+        settlement.garrisonHp = Math.min(maxGarrison, settlement.garrisonHp + maxGarrison * 0.015);
+        settlement.siegeProgress = Math.max(0, settlement.siegeProgress - 3);
         continue;
       }
-      double defense = settlement.populationCount * 0.4 + 4;
+
       double attackTotal = 0;
       for (Army a : attackers) attackTotal += armyStrength(a);
 
-      if (attackTotal > defense) {
-        settlement.siegeProgress += (attackTotal - defense) * 0.05;
-        for (Army a : attackers) applyDamage(state, a, defense * 0.09 * (armyStrength(a) / attackTotal));
-      } else {
-        settlement.siegeProgress = Math.max(0, settlement.siegeProgress - 1);
-        for (Army a : attackers) applyDamage(state, a, defense * 0.1 / attackers.size());
+      if (settlement.garrisonHp > 0) {
+        double defense = settlement.garrisonHp;
+        if (attackTotal > defense) {
+          settlement.garrisonHp = Math.max(0, defense - (defense * 0.25 + (attackTotal - defense) * 0.15));
+          for (Army a : attackers) applyDamage(state, a, defense * 0.08 * (armyStrength(a) / attackTotal));
+        } else {
+          settlement.garrisonHp = Math.max(0, defense - attackTotal * 0.06);
+          for (Army a : attackers) applyDamage(state, a, defense * 0.12 / attackers.size());
+        }
+        // a badly mauled garrison can break outright rather than fight to
+        // its literal last defender - covers the "or ran away" half of
+        // "all the soldiers in the city are dead, or ran away"
+        if (settlement.garrisonHp < maxGarrison * 0.18 && Math.random() < 0.07) {
+          settlement.garrisonHp = 0;
+          EventLog.log(state, "war", "The defenders of " + settlement.name + " broke and fled");
+        }
       }
 
-      if (settlement.siegeProgress >= 24) {
+      if (settlement.garrisonHp <= 0) {
+        settlement.siegeProgress += 9;
+      }
+
+      if (settlement.siegeProgress >= 100) {
         Army winner = attackers.get(0);
         for (Army a : attackers) if (armyStrength(a) > armyStrength(winner)) winner = a;
         int oldNationId = settlement.nationId;
@@ -245,6 +295,7 @@ public class Military {
         Nation loserNation = state.nations.get(oldNationId);
         Nation.transferSettlement(state, settlement, winner.nationId);
         settlement.siegeProgress = 0;
+        settlement.garrisonHp = -1;
         winner.targetSettlementId = null;
         Diplomacy.onConquest(state, winner.nationId, oldNationId);
         EventLog.log(state, "war", (winnerNation != null ? winnerNation.name : "An unknown power")
@@ -266,9 +317,12 @@ public class Military {
         if (!state.diplomacy.getStatus(a.nationId, b.nationId).equals(Config.WAR)) continue;
         double d = Math.hypot(a.x - b.x, a.z - b.z);
         if (d > ENGAGE_RANGE) continue;
+        // bumped from 0.16 - the player asked for wars that feel/look
+        // devastating, and a field clash that barely dents either side
+        // read as a stalemate rather than a real fight
         double sa = armyStrength(a), sb = armyStrength(b);
-        applyDamage(state, a, sb * 0.16 * (0.75 + Math.random() * 0.5));
-        applyDamage(state, b, sa * 0.16 * (0.75 + Math.random() * 0.5));
+        applyDamage(state, a, sb * 0.22 * (0.75 + Math.random() * 0.5));
+        applyDamage(state, b, sa * 0.22 * (0.75 + Math.random() * 0.5));
       }
     }
   }

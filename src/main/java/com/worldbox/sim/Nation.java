@@ -184,6 +184,19 @@ public class Nation {
     return power;
   }
 
+  /** How far along the weapon-tech timeline this nation is, purely a
+   * function of its age - see Config.ERA_* - so a war that drags on long
+   * enough naturally escalates from spears to guns to tanks without a
+   * separate research system to build. */
+  public static int era(GameState state, Nation nation) {
+    int age = state.tick - nation.founded;
+    int era = Config.ERA_ANCIENT;
+    for (int i = 0; i < Config.ERA_AGE_TICKS.length; i++) {
+      if (age >= Config.ERA_AGE_TICKS[i]) era = i;
+    }
+    return era;
+  }
+
   private static void trySettlementUpkeepSpending(Nation nation) {
     if (nation.treasury < -50) nation.taxRate = Math.min(0.45, nation.taxRate + 0.01);
     else if (nation.treasury > 400) nation.taxRate = Math.max(0.1, nation.taxRate - 0.002);
@@ -369,9 +382,10 @@ public class Nation {
       Settlement capital = state.settlements.get(nation.capitalSettlementId);
       if (capital == null) continue;
       for (int sid : nation.settlementIds) {
-        if (sid == nation.capitalSettlementId) continue;
         Settlement s = state.settlements.get(sid);
         if (s == null) continue;
+        drawSettlementStreets(grid, s);
+        if (sid == nation.capitalSettlementId) continue;
         drawRoad(grid, capital.x, capital.z, s.x, s.z);
       }
     }
@@ -379,6 +393,33 @@ public class Nation {
     // whole map, since this redraws from scratch every cycle
     for (int i = 0; i < grid.isRoad.length; i++) {
       if (grid.isRoad[i] != before[i]) grid.markDirtyIdx(i);
+    }
+  }
+
+  /** A local street grid inside a single settlement - an 8-point star out
+   * from the town center plus a ring road at half that reach, connecting
+   * the center toward where its houses/farms actually cluster (see
+   * EntityRenderer's house spiral) instead of leaving every city's
+   * interior as untouched open ground with only the inter-city highway
+   * passing nearby. */
+  private static void drawSettlementStreets(WorldGrid grid, Settlement s) {
+    int cx = s.x, cz = s.z;
+    int reach = (int) Math.max(2, Math.min(9, s.radius * 0.55));
+    for (int dir = 0; dir < 8; dir++) {
+      double ang = dir * Math.PI / 4;
+      int tx = cx + (int) Math.round(Math.cos(ang) * reach);
+      int tz = cz + (int) Math.round(Math.sin(ang) * reach);
+      drawRoad(grid, cx, cz, tx, tz);
+    }
+    int ringSteps = 16;
+    int ringR = Math.max(1, reach / 2);
+    int px = cx + ringR, pz = cz;
+    for (int k = 1; k <= ringSteps; k++) {
+      double ang = k * (2 * Math.PI / ringSteps);
+      int nx = cx + (int) Math.round(Math.cos(ang) * ringR);
+      int nz = cz + (int) Math.round(Math.sin(ang) * ringR);
+      drawRoad(grid, px, pz, nx, nz);
+      px = nx; pz = nz;
     }
   }
 

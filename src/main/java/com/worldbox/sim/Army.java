@@ -28,9 +28,5 @@ public class Army {
     this.homeSettlementId = homeSettlementId;
     this.x = x; this.z = z; this.prevX = x; this.prevZ = z;
     this.targetX = x; this.targetZ = z;
-    units.put("militia", 0);
-    units.put("swordsman", 0);
-    units.put("archer", 0);
-    units.put("knight", 0);
   }
 }
