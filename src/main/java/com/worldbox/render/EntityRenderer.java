@@ -70,7 +70,7 @@ public class EntityRenderer {
   // no houses around it at all, reading as "a circle with a square in
   // it" instead of a village
   private static final int HOUSE_CAP_SAMPLE = 6000;
-  private static final int FOLIAGE_CAP_SAMPLE = 4500;
+  private static final int FOLIAGE_CAP_SAMPLE = 5500;
   private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
   private static final ColorRGBA RUIN_COLOR = new ColorRGBA(0.32f, 0.3f, 0.28f, 1f);
   // these used to be tuned for a small 128x128 map with a handful of
@@ -575,18 +575,19 @@ public class EntityRenderer {
           float jz = y + 0.5f + jitterAxis(x, y, 4);
           deposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (grid.terrain[i] == Config.GRASS && res == Config.RES_NONE
-            && foliage.size() < FOLIAGE_CAP_SAMPLE && hash01(x, y, 6) < 0.14f) {
-          // sparse, patchy coverage rather than every single grass block -
-          // real ground cover grows in clumps, not a uniform carpet, and a
+            && foliage.size() < FOLIAGE_CAP_SAMPLE && hash01(x, y, 6) < 0.19f) {
+          // patchy coverage rather than every single grass block - real
+          // ground cover grows in clumps, not a uniform carpet, and a
           // literal every-cell carpet would blow well past a sane vertex
-          // budget on a 256x256 map anyway
+          // budget on a 256x256 map anyway. Each placement is already a
+          // 7-blade tuft (MeshUtil.buildGrassTuft), not a single blade.
           float rotY = hash01(x, y, 7) * 6.28f;
           float jx = x + 0.5f + jitterAxis(x, y, 8);
           float jz = y + 0.5f + jitterAxis(x, y, 9);
           float scale = 0.7f + hash01(x, y, 10) * 0.7f;
           ColorRGBA tuftColor = FOLIAGE_COLOR.clone().interpolateLocal(TREE_COLOR, hash01(x, y, 11) * 0.4f);
           foliage.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, scale, tuftColor));
-          if (hash01(x, y, 12) < 0.1f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
+          if (hash01(x, y, 12) < 0.16f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
             ColorRGBA fc = FLOWER_COLORS[(int) (hash01(x, y, 13) * FLOWER_COLORS.length) % FLOWER_COLORS.length];
             flowers.add(new PropBatcher.Placement(jx, grid.height[i] + 0.32f * scale, jz, rotY, scale, fc));
           }
@@ -635,9 +636,12 @@ public class EntityRenderer {
       int houseCount = Math.min(32, Math.max(2 + s.populationCount / 3, occupiedHouses));
       for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
         // a spiral placement (radius grows with i) reads as an organic
-        // cluster of streets/blocks instead of a single uniform ring
+        // cluster of streets/blocks instead of a single uniform ring.
+        // Starts at 1.8 rather than 1.0 - a big city's own marker (scaled
+        // up with population) can be wide enough that the old start
+        // radius put the first couple of houses right on top of it.
         float angle = i * 2.4f + s.id * 0.7f;
-        float radius = 1.0f + (i % 6) * 0.5f + (i / 6) * 0.7f;
+        float radius = 1.8f + (i % 6) * 0.5f + (i / 6) * 0.7f;
         float hx = s.x + 0.5f + (float) Math.cos(angle) * radius;
         float hz = s.z + 0.5f + (float) Math.sin(angle) * radius;
         int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
@@ -789,15 +793,23 @@ public class EntityRenderer {
 
   private void updateBusinesses(GameState state) {
     int i = 0;
+    // a business's placement used to depend only on its own global id, at
+    // a fixed radius (1.4) that overlapped the first couple of houses'
+    // spiral (which starts at radius 1.0) almost every time. Businesses
+    // now get their own outward spiral on a per-settlement local index,
+    // starting past where the house spiral's radius tops out (see
+    // updateHouses' houseCount<=32 spiral, max radius ~5.0).
+    Map<Integer, Integer> localIndex = new HashMap<>();
     for (Business b : state.businesses.values()) {
       if (i >= BUSINESS_CAP) break;
       Settlement s = state.settlements.get(b.settlementId);
       if (s == null) continue;
       Geometry g = businessPool[i];
       float h = grid.height[grid.idx(s.x, s.z)];
-      // scatter around the settlement a bit so multiple businesses don't overlap
-      float angle = (b.id * 2.399963f);
-      float ox = (float) Math.cos(angle) * 1.4f, oz = (float) Math.sin(angle) * 1.4f;
+      int local = localIndex.merge(b.settlementId, 1, Integer::sum) - 1;
+      float angle = local * 1.9f + s.id * 0.7f;
+      float radius = 6.4f + (local % 3) * 1.1f;
+      float ox = (float) Math.cos(angle) * radius, oz = (float) Math.sin(angle) * radius;
       float scale = (float) (0.7 + Math.min(1.5, b.capital / 60.0));
       // farmTemplate is already ground-anchored at construction; market's
       // and the default extraction cube's base boxes are centered on

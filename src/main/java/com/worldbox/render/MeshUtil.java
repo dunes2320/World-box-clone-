@@ -162,7 +162,7 @@ public class MeshUtil {
     return m;
   }
 
-  /** A little clump of 5 fanned-out blades around a shared base - reads as
+  /** A little clump of 7 fanned-out blades around a shared base - reads as
    * an actual tuft of grass/garden greenery from any angle instead of the
    * old two-crossed-boxes "stick" (which was both too short and too boxy
    * to read as a plant at all). Bottom sits at y=0, like the rock/crystal
@@ -170,7 +170,7 @@ public class MeshUtil {
    * height/scale from EntityRenderer - no extra lift here. */
   public static Mesh buildGrassTuft(float baseHeight) {
     Mesh tuft = null;
-    int blades = 5;
+    int blades = 7;
     for (int i = 0; i < blades; i++) {
       float angle = (i / (float) blades) * 6.2832f + (i * 0.53f);
       float h = baseHeight * (0.78f + 0.11f * (i % 3));

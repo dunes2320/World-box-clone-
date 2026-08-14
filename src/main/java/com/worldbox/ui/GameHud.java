@@ -43,6 +43,18 @@ public class GameHud {
   private final HudContext ctx;
   private final AssetManager assetManager;
   private final float screenW, screenH;
+  // Every font size and icon-button dimension in this file was authored
+  // as a bare pixel constant against a ~900px-tall reference window. On a
+  // genuinely high-resolution or fullscreen display those same pixel
+  // counts are a much smaller fraction of the screen, so the whole HUD
+  // read as tiny relative to the window - this scales every one of those
+  // constants by how much taller the real window is than that reference,
+  // clamped so a very small or very large window doesn't produce
+  // illegibly tiny or comically huge text either.
+  private final float uiScale;
+
+  /** Scales a base font-size/icon-margin constant by uiScale. */
+  private float fs(float base) { return base * uiScale; }
 
   private final Container toolbar = new Container(new SpringGridLayout(Axis.Y, Axis.X));
   private final Container topBar = new Container(new SpringGridLayout(Axis.X, Axis.Y));
@@ -110,10 +122,11 @@ public class GameHud {
   private int graphNationId = -1;
   private String graphMetric = "marketcap"; // marketcap | unemployment | gdp | currency
 
-  private static final float SIDEPANEL_WIDTH = 330f;
-  private static final float CHART_WIDTH = 290f;
-  private static final float CHART_HEIGHT = 150f;
-  private static final float CHART_TOP_OFFSET = 226f; // px below sidePanel's top edge
+  // scaled by uiScale, assigned in the constructor
+  private final float SIDEPANEL_WIDTH;
+  private final float CHART_WIDTH;
+  private final float CHART_HEIGHT;
+  private final float CHART_TOP_OFFSET; // px below sidePanel's top edge
 
   // Measured after topBar's children are built rather than hardcoded - the
   // bar's real height depends on its tallest child (the icon buttons), and
@@ -142,6 +155,13 @@ public class GameHud {
     this.assetManager = assets;
     this.screenW = width;
     this.screenH = height;
+    this.uiScale = Math.max(0.9f, Math.min(1.9f, height / 900f));
+    this.SIDEPANEL_WIDTH = 330f * uiScale;
+    this.CHART_WIDTH = 290f * uiScale;
+    this.CHART_HEIGHT = 150f * uiScale;
+    this.CHART_TOP_OFFSET = 226f * uiScale;
+    this.DOCK_ICON_MARGIN = 6f * uiScale;
+    this.DOCK_WIDTH_ESTIMATE = 620f * uiScale;
 
     // Minimal top bar: a wordmark, a couple of compact stat chips, speed
     // controls, and icon buttons for the occasional-use menus - not a row
@@ -151,7 +171,7 @@ public class GameHud {
     guiNode.attachChild(topBar);
 
     Label title = topBar.addChild(new Label("WORLD BOX"));
-    title.setFontSize(18);
+    title.setFontSize(fs(18));
     title.setColor(TEXT);
     topBar.addChild(spacer(20));
     statLabel = topBar.addChild(new Label("Pop: 0   Nations: 0"));
@@ -161,7 +181,7 @@ public class GameHud {
 
     for (int speed : new int[]{0, 1, 2, 4}) {
       Button b = topBar.addChild(new Button(speedLabel(speed)));
-      b.setFontSize(13);
+      b.setFontSize(fs(13));
       b.addClickCommands(src -> { ctx.setGameSpeed(speed); refreshSpeedButtons(); });
       speedButtons.put(speed, b);
       topBar.addChild(spacer(3));
@@ -225,12 +245,12 @@ public class GameHud {
     guiNode.attachChild(chartNode);
 
     toastLabel = new Label(" ");
-    toastLabel.setFontSize(15);
+    toastLabel.setFontSize(fs(15));
     toastLabel.setColor(TEXT);
     toastLabel.setBackground(UiTextures.panelBackground());
     toastLabel.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
     toastLabel.setTextVAlignment(com.simsilica.lemur.VAlignment.Center);
-    toastLabel.setPreferredSize(new Vector3f(520, 42, 0));
+    toastLabel.setPreferredSize(new Vector3f(520 * uiScale, 42 * uiScale, 0));
     toastLabel.setLocalTranslation(width / 2f - 260, height - topBarHeight - 18, 5);
     toastLabel.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(toastLabel);
@@ -249,7 +269,7 @@ public class GameHud {
   private Button menuIconButton(String iconKey, Runnable onClick) {
     Button b = new Button("");
     b.setIcon(new com.simsilica.lemur.component.IconComponent(
-        IconTextures.icon(iconKey), new com.jme3.math.Vector2f(0.75f, 0.75f), 6, 6, 0, false));
+        IconTextures.icon(iconKey), new com.jme3.math.Vector2f(0.75f * uiScale, 0.75f * uiScale), fs(6), fs(6), 0, false));
     b.setBackground(UiTextures.iconSlotBackground());
     b.addClickCommands(src -> onClick.run());
     return b;
@@ -257,7 +277,7 @@ public class GameHud {
 
   private Label spacer(float width) {
     Label l = new Label(" ");
-    l.setPreferredSize(new Vector3f(width, 1, 0));
+    l.setPreferredSize(new Vector3f(width * uiScale, 1, 0));
     return l;
   }
 
@@ -306,8 +326,8 @@ public class GameHud {
     TOOL_CAPTIONS.put("blessing", "Bless");
   }
 
-  private static final float DOCK_ICON_MARGIN = 6f;
-  private static final float DOCK_WIDTH_ESTIMATE = 620f;
+  private final float DOCK_ICON_MARGIN;
+  private final float DOCK_WIDTH_ESTIMATE;
 
   private Label activeToolLabel;
 
@@ -318,10 +338,10 @@ public class GameHud {
     Container col = new Container(new SpringGridLayout(Axis.Y, Axis.X));
     col.addChild(icon);
     Label lbl = col.addChild(new Label(caption));
-    lbl.setFontSize(10);
+    lbl.setFontSize(fs(10));
     lbl.setColor(MUTED);
     lbl.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
-    lbl.setPreferredSize(new Vector3f(Math.max(40, lbl.getPreferredSize().x), 13, 0));
+    lbl.setPreferredSize(new Vector3f(Math.max(fs(40), lbl.getPreferredSize().x), fs(13), 0));
     return col;
   }
 
@@ -335,7 +355,7 @@ public class GameHud {
     GodTools.ToolDef selectDef = GodTools.TOOLS.get(0);
     Button selectBtn = new Button("");
     selectBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
-        IconTextures.icon(selectDef.id), new com.jme3.math.Vector2f(0.8f, 0.8f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+        IconTextures.icon(selectDef.id), new com.jme3.math.Vector2f(0.8f * uiScale, 0.8f * uiScale), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
     selectBtn.setBackground(UiTextures.iconSlotBackground());
     selectBtn.addClickCommands(src -> { ctx.setTool(selectDef.id); refreshToolButtons(); });
     toolButtons.put(selectDef.id, selectBtn);
@@ -344,7 +364,7 @@ public class GameHud {
     for (String tabName : TOOL_TABS) {
       Button tabBtn = new Button("");
       tabBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
-          IconTextures.icon(TAB_ICONS.get(tabName)), new com.jme3.math.Vector2f(0.68f, 0.68f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+          IconTextures.icon(TAB_ICONS.get(tabName)), new com.jme3.math.Vector2f(0.68f * uiScale, 0.68f * uiScale), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
       tabBtn.setBackground(UiTextures.iconSlotBackground());
       tabBtn.addClickCommands(src -> {
         activeToolTab = tabName;
@@ -358,23 +378,23 @@ public class GameHud {
     rebuildToolGroup();
 
     Label rowGap = toolbar.addChild(new Label(" "));
-    rowGap.setPreferredSize(new Vector3f(1, 8, 0));
+    rowGap.setPreferredSize(new Vector3f(1 * uiScale, 8 * uiScale, 0));
 
     Container statusRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     activeToolLabel = statusRow.addChild(new Label(selectDef.name));
     activeToolLabel.setColor(ACTIVE);
-    activeToolLabel.setFontSize(13);
-    activeToolLabel.setPreferredSize(new Vector3f(110, 18, 0));
+    activeToolLabel.setFontSize(fs(13));
+    activeToolLabel.setPreferredSize(new Vector3f(110 * uiScale, 18 * uiScale, 0));
     statusRow.addChild(spacer(14));
     Label brushHeader = statusRow.addChild(new Label("Brush"));
     brushHeader.setColor(MUTED);
-    brushHeader.setFontSize(12);
+    brushHeader.setFontSize(fs(12));
     brushSlider = statusRow.addChild(new Slider(new DefaultRangedValueModel(1, 9, ctx.getBrushSize()), Axis.X));
     brushSlider.setDelta(1);
-    brushSlider.setPreferredSize(new Vector3f(100, 20, 0));
+    brushSlider.setPreferredSize(new Vector3f(100 * uiScale, 20 * uiScale, 0));
     brushLabel = statusRow.addChild(new Label(String.valueOf(ctx.getBrushSize())));
     brushLabel.setColor(MUTED);
-    brushLabel.setFontSize(12);
+    brushLabel.setFontSize(fs(12));
 
     refreshToolButtons();
   }
@@ -393,7 +413,7 @@ public class GameHud {
       first = false;
       Button b = new Button("");
       b.setIcon(new com.simsilica.lemur.component.IconComponent(
-          IconTextures.icon(tool.id), new com.jme3.math.Vector2f(0.85f, 0.85f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+          IconTextures.icon(tool.id), new com.jme3.math.Vector2f(0.85f * uiScale, 0.85f * uiScale), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
       b.setBackground(UiTextures.iconSlotBackground());
       b.addClickCommands(src -> {
         ctx.setTool(tool.id);
@@ -555,24 +575,24 @@ public class GameHud {
     Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     Label l = row.addChild(new Label(label));
     l.setColor(MUTED);
-    l.setPreferredSize(new Vector3f(160, 20, 0));
+    l.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
     Label v = row.addChild(new Label(value));
     v.setColor(TEXT);
   }
 
   private void renderSettings() {
     Label title = sidePanel.addChild(new Label("Settings"));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
 
     Label camHeader = sidePanel.addChild(new Label("CAMERA"));
-    camHeader.setColor(MUTED); camHeader.setFontSize(12);
+    camHeader.setColor(MUTED); camHeader.setFontSize(fs(12));
 
     Label zoomHeader = sidePanel.addChild(new Label("Scroll zoom sensitivity"));
     zoomHeader.setColor(TEXT);
     zoomSlider = sidePanel.addChild(new Slider(new DefaultRangedValueModel(0.2, 3.0, ctx.getZoomSensitivity()), Axis.X));
     zoomSlider.setDelta(0.1);
-    zoomSlider.setPreferredSize(new Vector3f(260, 24, 0));
+    zoomSlider.setPreferredSize(new Vector3f(260 * uiScale, 24 * uiScale, 0));
     zoomLabel = sidePanel.addChild(new Label(String.format("%.1fx", ctx.getZoomSensitivity())));
     zoomLabel.setColor(MUTED);
   }
@@ -581,7 +601,7 @@ public class GameHud {
     Settlement s = state.settlements.get(id);
     if (s == null) { sidePanelMode = null; ctx.setSelection(null); return; }
     Label title = sidePanel.addChild(new Label(s.name));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
     Nation nation = state.nations.get(s.nationId);
     statRow("Nation", s.abandoned ? "(abandoned ruin)" : nation != null ? nation.displayName() : "-");
@@ -591,13 +611,13 @@ public class GameHud {
     statRow("Under siege", s.siegeProgress > 0.5 ? "yes" : "no");
 
     Label stockHeader = sidePanel.addChild(new Label("STOCKPILE"));
-    stockHeader.setColor(MUTED); stockHeader.setFontSize(12);
+    stockHeader.setColor(MUTED); stockHeader.setFontSize(fs(12));
     for (Map.Entry<String, Double> e : s.stock.entrySet()) {
       statRow(e.getKey(), String.valueOf((int) Math.floor(e.getValue())));
     }
 
     Label raiseHeader = sidePanel.addChild(new Label("RAISE ARMY"));
-    raiseHeader.setColor(MUTED); raiseHeader.setFontSize(12);
+    raiseHeader.setColor(MUTED); raiseHeader.setFontSize(fs(12));
     Label msg = new Label("");
     msg.setColor(MUTED);
     for (Config.UnitSpec spec : Config.UNIT_TYPES.values()) {
@@ -633,7 +653,7 @@ public class GameHud {
     }
     if (h == null) { sidePanelMode = null; ctx.setSelection(null); return; }
     Label title = sidePanel.addChild(new Label(h.name));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
 
     boolean undead = h.nationId == Config.UNDEAD_NATION_ID;
@@ -652,7 +672,7 @@ public class GameHud {
       statRow("Housing", h.hasHouse ? "Owns a house" : "Repossessed - homeless");
 
       Label persHeader = sidePanel.addChild(new Label("PERSONALITY: " + h.personality.archetype()));
-      persHeader.setColor(MUTED); persHeader.setFontSize(12);
+      persHeader.setColor(MUTED); persHeader.setFontSize(fs(12));
       statRow("Industrious", String.format("%.0f%%", h.personality.industriousness * 100));
       statRow("Ambition", String.format("%.0f%%", h.personality.ambition * 100));
       statRow("Sociable", String.format("%.0f%%", h.personality.sociability * 100));
@@ -665,13 +685,13 @@ public class GameHud {
     Nation n = state.nations.get(id);
     if (n == null) { sidePanelMode = "nationsList"; ctx.setSelection(null); return; }
     Label title = sidePanel.addChild(new Label(n.displayName()));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     title.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
     closeButton();
 
     if (n.leader != null) {
       Label leaderHeader = sidePanel.addChild(new Label("LEADER"));
-      leaderHeader.setColor(MUTED); leaderHeader.setFontSize(12);
+      leaderHeader.setColor(MUTED); leaderHeader.setFontSize(fs(12));
       statRow(n.leader.title, n.leader.name);
       statRow("Character", n.leader.personality.archetype());
     }
@@ -687,7 +707,7 @@ public class GameHud {
     statRow("Wage policy", (int) Math.round(n.wagePolicy * 100) + "% of sale value");
 
     Label currencyHeader = sidePanel.addChild(new Label("CURRENCY: " + n.currencyName));
-    currencyHeader.setColor(MUTED); currencyHeader.setFontSize(12);
+    currencyHeader.setColor(MUTED); currencyHeader.setFontSize(fs(12));
     if (n.currencyCollapsed) {
       Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
       collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
@@ -706,12 +726,12 @@ public class GameHud {
     statRow("Military power", String.format("%.0f", military));
 
     Label govHeader = sidePanel.addChild(new Label("GOVERNMENT"));
-    govHeader.setColor(MUTED); govHeader.setFontSize(12);
+    govHeader.setColor(MUTED); govHeader.setFontSize(fs(12));
     statRow("Type", n.government);
     Container stabilityRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     Label stabLabel = stabilityRow.addChild(new Label("Stability"));
     stabLabel.setColor(MUTED);
-    stabLabel.setPreferredSize(new Vector3f(160, 20, 0));
+    stabLabel.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
     Label stabValue = stabilityRow.addChild(new Label(String.format("%.0f%%", n.stability)));
     stabValue.setColor(n.stability < 25 ? DANGER : n.stability < 50 ? ACTIVE : GOOD);
     if (n.stability < 15) {
@@ -730,21 +750,13 @@ public class GameHud {
     gift.addClickCommands(src -> Diplomacy.divineGift(state, id, 200));
 
     Label econHeader = sidePanel.addChild(new Label("ECONOMY"));
-    econHeader.setColor(MUTED); econHeader.setFontSize(12);
+    econHeader.setColor(MUTED); econHeader.setFontSize(fs(12));
     Container cycleRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     Label cycleLbl = cycleRow.addChild(new Label("Business cycle"));
     cycleLbl.setColor(MUTED);
-    cycleLbl.setPreferredSize(new Vector3f(160, 20, 0));
+    cycleLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
     Label cycleVal = cycleRow.addChild(new Label(econCycleLabel(n.econCycle)));
     cycleVal.setColor(n.econCycle > 1.08 ? GOOD : n.econCycle < 0.92 ? DANGER : TEXT);
-    statRow("Ideology", n.ideology);
-    Button toggleIdeology = sidePanel.addChild(new Button(
-        n.ideology.equals("capitalism") ? "Switch to Communism" : "Switch to Capitalism"));
-    toggleIdeology.addClickCommands(src -> {
-      n.ideology = n.ideology.equals("capitalism") ? "communism" : "capitalism";
-      refreshSidePanel();
-    });
-
     statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + " " + cur);
     statRow("Bank loans", (int) Math.floor(n.bank.loans) + " " + cur);
     if (n.bank.justCrashed) {
@@ -766,7 +778,7 @@ public class GameHud {
     viewGraph.addClickCommands(src -> showGraph("nation", id));
 
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
-    relHeader.setColor(MUTED); relHeader.setFontSize(12);
+    relHeader.setColor(MUTED); relHeader.setFontSize(fs(12));
     resetListPage(id);
     java.util.List<Nation> others = new java.util.ArrayList<>();
     for (Nation other : state.nations.values()) if (other.id != id) others.add(other);
@@ -775,7 +787,7 @@ public class GameHud {
       String status = state.diplomacy.getStatus(id, other.id);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label name = row.addChild(new Label(other.displayName() + " (" + status + ")"));
-      name.setPreferredSize(new Vector3f(180, 20, 0));
+      name.setPreferredSize(new Vector3f(180 * uiScale, 20 * uiScale, 0));
       name.setColor(statusColor(status));
 
       Container actions = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
@@ -801,7 +813,7 @@ public class GameHud {
 
   private void renderNationsList(GameState state) {
     Label title = sidePanel.addChild(new Label("Nations (" + state.nations.size() + ")"));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
     if (state.nations.isEmpty()) {
       Label l = sidePanel.addChild(new Label("No nations yet. Use \"Found Nation\"."));
@@ -836,7 +848,7 @@ public class GameHud {
 
   private void renderLog(GameState state) {
     Label title = sidePanel.addChild(new Label("World Log (" + state.eventLog.size() + ")"));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
     if (state.eventLog.isEmpty()) {
       Label l = sidePanel.addChild(new Label("Nothing has happened yet."));
@@ -852,17 +864,17 @@ public class GameHud {
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label dateLbl = row.addChild(new Label(com.worldbox.util.Calendar.dateString(e.tick)));
       dateLbl.setColor(MUTED);
-      dateLbl.setFontSize(12);
-      dateLbl.setPreferredSize(new Vector3f(110, 18, 0));
+      dateLbl.setFontSize(fs(12));
+      dateLbl.setPreferredSize(new Vector3f(110 * uiScale, 18 * uiScale, 0));
       Label msg = row.addChild(new Label(e.message));
       msg.setColor(logCategoryColor(e.category));
-      msg.setFontSize(12);
+      msg.setFontSize(fs(12));
     }
   }
 
   private void renderMarket(GameState state) {
     Label title = sidePanel.addChild(new Label("World Market"));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     closeButton();
     if (state.market.crashedThisTick) {
       Label crash = sidePanel.addChild(new Label("MARKET CRASH just hit a resource!"));
@@ -877,10 +889,10 @@ public class GameHud {
       double greed = market.greed.getOrDefault(key, 0.0);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label l = row.addChild(new Label(key));
-      l.setPreferredSize(new Vector3f(110, 20, 0));
+      l.setPreferredSize(new Vector3f(110 * uiScale, 20 * uiScale, 0));
       Label v = row.addChild(new Label(String.format("%.2fg %s", price, price >= prev ? "↑" : "↓")));
       v.setColor(price >= prev ? GOOD : DANGER);
-      v.setPreferredSize(new Vector3f(80, 20, 0));
+      v.setPreferredSize(new Vector3f(80 * uiScale, 20 * uiScale, 0));
       if (price > base * 1.8) {
         Label bubble = row.addChild(new Label(greed > 0.5 ? "BUBBLE" : "high"));
         bubble.setColor(greed > 0.5 ? DANGER : ACTIVE);
@@ -942,7 +954,7 @@ public class GameHud {
     if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
 
     Label title = sidePanel.addChild(new Label((isWorld ? "World Economy" : n.displayName()) + " - " + metricPanelTitle(graphMetric)));
-    title.setFontSize(17);
+    title.setFontSize(fs(17));
     Container navRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     Button back = navRow.addChild(new Button("Back"));
     back.addClickCommands(src -> {
@@ -989,7 +1001,7 @@ public class GameHud {
       Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
       Label changeLbl = changeRow.addChild(new Label("Change"));
       changeLbl.setColor(MUTED);
-      changeLbl.setPreferredSize(new Vector3f(160, 20, 0));
+      changeLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
       Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%s)",
           change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", formatMetric(graphMetric, Math.abs(change)))));
       changeVal.setColor(change >= 0 ? GOOD : DANGER);

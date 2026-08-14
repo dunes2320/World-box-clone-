@@ -1,8 +1,8 @@
 package com.worldbox.sim;
 
-/** A private (capitalism) or state-owned (communism) economic actor that
- * specializes in one resource, skimming surplus into its own capital and
- * boosting local output. Businesses can go bankrupt in a market crash. */
+/** A privately owned, nation-taxed economic actor that specializes in one
+ * resource, skimming surplus into its own capital and boosting local
+ * output. Businesses can go bankrupt in a market crash. */
 public class Business {
   private static int nextId = 1;
 

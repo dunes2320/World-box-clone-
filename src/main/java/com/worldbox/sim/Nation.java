@@ -68,7 +68,6 @@ public class Nation {
   public final Set<Integer> armyIds = new LinkedHashSet<>();
   public final int founded;
   public boolean alive = true;
-  public String ideology; // "capitalism" | "communism"
   public final Bank bank = new Bank();
   public String government; // Government.DEMOCRACY | AUTOCRACY | MONARCHY | OLIGARCHY
   public double stability = 65;
@@ -155,7 +154,6 @@ public class Nation {
     this.color = Config.NATION_COLORS[this.colorIndex];
     this.name = name != null ? name : randomNationName(rng != null ? rng : new Rng((long) (Math.random() * Long.MAX_VALUE)));
     this.founded = founded;
-    this.ideology = Math.random() < 0.5 ? "capitalism" : "communism";
     this.government = Government.random();
     this.currencyName = this.name + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
     this.leader = new Leader(this.government);

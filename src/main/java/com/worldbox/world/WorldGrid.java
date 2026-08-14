@@ -26,6 +26,14 @@ public class WorldGrid {
    * overlay, blended into the terrain's top-face color. */
   public final boolean[] isFarmland = new boolean[n];
   public final boolean[] isRoad = new boolean[n];
+  /** The "claim strength" (population + treasury + military, see
+   * Settlement.claimTerritory) that most recently won each cell - lets two
+   * overlapping settlements' claims be resolved by which one is actually
+   * bigger/richer/stronger instead of just whichever happened to run its
+   * claim pass last. Decays slowly so a claim a settlement no longer
+   * actively presses (shrunk, died) eventually loses ground to a neighbor
+   * instead of being permanently locked in from one strong claim years ago. */
+  public final float[] claimStrength = new float[n];
 
   /** Cell indices whose terrain/resource/color changed since the renderer
    * last flushed them. */

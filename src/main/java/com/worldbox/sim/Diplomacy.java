@@ -7,17 +7,25 @@ import java.util.List;
 
 public class Diplomacy {
 
-  private static boolean nationsAreNear(GameState state, Nation a, Nation b, double maxDist) {
+  private static final double CONTACT_RANGE = 34;
+
+  /** Closest distance between any pair of the two nations' settlements, or
+   * Double.MAX_VALUE if they share none close enough to compare. Used both
+   * as the "are these nations even in contact" gate and, at the peace
+   * branch below, to tell a tense border neighbor from a nation that's
+   * merely within trading range. */
+  private static double nearestDistance(GameState state, Nation a, Nation b) {
+    double best = Double.MAX_VALUE;
     for (int sidA : a.settlementIds) {
       Settlement sA = state.settlements.get(sidA);
       if (sA == null) continue;
       for (int sidB : b.settlementIds) {
         Settlement sB = state.settlements.get(sidB);
         if (sB == null) continue;
-        if (Math.hypot(sA.x - sB.x, sA.z - sB.z) <= maxDist) return true;
+        best = Math.min(best, Math.hypot(sA.x - sB.x, sA.z - sB.z));
       }
     }
-    return false;
+    return best;
   }
 
   public static void update(GameState state) {
@@ -44,7 +52,8 @@ public class Diplomacy {
 
       for (Nation other : nations) {
         if (other.id == nation.id) continue;
-        if (!nationsAreNear(state, nation, other, 34)) continue;
+        double dist = nearestDistance(state, nation, other);
+        if (dist > CONTACT_RANGE) continue;
         String status = dip.getStatus(nation.id, other.id);
         double score = dip.getScore(nation.id, other.id);
         double theirPower = Nation.totalMilitaryPower(state, other.id) + 1;
@@ -53,13 +62,38 @@ public class Diplomacy {
         // not be fully ready for; a cautious one waits for a clearer edge
         double ambition = nation.leader != null ? nation.leader.personality.ambition : 0.5;
         if (status.equals(Config.PEACE)) {
-          // neighbors compete for the same land and resources - without
-          // some steady friction here, the relationship score only ever
-          // moves via a tiny random walk that would take millions of
-          // ticks to organically drift past the war threshold below, so
-          // wars in practice never happened on their own and every army
-          // just sat home forever with nothing to do
-          dip.adjustScore(nation.id, other.id, -0.4);
+          // border friction scales with how close the two actually are -
+          // a shared border is real tension, but a nation only just within
+          // contact range has room to trade instead of just grinding
+          // toward war. Previously this was a flat -0.4 with nothing ever
+          // pushing the other way, which meant every peaceful neighbor
+          // inevitably slid toward war (or, once too weak to fight, an
+          // inert dead stalemate) and an alliance - which needs a POSITIVE
+          // score - could never actually be reached organically. That's
+          // why wars stayed rare and alliances never happened at all.
+          //
+          // This only runs once every Config.DECISION_INTERVAL (45) ticks
+          // per pair, not every tick - the magnitudes below are sized
+          // against THAT cadence (roughly matching how the old flat -0.4
+          // took ~11 years to grind a pair down to the -35 war threshold),
+          // not a per-tick rate. A first attempt at this fix used
+          // per-tick-sized deltas (~0.1-0.2) here and it was still 40+
+          // years to reach an alliance in practice - re-verified against
+          // an actual multi-year soak, not just the formula on paper.
+          double proximity = clamp(1 - dist / CONTACT_RANGE, 0, 1);
+          double friction = 0.6 * proximity;
+          double tradeBenefit = 0.55 * (1 - proximity);
+          dip.adjustScore(nation.id, other.id, tradeBenefit - friction);
+          // real trade: an occasional mutual income bump, more likely the
+          // more comfortable (less bordered) the relationship is - this is
+          // the actual "trade" the diplomacy system was missing entirely
+          if (Math.random() < 0.02 * (1 - proximity * 0.6)) {
+            double value = 5 + Math.random() * 9;
+            nation.treasury += value;
+            other.treasury += value;
+            nation.gdpAccum += value * 0.4;
+            other.gdpAccum += value * 0.4;
+          }
           if (score > 55 && Math.random() < 0.5) {
             dip.setStatus(nation.id, other.id, Config.ALLIANCE);
             dip.adjustScore(nation.id, other.id, 10);

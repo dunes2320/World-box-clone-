@@ -189,7 +189,7 @@ public class Economy {
     state.businesses.put(b.id, b);
   }
 
-  // ---- businesses: private (capitalism) or state-owned (communism) ----
+  // ---- businesses: privately owned, taxed by the nation ----
   private static void updateBusinesses(GameState state) {
     if (state.tick % 3 == 0) {
       for (Settlement s : state.settlements.values()) {
@@ -259,15 +259,9 @@ public class Economy {
       }
       n.gdpAccum += revenue;
 
-      if (n.ideology.equals("communism")) {
-        // state-owned: the enterprise's output goes straight to the treasury
-        n.treasury += revenue;
-        b.capital += revenue * 0.05;
-      } else {
-        double stateCut = n.government.equals(Government.OLIGARCHY) ? 0.15 : 0.3;
-        b.capital += revenue * (1 - stateCut);
-        n.treasury += revenue * stateCut;
-      }
+      double stateCut = n.government.equals(Government.OLIGARCHY) ? 0.15 : 0.3;
+      b.capital += revenue * (1 - stateCut);
+      n.treasury += revenue * stateCut;
 
       b.capital -= 0.4; // upkeep
 

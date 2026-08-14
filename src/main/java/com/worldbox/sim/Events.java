@@ -39,7 +39,7 @@ public class Events {
   // - MAX_SIMULTANEOUS_FIRE acts as "the whole world's worth of bad luck
   // meeting itself", a hard ceiling on how much can be burning at once
   // regardless of how much fuel is still out there.
-  private static final int MAX_SIMULTANEOUS_FIRE = 220;
+  private static final int MAX_SIMULTANEOUS_FIRE = 110;
 
   // a fire holding at the MAX_SIMULTANEOUS_FIRE cap for a long stretch
   // would otherwise just sit there indefinitely (spread blocked, but
@@ -49,8 +49,8 @@ public class Events {
   // this big for this long starts picking up random forced-out cells
   // each tick, an escalating chance that guarantees it's fully dead
   // within a bounded (but not exactly predictable) further stretch.
-  private static final int SIZABLE_FIRE = 40;
-  private static final int BURNOUT_ONSET_TICKS = 300;
+  private static final int SIZABLE_FIRE = 30;
+  private static final int BURNOUT_ONSET_TICKS = 150;
 
   private static void updateFire(GameState state) {
     WorldGrid grid = state.grid;
@@ -122,7 +122,13 @@ public class Events {
 
   private static void updateVegetation(GameState state) {
     WorldGrid grid = state.grid;
-    int samples = 250;
+    // was 250 samples/tick at a 2% regrowth chance regardless of map size -
+    // a single sizable wildfire could scorch several hundred cells in the
+    // time it took to burn out, and this pass could only actually convert
+    // a handful of those back to grass per tick, so burn scars accumulated
+    // faster than they healed and the map read as permanently burnt within
+    // the first year or two.
+    int samples = 700;
     for (int s = 0; s < samples; s++) {
       int x = (int) (Math.random() * grid.cols);
       int y = (int) (Math.random() * grid.rows);
@@ -137,7 +143,7 @@ public class Events {
           grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 2;
           grid.markDirtyIdx(i);
         }
-      } else if (grid.terrain[i] == Config.DIRT && !grid.burning[i] && hasGrassNeighbor(grid, x, y) && Math.random() < 0.02) {
+      } else if (grid.terrain[i] == Config.DIRT && !grid.burning[i] && hasGrassNeighbor(grid, x, y) && Math.random() < 0.04) {
         // grass slowly reclaims bare dirt (burn scars heal, cleared
         // patches soften) if it's got grass nearby to spread from
         grid.terrain[i] = Config.GRASS;
@@ -381,7 +387,7 @@ public class Events {
         EventLog.log(state, "disaster", "An earthquake struck " + where);
       }
     }
-    if (Math.random() < 0.0022) {
+    if (Math.random() < 0.0008) {
       for (int attempt = 0; attempt < 8; attempt++) {
         int x = (int) (Math.random() * grid.cols), y = (int) (Math.random() * grid.rows);
         int i = grid.idx(x, y);

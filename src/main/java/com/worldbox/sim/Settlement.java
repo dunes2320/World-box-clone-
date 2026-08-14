@@ -95,13 +95,27 @@ public class Settlement {
     return housed < capacity;
   }
 
+  /** Claims every cell in range, contested by "claim strength" (population
+   * + treasury + military power, falling off with distance from the
+   * settlement) rather than by whichever settlement's turn happened to
+   * come up last in this cycle - so a rich, powerful nation genuinely
+   * pushes into a weaker neighbor's territory instead of border cells
+   * just flickering between owners depending on iteration order. */
   public static void claimTerritory(GameState state, Settlement settlement) {
     WorldGrid grid = state.grid;
+    Nation nation = state.nations.get(settlement.nationId);
+    double treasury = nation != null ? Math.max(0, nation.treasury) : 0;
+    double power = nation != null ? Nation.totalMilitaryPower(state, nation.id) : 0;
+    float strength = (float) (settlement.populationCount + treasury * 0.01 + power * 3);
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (grid.terrain[i] == Config.WATER) return;
-      grid.ownerNation[i] = settlement.nationId;
-      grid.markDirtyIdx(i);
+      float effective = strength - (float) d * 4f;
+      if (grid.ownerNation[i] == settlement.nationId || effective >= grid.claimStrength[i]) {
+        grid.ownerNation[i] = settlement.nationId;
+        grid.claimStrength[i] = effective;
+        grid.markDirtyIdx(i);
+      }
     });
   }
 
@@ -156,7 +170,17 @@ public class Settlement {
       if (settlement.abandoned) continue;
 
       if (state.tick % 25 == 0) {
-        settlement.radius = Math.min(11, 3.5 + Math.sqrt(settlement.populationCount) * 0.85);
+        // territory used to be population-only and capped at a modest 11 -
+        // a nation's wealth and military never mattered, and even a
+        // flourishing empire topped out claiming a small patch around each
+        // town, leaving most of the map permanently unclaimed wilderness.
+        // Now a rich, powerful settlement genuinely presses outward
+        // further than a poor, defenseless one, and claimTerritory (below)
+        // lets that actually win contested cells from a weaker neighbor.
+        Nation homeNation = state.nations.get(settlement.nationId);
+        double wealthBonus = homeNation != null ? Math.sqrt(Math.max(0, homeNation.treasury)) * 0.11 : 0;
+        double powerBonus = homeNation != null ? Math.sqrt(Nation.totalMilitaryPower(state, homeNation.id)) * 0.6 : 0;
+        settlement.radius = Math.min(24, 3.5 + Math.sqrt(settlement.populationCount) * 0.85 + wealthBonus + powerBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
       }
@@ -288,7 +312,14 @@ public class Settlement {
     WorldGrid grid = state.grid;
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
-      if (grid.ownerNation[i] == oldNationId) { grid.ownerNation[i] = -1; grid.markDirtyIdx(i); }
+      if (grid.ownerNation[i] == oldNationId) {
+        grid.ownerNation[i] = -1;
+        // otherwise this settlement's last claim strength lingers forever
+        // and can block a neighbor from ever claiming the cell, even
+        // though nothing is actually holding it anymore
+        grid.claimStrength[i] = 0;
+        grid.markDirtyIdx(i);
+      }
       if (grid.isFarmland[i]) { grid.isFarmland[i] = false; grid.markDirtyIdx(i); }
     });
 
