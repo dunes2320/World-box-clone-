@@ -166,10 +166,11 @@ public class EntityRenderer {
         new Box(0.55f, 0.42f, 0.55f),
         MeshUtil.translatedCopy(new Box(0.38f, 0.32f, 0.38f), 0, 0.55f, 0));
     treeTrunkTemplate = new Box(0.15f, 0.42f, 0.15f);
-    depositTemplate = MeshUtil.buildGem(0.4f, 0.55f);
-    // stone used to share the same smooth "gem" mesh as iron/gold ore,
-    // which reads fine as a polished crystal but looks like a bland blob
-    // for plain rock - a jumbled boulder cluster instead
+    // iron/gold ore used to be a single smooth bipyramid "gem" - reads as
+    // a polished blob rather than raw mineral. An angular jutting crystal
+    // cluster instead; stone gets its own jumbled boulder cluster below
+    // since a rock and an ore vein shouldn't look like the same thing.
+    depositTemplate = MeshUtil.buildCrystalCluster(0.42f);
     stoneDepositTemplate = MeshUtil.buildRockCluster(0.5f);
     humanTemplate = MeshUtil.mergeMeshes(
         new Box(0.15f, 0.5f, 0.12f),
@@ -466,8 +467,8 @@ public class EntityRenderer {
   private Material vertexColorMaterial() {
     Material mat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     mat.setBoolean("UseVertexColor", true);
-    mat.setColor("Specular", ColorRGBA.Black);
-    mat.setFloat("Shininess", 1f);
+    mat.setColor("Specular", new ColorRGBA(0.14f, 0.14f, 0.13f, 1f));
+    mat.setFloat("Shininess", 8f);
     return mat;
   }
 
@@ -476,8 +477,8 @@ public class EntityRenderer {
     mat.setBoolean("UseMaterialColors", true);
     mat.setColor("Diffuse", c);
     mat.setColor("Ambient", c);
-    mat.setColor("Specular", ColorRGBA.Black);
-    mat.setFloat("Shininess", 1f);
+    mat.setColor("Specular", new ColorRGBA(0.14f, 0.14f, 0.13f, 1f));
+    mat.setFloat("Shininess", 8f);
     return mat;
   }
 
@@ -564,17 +565,17 @@ public class EntityRenderer {
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
           float jx = x + 0.5f + jitterAxis(x, y, 3);
           float jz = y + 0.5f + jitterAxis(x, y, 4);
-          // buildRockCluster's boxes are each lifted by their own half
-          // height already, so the cluster's bottom sits flush at local
-          // y=0 - no extra ground offset needed, unlike the origin-
-          // centered gem template below
+          // buildRockCluster's boxes (and buildCrystalCluster's spikes
+          // below) are each lifted by their own half height already, so
+          // both clusters sit flush at local y=0 - no extra ground offset
+          // needed, unlike the old origin-centered gem template
           stoneDeposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (res != Config.RES_NONE && res != Config.RES_FOREST && deposits.size() < DEPOSIT_CAP_SAMPLE) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
           float jx = x + 0.5f + jitterAxis(x, y, 3);
           float jz = y + 0.5f + jitterAxis(x, y, 4);
-          deposits.add(new PropBatcher.Placement(jx, grid.height[i] + 0.28f, jz, rotY, 1f, c));
+          deposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (grid.terrain[i] == Config.GRASS && res == Config.RES_NONE
             && foliage.size() < FOLIAGE_CAP_SAMPLE && hash01(x, y, 6) < 0.14f) {
           // sparse, patchy coverage rather than every single grass block -

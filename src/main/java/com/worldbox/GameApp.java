@@ -90,17 +90,17 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // 0-1 range for the directional term to actually carve out, so a lit
     // block and a shadowed block read as visibly different instead of
     // both sitting close to the same washed-out ambient-dominated value.
-    rootNode.addLight(new AmbientLight(new ColorRGBA(0.3f, 0.32f, 0.36f, 1f)));
+    rootNode.addLight(new AmbientLight(new ColorRGBA(0.26f, 0.28f, 0.32f, 1f)));
     DirectionalLight sun = new DirectionalLight();
     sun.setDirection(new Vector3f(-0.5f, -1f, -0.4f).normalizeLocal());
-    sun.setColor(new ColorRGBA(0.78f, 0.74f, 0.64f, 1f));
+    sun.setColor(new ColorRGBA(0.88f, 0.83f, 0.7f, 1f));
     rootNode.addLight(sun);
 
     rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
     com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
         new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 2048, 3);
     shadowRenderer.setLight(sun);
-    shadowRenderer.setShadowIntensity(0.6f);
+    shadowRenderer.setShadowIntensity(0.72f);
     shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
     viewPort.addProcessor(shadowRenderer);
 

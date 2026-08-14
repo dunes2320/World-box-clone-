@@ -75,15 +75,20 @@ public class VoxelChunkRenderer {
     solidChunks = new Geometry[n];
     waterChunks = new Geometry[n];
 
+    // Specular was pinned to black everywhere (pure diffuse+ambient, no
+    // highlight at all) - technically "lit" but with nothing that visibly
+    // responds to view angle, which reads as flat/painted-on rather than
+    // actually lit. A soft sheen on terrain and a real glint on water
+    // give the sun something to visibly bounce off of.
     Material solidMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     solidMat.setBoolean("UseVertexColor", true);
-    solidMat.setColor("Specular", ColorRGBA.Black);
-    solidMat.setFloat("Shininess", 1f);
+    solidMat.setColor("Specular", new ColorRGBA(0.16f, 0.16f, 0.15f, 1f));
+    solidMat.setFloat("Shininess", 10f);
 
     Material waterMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     waterMat.setBoolean("UseVertexColor", true);
-    waterMat.setColor("Specular", ColorRGBA.Black);
-    waterMat.setFloat("Shininess", 1f);
+    waterMat.setColor("Specular", new ColorRGBA(0.85f, 0.89f, 0.93f, 1f));
+    waterMat.setFloat("Shininess", 80f);
     waterMat.setTransparent(true);
     waterMat.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
     waterMat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);

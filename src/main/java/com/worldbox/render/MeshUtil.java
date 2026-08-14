@@ -112,6 +112,29 @@ public class MeshUtil {
     return mergeMeshes(mergeMeshes(bigP, midP), smallP);
   }
 
+  /** A single angular crystal spike - a low-radial-segment cone reads as
+   * faceted/gem-like rather than smoothly round. Bottom sits at local
+   * y=0, tip at y=height. */
+  private static Mesh spike(float radius, float height, int sides) {
+    Mesh cone = new com.jme3.scene.shape.Cylinder(2, sides, radius, 0.001f, height, true, false);
+    reorientZToY(cone);
+    return translatedCopy(cone, 0, height / 2, 0);
+  }
+
+  /** A cluster of jutting angular spikes at different heights/radii - a
+   * mineral crystal formation, not a single smooth polished "gem". Used
+   * for iron/gold ore so they read as raw crystal rather than a blobby
+   * lump; each instance's own per-placement Y rotation (see
+   * EntityRenderer) varies which facets face the camera between
+   * deposits even though the cluster shape itself is fixed. */
+  public static Mesh buildCrystalCluster(float baseRadius) {
+    Mesh a = spike(baseRadius * 0.4f, baseRadius * 1.6f, 5);
+    Mesh b = translatedCopy(spike(baseRadius * 0.28f, baseRadius * 1.1f, 5), baseRadius * 0.35f, 0, baseRadius * 0.15f);
+    Mesh c = translatedCopy(spike(baseRadius * 0.22f, baseRadius * 0.85f, 5), -baseRadius * 0.3f, 0, -baseRadius * 0.2f);
+    Mesh d = translatedCopy(spike(baseRadius * 0.18f, baseRadius * 0.6f, 6), baseRadius * 0.08f, 0, -baseRadius * 0.38f);
+    return mergeMeshes(mergeMeshes(a, b), mergeMeshes(c, d));
+  }
+
   /** A slim pillar with a flared cap - used for a nation's bank/vault. */
   public static Mesh buildPillar(float baseRadius, float capRadius, float height) {
     Mesh shaft = new com.jme3.scene.shape.Cylinder(2, 5, baseRadius, baseRadius * 0.8f, height, true, false);

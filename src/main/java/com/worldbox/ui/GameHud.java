@@ -59,6 +59,8 @@ public class GameHud {
 
   private String sidePanelMode; // "settlement" | "nation" | "nationsList" | "market" | "graph" | "settings" | "log"
   private double lastStatRefresh, lastPanelRefresh;
+  private final Map<Integer, Button> speedButtons = new LinkedHashMap<>();
+  private int lastSpeedShown = -1;
 
   // a brief on-screen toast whenever a new world event lands (war, disaster,
   // a nation rising or falling) - the log book (see renderLog) is where a
@@ -141,11 +143,13 @@ public class GameHud {
     topBar.addChild(spacer(30));
     statLabel = topBar.addChild(new Label("Pop: 0   Nations: 0"));
     statLabel.setColor(MUTED);
+    statLabel.setBackground(UiTextures.chipBackground());
     topBar.addChild(spacer(30));
 
     for (int speed : new int[]{0, 1, 2, 4}) {
       Button b = topBar.addChild(new Button(speedLabel(speed)));
-      b.addClickCommands(src -> ctx.setGameSpeed(speed));
+      b.addClickCommands(src -> { ctx.setGameSpeed(speed); refreshSpeedButtons(); });
+      speedButtons.put(speed, b);
       topBar.addChild(spacer(4));
     }
     topBar.addChild(spacer(20));
@@ -203,10 +207,30 @@ public class GameHud {
     toastLabel.setLocalTranslation(width / 2f - 260, height - TOPBAR_HEIGHT - 14, 5);
     toastLabel.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(toastLabel);
+
+    styleButtons(topBar);
+    refreshSpeedButtons();
   }
 
   private static String speedLabel(int s) {
     switch (s) { case 0: return "Pause"; case 1: return "1x"; case 2: return "2x"; default: return "4x"; }
+  }
+
+  /** Walks every Button under a container and gives it the resting chip
+   * background if it doesn't already have a background set - lets a
+   * whole panel's worth of buttons (built across many call sites) get
+   * restyled from a couple of call sites instead of touching every
+   * individual `new Button(...)` construction. Buttons that already carry
+   * a specific background (the active tool/tab, an active-state row) are
+   * left alone so this doesn't stomp on that state. */
+  private void styleButtons(com.jme3.scene.Node root) {
+    for (com.jme3.scene.Spatial child : root.getChildren()) {
+      if (child instanceof Button) {
+        Button b = (Button) child;
+        if (b.getBackground() == null) b.setBackground(UiTextures.buttonBackground());
+      }
+      if (child instanceof com.jme3.scene.Node) styleButtons((com.jme3.scene.Node) child);
+    }
   }
 
   private Label spacer(float width) {
@@ -260,6 +284,7 @@ public class GameHud {
     Button reset = toolbar.addChild(new Button("Reset World"));
     reset.addClickCommands(src -> ctx.resetWorld());
 
+    styleButtons(toolbar);
     refreshToolButtons();
   }
 
@@ -267,7 +292,9 @@ public class GameHud {
     toolGroupContainer.clearChildren();
     for (String tabName : TOOL_TABS) {
       Button b = toolTabButtons.get(tabName);
-      b.setColor(tabName.equals(activeToolTab) ? ACTIVE : TEXT);
+      boolean active = tabName.equals(activeToolTab);
+      b.setColor(active ? ACTIVE : TEXT);
+      b.setBackground(active ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
     }
     for (GodTools.ToolDef tool : GodTools.TOOLS) {
       if (!tool.group.equals(activeToolTab)) continue;
@@ -279,13 +306,27 @@ public class GameHud {
       });
       toolButtons.put(tool.id, b);
     }
+    styleButtons(toolGroupContainer);
     refreshToolButtons();
   }
 
   private void refreshToolButtons() {
     String active = ctx.getTool();
     for (Map.Entry<String, Button> e : toolButtons.entrySet()) {
-      e.getValue().setColor(e.getKey().equals(active) ? ACTIVE : TEXT);
+      boolean isActive = e.getKey().equals(active);
+      e.getValue().setColor(isActive ? ACTIVE : TEXT);
+      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
+    }
+  }
+
+  private void refreshSpeedButtons() {
+    int active = ctx.getGameSpeed();
+    if (active == lastSpeedShown) return;
+    lastSpeedShown = active;
+    for (Map.Entry<Integer, Button> e : speedButtons.entrySet()) {
+      boolean isActive = e.getKey() == active;
+      e.getValue().setColor(isActive ? ACTIVE : TEXT);
+      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
     }
   }
 
@@ -327,6 +368,7 @@ public class GameHud {
         zoomLabel.setText(String.format("%.1fx", zoomVal));
       }
     }
+    refreshSpeedButtons();
 
     if (now - lastStatRefresh > 0.28) {
       lastStatRefresh = now;
@@ -352,8 +394,13 @@ public class GameHud {
     }
     // "settings" is deliberately excluded from the periodic auto-refresh -
     // rebuilding the panel every second would recreate the slider mid-drag
-    // and reset it out from under the player's mouse
-    if (now - lastPanelRefresh > 1.0 && !"settings".equals(sidePanelMode)) {
+    // and reset it out from under the player's mouse.
+    // Every button in a rebuilt panel now carries its own background
+    // geometry (see styleButtons) instead of zero, so a full clear+rebuild
+    // is a heavier operation than it used to be - a slower refresh cadence
+    // trades a little UI freshness for a lot less GPU buffer churn over a
+    // long session.
+    if (now - lastPanelRefresh > 2.5 && !"settings".equals(sidePanelMode)) {
       lastPanelRefresh = now;
       refreshSidePanel();
     }
@@ -382,6 +429,7 @@ public class GameHud {
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
 
     sidePanel.setLocalTranslation(screenW - 320, screenH - 46, 1);
+    styleButtons(sidePanel);
 
     if (!"graph".equals(mode)) {
       chartNode.setCullHint(Spatial.CullHint.Always);
@@ -709,6 +757,7 @@ public class GameHud {
     int[] range = pager(events.size());
     for (WorldEvent e : events.subList(range[0], range[1])) {
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      row.setBackground(UiTextures.cardBackground());
       Label dateLbl = row.addChild(new Label(com.worldbox.util.Calendar.dateString(e.tick)));
       dateLbl.setColor(MUTED);
       dateLbl.setFontSize(12);
