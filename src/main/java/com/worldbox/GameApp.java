@@ -322,7 +322,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     voxelRenderer.flushDirty();
     voxelRenderer.updateWaterAnimation((float) simTime);
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
-    entityRenderer.update(state, alpha);
+    entityRenderer.update(state, alpha, (float) simTime);
     updateSelectionRing();
     updateBrushIndicator();
     updateNationLabel();
@@ -507,14 +507,36 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (simTime > testModeExitAt) stop();
   }
 
+  private long profTickNanos = 0, profRebuildNanos = 0;
+  private int profTickCount = 0, profRebuildCount = 0;
+
   private void maybeTick() {
     if (speed <= 0) { lastTickTime = simTime; return; }
     double interval = Config.TICK_MS / 1000.0 / speed;
     int iterations = 0;
     while (simTime - lastTickTime > interval && iterations < 8) {
+      long t0 = System.nanoTime();
       Simulation.tick(state);
-      if (state.tick % 20 == 0) entityRenderer.rebuildStatics(state);
-      if (testMode && state.tick % com.worldbox.util.Calendar.DAYS_PER_YEAR == 0) logEconomicHealth();
+      long t1 = System.nanoTime();
+      profTickNanos += (t1 - t0);
+      profTickCount++;
+      if (state.tick % 20 == 0) {
+        entityRenderer.rebuildStatics(state);
+        long t2 = System.nanoTime();
+        profRebuildNanos += (t2 - t1);
+        profRebuildCount++;
+      }
+      if (testMode && state.tick % com.worldbox.util.Calendar.DAYS_PER_YEAR == 0) {
+        logEconomicHealth();
+        if (profTickCount > 0) {
+          System.out.println(String.format(
+              "PROF avgTickMs=%.3f avgRebuildMs=%.3f humans=%d nations=%d settlements=%d armies=%d businesses=%d",
+              profTickNanos / 1e6 / profTickCount, profRebuildCount > 0 ? profRebuildNanos / 1e6 / profRebuildCount : 0,
+              state.humans.size(), state.nations.size(), state.settlements.size(), state.armies.size(),
+              state.businesses.size()));
+        }
+        profTickNanos = 0; profRebuildNanos = 0; profTickCount = 0; profRebuildCount = 0;
+      }
       lastTickTime += interval;
       iterations++;
     }

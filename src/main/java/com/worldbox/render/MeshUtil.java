@@ -135,6 +135,53 @@ public class MeshUtil {
     return mergeMeshes(mergeMeshes(a, b), mergeMeshes(c, d));
   }
 
+  /** A single thin double-sided blade - a flat triangle tapering from
+   * `width` at the base to a near-point tip, leaning over by `bend` along
+   * local Z. Built as two separate triangles (not a shared-vertex quad) so
+   * front and back faces each get their own flat normal instead of
+   * averaging to a degenerate near-zero normal. */
+  private static Mesh bladeShape(float width, float height, float bend) {
+    float hw = width / 2f, tw = width * 0.12f;
+    float[] front = {
+        -hw, 0, 0,
+        hw, 0, 0,
+        bend, height, 0,
+    };
+    float[] positions = new float[18];
+    System.arraycopy(front, 0, positions, 0, 9);
+    System.arraycopy(front, 0, positions, 9, 9);
+    // widen the tip slightly off dead-center so the silhouette isn't a
+    // perfectly straight spike
+    positions[6] = tw + bend; positions[15] = tw + bend;
+    int[] indices = {0, 1, 2, 5, 4, 3};
+    Mesh m = new Mesh();
+    m.setBuffer(VertexBuffer.Type.Position, 3, positions);
+    m.setBuffer(VertexBuffer.Type.Normal, 3, computeSmoothNormals(positions, indices));
+    m.setBuffer(VertexBuffer.Type.Index, 3, indices);
+    m.updateBound();
+    return m;
+  }
+
+  /** A little clump of 5 fanned-out blades around a shared base - reads as
+   * an actual tuft of grass/garden greenery from any angle instead of the
+   * old two-crossed-boxes "stick" (which was both too short and too boxy
+   * to read as a plant at all). Bottom sits at y=0, like the rock/crystal
+   * clusters, so ground placement just needs the usual per-instance
+   * height/scale from EntityRenderer - no extra lift here. */
+  public static Mesh buildGrassTuft(float baseHeight) {
+    Mesh tuft = null;
+    int blades = 5;
+    for (int i = 0; i < blades; i++) {
+      float angle = (i / (float) blades) * 6.2832f + (i * 0.53f);
+      float h = baseHeight * (0.78f + 0.11f * (i % 3));
+      float w = baseHeight * 0.3f;
+      Mesh blade = bladeShape(w, h, w * 1.1f);
+      rotateYInPlace(blade, angle);
+      tuft = (tuft == null) ? blade : mergeMeshes(tuft, blade);
+    }
+    return tuft;
+  }
+
   /** A slim pillar with a flared cap - used for a nation's bank/vault. */
   public static Mesh buildPillar(float baseRadius, float capRadius, float height) {
     Mesh shaft = new com.jme3.scene.shape.Cylinder(2, 5, baseRadius, baseRadius * 0.8f, height, true, false);

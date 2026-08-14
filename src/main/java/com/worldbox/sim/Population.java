@@ -552,7 +552,8 @@ public class Population {
     if (Math.random() < 0.02 || moveToward(grid, h, SPEED) < 0.1) pickWanderTarget(grid, h);
 
     boolean trulyIsolated = nearest == null || bestD > JOIN_RADIUS * 2.2;
-    if (h.isolationTicks > ISOLATION_THRESHOLD && trulyIsolated && Math.random() < 0.03) {
+    if (h.isolationTicks > ISOLATION_THRESHOLD && trulyIsolated && Math.random() < 0.03
+        && state.nations.size() < Config.MAX_NATIONS) {
       int gx = (int) Math.floor(h.x), gz = (int) Math.floor(h.z);
       boolean spotOk = grid.inBounds(gx, gz) && grid.isBuildable(grid.idx(gx, gz))
           && grid.slopeAt(gx, gz) < 1.4 && grid.settlementAt[grid.idx(gx, gz)] < 0;

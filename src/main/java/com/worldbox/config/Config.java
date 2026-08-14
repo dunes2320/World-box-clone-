@@ -52,6 +52,19 @@ public final class Config {
   // was 420 - too tight a ceiling to see real multi-year growth play out;
   // a 10-15 year run hit this cap by year 8 and sat flat for the rest
   public static final int MAX_HUMANS = 3000;
+  // Nothing capped how many nations could exist at once, and each one can
+  // grow up to 6 settlements of its own - population plateaus at
+  // MAX_HUMANS, but nothing stopped isolated wanderers (or secessions)
+  // from founding entirely new nations forever, so settlement/business/
+  // house counts (and every per-tick system that scans them: Nation,
+  // Economy, Government, Diplomacy, Military, plus the wanderer-nearest-
+  // settlement search) kept climbing for as long as the game ran. A 12-year
+  // profiling soak showed avg tick cost more than tripling (0.5ms -> 1.8ms)
+  // while population had already flattened out - nations/settlements were
+  // the thing still growing. This caps the world's nation count the same
+  // way MAX_HUMANS caps its population, so per-tick cost plateaus instead
+  // of growing for the entire length of a long game.
+  public static final int MAX_NATIONS = 55;
   // age is tracked in days (1 tick = 1 day, 360 days/year - see
   // Population's OLD_AGE_START/SPAN, which run a realistic 60-90 year
   // lifespan), so adulthood has to be years of days too - this was left

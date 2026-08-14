@@ -232,7 +232,8 @@ public class Government {
     state.humans.removeIf(h -> h.dead);
     n.treasury *= 0.7;
 
-    if (n.settlementIds.size() > 1 && !n.government.equals(AUTOCRACY) && Math.random() < 0.35) {
+    if (n.settlementIds.size() > 1 && !n.government.equals(AUTOCRACY) && Math.random() < 0.35
+        && state.nations.size() < Config.MAX_NATIONS) {
       String oldName = n.name;
       secede(state, n);
       EventLog.log(state, "nation", "A breakaway settlement seceded from " + oldName);

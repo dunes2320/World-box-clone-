@@ -13,7 +13,13 @@ import java.util.List;
 public class Weather {
   private static final int MAX_CLOUDS = 6;
   private static final int MAX_CONCURRENT_STORMS = 2;
-  private static final double CLOUD_SPEED = 0.05;
+  // At the old 0.05/tick, a cloud took ~5000+ ticks (well over a decade of
+  // game time) to cross a 256-cell map, so in practice clouds spent nearly
+  // all their time sitting just off the edges - which read as "clouds are
+  // outside the world" since the player is almost always looking at the
+  // populated middle, not the fringes. This crosses the map in well under
+  // two minutes of real time even at 1x.
+  private static final double CLOUD_SPEED = 0.6;
 
   public static void update(GameState state) {
     WorldGrid grid = state.grid;

@@ -354,6 +354,7 @@ public class Nation {
       if (a != null) a.dead = true;
     }
     state.nations.remove(nation.id);
+    state.diplomacy.removeNation(nation.id);
     EventLog.log(state, "nation", nation.name + " has fallen");
   }
 

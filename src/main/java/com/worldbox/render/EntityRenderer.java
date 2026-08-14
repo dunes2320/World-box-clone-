@@ -228,15 +228,13 @@ public class EntityRenderer {
         MeshUtil.translatedCopy(new Box(0.9f, 0.24f, 0.85f), -1f, 0.05f, -0.15f));
     rainTemplate = new Box(0.02f, 0.32f, 0.02f);
 
-    // ground-level foliage: two thin crossed blades reading as a little
-    // tuft of grass/weeds from any angle, not just a flat card that
-    // vanishes edge-on. Bottom sits at local y=0 like the rock cluster.
-    Mesh bladeA = MeshUtil.translatedCopy(new Box(0.11f, 0.09f, 0.015f), 0, 0.09f, 0);
-    Mesh bladeB = new Box(0.015f, 0.09f, 0.11f);
-    MeshUtil.rotateYInPlace(bladeB, 0.3f);
-    bladeB = MeshUtil.translatedCopy(bladeB, 0, 0.09f, 0);
-    foliageTemplate = MeshUtil.mergeMeshes(bladeA, bladeB);
-    flowerTemplate = MeshUtil.buildGem(0.045f, 0.09f);
+    // ground-level foliage: a fanned-out clump of 5 tapered blades, tall
+    // enough to actually read as grass next to a 1-unit terrain block
+    // instead of the old two-crossed-boxes "stick" (0.18 tall and boxy
+    // enough to look like a peg rather than a plant). Bottom sits at
+    // local y=0 like the rock cluster.
+    foliageTemplate = MeshUtil.buildGrassTuft(0.42f);
+    flowerTemplate = MeshUtil.buildGem(0.07f, 0.14f);
 
     // small satellite houses scattered around a settlement's main building
     // - the town-hall marker alone read as a single icon, not a village
@@ -590,7 +588,7 @@ public class EntityRenderer {
           foliage.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, scale, tuftColor));
           if (hash01(x, y, 12) < 0.1f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
             ColorRGBA fc = FLOWER_COLORS[(int) (hash01(x, y, 13) * FLOWER_COLORS.length) % FLOWER_COLORS.length];
-            flowers.add(new PropBatcher.Placement(jx, grid.height[i] + 0.14f * scale, jz, rotY, scale, fc));
+            flowers.add(new PropBatcher.Placement(jx, grid.height[i] + 0.32f * scale, jz, rotY, scale, fc));
           }
         }
         if (res == Config.RES_GOLD && goldCache.size() < SPARKLE_CAP) goldCache.add(i);
@@ -655,7 +653,7 @@ public class EntityRenderer {
     housesGeom.setCullHint(houses.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
 
-  public void update(GameState state, float alpha) {
+  public void update(GameState state, float alpha, float animTime) {
     updateSettlements(state);
     updateArmies(state, alpha);
     updateHumans(state, alpha);
@@ -664,10 +662,10 @@ public class EntityRenderer {
     updateStatues(state);
     updateMonster(state);
     updateTornadoes(state);
-    updateFires(state);
+    updateFires(state, animTime);
     updateSmoke(state);
     updateSparkles(state);
-    updateWeather(state);
+    updateWeather(state, animTime);
   }
 
   private Mesh tierTemplate(int population) {
@@ -722,14 +720,19 @@ public class EntityRenderer {
     }
   }
 
-  private void updateFires(GameState state) {
+  private void updateFires(GameState state, float animTime) {
     int count = Math.min(FIRE_CAP, burningCache.size());
     for (int i = 0; i < count; i++) {
       int cell = burningCache.get(i);
       int gx = cell % grid.cols, gz = cell / grid.cols;
       Geometry g = firePool[i];
       float h = grid.height[cell];
-      float flicker = (float) Math.sin(state.tick * 0.4 + i * 1.7) * 0.5f + 0.5f;
+      // animTime is continuous real time (like the water shader's clock),
+      // not the simulation tick counter - keying flicker off state.tick
+      // meant it only advanced once per ~220ms tick and looked like a
+      // stutter/lag rather than a flame, since a full render frame comes
+      // far more often than that.
+      float flicker = (float) Math.sin(animTime * 6.0 + i * 1.7) * 0.5f + 0.5f;
       float fireScale = 0.8f + flicker * 0.5f;
       g.setLocalTranslation(gx + 0.5f, h + 0.24f * fireScale, gz + 0.5f);
       g.setLocalScale(fireScale);
@@ -927,7 +930,7 @@ public class EntityRenderer {
   private static final ColorRGBA STORM_COLOR = new ColorRGBA(0.42f, 0.45f, 0.5f, 0.92f);
   private static final float CLOUD_HEIGHT = 15f;
 
-  private void updateWeather(GameState state) {
+  private void updateWeather(GameState state, float animTime) {
     while (cloudGeoms.size() < state.clouds.size()) {
       Geometry g = new Geometry("Cloud", cloudTemplate);
       g.setMaterial(soloColorMaterial(CLOUD_COLOR));
@@ -964,7 +967,11 @@ public class EntityRenderer {
           float ox = (jitterAxis(c.id * 97 + j, 11, 5)) * (float) c.radius * 1.6f;
           float oz = (jitterAxis(c.id * 97 + j, 13, 7)) * (float) c.radius * 1.6f;
           float fallSpan = CLOUD_HEIGHT - groundH;
-          float phase = ((state.tick * 3 + j * 37) % 100) / 100f;
+          // Continuous real time again, not state.tick - each drop falls
+          // in about 0.7s (not 0.7s * gameSpeed) with its own phase offset
+          // so the rain reads as a fast, continuous shower instead of
+          // hitching forward once per simulation tick.
+          float phase = (animTime * 1.4f + j * 0.081f) % 1f;
           float y = CLOUD_HEIGHT - phase * fallSpan;
           Geometry g = rainPool[slot];
           g.setLocalTranslation((float) c.x + ox, y, (float) c.z + oz);

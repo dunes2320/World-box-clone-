@@ -55,4 +55,17 @@ public class DiplomacyManager {
   }
 
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /** Purges every relation entry involving a nation that just died. Without
+   * this, `relations` only ever grew - nation IDs are never reused, so
+   * over a long game where nations keep rising and falling this map (and
+   * the full scan over it every tick in Diplomacy.update) would keep
+   * growing for as long as the game ran, long after most of those nations
+   * were gone. */
+  public void removeNation(int nationId) {
+    relations.keySet().removeIf(k -> {
+      int dash = k.indexOf('-');
+      return Integer.parseInt(k, 0, dash, 10) == nationId || Integer.parseInt(k, dash + 1, k.length(), 10) == nationId;
+    });
+  }
 }
