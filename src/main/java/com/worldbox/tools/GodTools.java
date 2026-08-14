@@ -37,13 +37,13 @@ public class GodTools {
       new ToolDef("monster", "Kaiju", "Creatures"),
       new ToolDef("zombie", "Outbreak", "Creatures"),
       new ToolDef("fire", "Fire", "Disasters"),
-      new ToolDef("extinguish", "Extinguish", "Disasters"),
-      new ToolDef("storm", "Call Storm", "Disasters"),
       new ToolDef("meteor", "Meteor", "Disasters"),
       new ToolDef("nuke", "Nuke", "Disasters"),
       new ToolDef("earthquake", "Earthquake", "Disasters"),
       new ToolDef("tornado", "Tornado", "Disasters"),
-      new ToolDef("blessing", "Blessing", "Disasters")
+      new ToolDef("extinguish", "Extinguish", "Powers"),
+      new ToolDef("storm", "Call Storm", "Powers"),
+      new ToolDef("blessing", "Blessing", "Powers")
   );
 
   public static final Set<String> CONTINUOUS_TOOLS = new LinkedHashSet<>(List.of(

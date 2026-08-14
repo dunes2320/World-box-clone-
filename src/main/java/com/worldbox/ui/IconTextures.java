@@ -196,6 +196,9 @@ public final class IconTextures {
       case "tab_disasters":
         g.fill(flame(c));
         break;
+      case "tab_powers":
+        star(g, c, c, 13, 6, 4);
+        break;
       default:
         g.fill(new Ellipse2D.Float(c - 8, c - 8, 16, 16));
     }

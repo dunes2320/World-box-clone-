@@ -36,7 +36,7 @@ import java.util.Map;
 public class GameHud {
   private static final ColorRGBA ACTIVE = new ColorRGBA(0.31f, 0.64f, 1f, 1f);
   private static final ColorRGBA TEXT = new ColorRGBA(0.91f, 0.93f, 0.96f, 1f);
-  private static final ColorRGBA MUTED = new ColorRGBA(0.55f, 0.59f, 0.66f, 1f);
+  private static final ColorRGBA MUTED = new ColorRGBA(0.68f, 0.72f, 0.79f, 1f);
   private static final ColorRGBA GOOD = new ColorRGBA(0.31f, 0.75f, 0.42f, 1f);
   private static final ColorRGBA DANGER = new ColorRGBA(0.88f, 0.33f, 0.30f, 1f);
 
@@ -110,11 +110,17 @@ public class GameHud {
   private int graphNationId = -1;
   private String graphMetric = "marketcap"; // marketcap | unemployment | gdp | currency
 
-  private static final float TOPBAR_HEIGHT = 42f;
   private static final float SIDEPANEL_WIDTH = 330f;
   private static final float CHART_WIDTH = 290f;
   private static final float CHART_HEIGHT = 150f;
   private static final float CHART_TOP_OFFSET = 226f; // px below sidePanel's top edge
+
+  // Measured after topBar's children are built rather than hardcoded - the
+  // bar's real height depends on its tallest child (the icon buttons), and
+  // a stale guess here is exactly what let the notification toast render
+  // partly hidden behind the bar before.
+  private float topBarHeight = 48f;
+  private float dockTopY = 200f;
 
   /** Coarse screen-space guard so a click on a HUD panel doesn't also paint
    * the world underneath it. Panel positions are fixed (non-resizable
@@ -122,8 +128,8 @@ public class GameHud {
    * lives bottom-center instead of running up the whole left edge, so its
    * guard is a bounded box, not a full-height column. */
   public boolean isOverUi(float sx, float sy) {
-    if (sy > screenH - TOPBAR_HEIGHT) return true;
-    if (sy < DOCK_TOP_Y) {
+    if (sy > screenH - topBarHeight) return true;
+    if (sy < dockTopY) {
       float dockLeft = screenW / 2f - DOCK_WIDTH_ESTIMATE / 2f;
       if (sx > dockLeft && sx < dockLeft + DOCK_WIDTH_ESTIMATE) return true;
     }
@@ -185,16 +191,30 @@ public class GameHud {
     topBar.addChild(spacer(10));
     topBar.addChild(menuIconButton("reset", ctx::resetWorld));
 
+    // Icon buttons (48px-ish incl. margins) are taller than the plain text
+    // this bar used to hold, so its real rendered height is bigger than any
+    // hardcoded guess - measure it now and use that everywhere below
+    // instead of re-guessing a constant.
+    topBarHeight = Math.max(46f, topBar.getPreferredSize().y);
+
     // A bottom-center icon dock for the god tools, WorldBox-style, instead
     // of a tall always-open text list running down the left edge of the
     // screen - the previous layout's dominant source of visual clutter.
     // Anchored with a small Y (this coordinate system's origin is bottom-
     // left, Y increasing upward) so it sits near the bottom regardless of
     // screen height, same as topBar anchors to the top via `height`.
-    toolbar.setLocalTranslation(width / 2f - DOCK_WIDTH_ESTIMATE / 2f, DOCK_TOP_Y, 1);
     toolbar.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(toolbar);
     buildToolbar();
+    // Measured after the dock is fully populated (three rows: category
+    // tabs, tool icons, status line - each with icon+caption now, taller
+    // than a single icon row) rather than a hardcoded guess - this is the
+    // same lesson the top bar height learned: a stale guess here is exactly
+    // what let the bottom status row clip off-screen or overlap the row
+    // above it before.
+    float dockHeight = Math.max(140f, toolbar.getPreferredSize().y);
+    dockTopY = dockHeight + 20f;
+    toolbar.setLocalTranslation(width / 2f - DOCK_WIDTH_ESTIMATE / 2f, dockTopY, 1);
 
     sidePanel.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(sidePanel);
@@ -209,8 +229,9 @@ public class GameHud {
     toastLabel.setColor(TEXT);
     toastLabel.setBackground(UiTextures.panelBackground());
     toastLabel.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
-    toastLabel.setPreferredSize(new Vector3f(520, 34, 0));
-    toastLabel.setLocalTranslation(width / 2f - 260, height - TOPBAR_HEIGHT - 14, 5);
+    toastLabel.setTextVAlignment(com.simsilica.lemur.VAlignment.Center);
+    toastLabel.setPreferredSize(new Vector3f(520, 42, 0));
+    toastLabel.setLocalTranslation(width / 2f - 260, height - topBarHeight - 18, 5);
     toastLabel.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(toastLabel);
 
@@ -222,12 +243,14 @@ public class GameHud {
   }
 
   /** A small icon-only button for an infrequent top-bar action (open a
-   * menu, reset the world) - just the glyph, no permanent background, so
-   * it reads as part of the bar rather than a boxed-in control. */
+   * menu, reset the world) - a soft permanent slot background (not just on
+   * hover/active) so the glyph reads clearly regardless of how bright the
+   * 3D world behind the bar happens to be. */
   private Button menuIconButton(String iconKey, Runnable onClick) {
     Button b = new Button("");
     b.setIcon(new com.simsilica.lemur.component.IconComponent(
         IconTextures.icon(iconKey), new com.jme3.math.Vector2f(0.75f, 0.75f), 6, 6, 0, false));
+    b.setBackground(UiTextures.iconSlotBackground());
     b.addClickCommands(src -> onClick.run());
     return b;
   }
@@ -238,48 +261,104 @@ public class GameHud {
     return l;
   }
 
-  private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters"};
+  private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters", "Powers"};
   private static final Map<String, String> TAB_ICONS = new LinkedHashMap<>();
+  private static final Map<String, String> TAB_CAPTIONS = new LinkedHashMap<>();
   static {
     TAB_ICONS.put("Terrain", "tab_terrain");
     TAB_ICONS.put("Civilizations", "tab_civ");
     TAB_ICONS.put("Creatures", "tab_creatures");
     TAB_ICONS.put("Disasters", "tab_disasters");
+    TAB_ICONS.put("Powers", "tab_powers");
+    TAB_CAPTIONS.put("Terrain", "Terrain");
+    TAB_CAPTIONS.put("Civilizations", "Civs");
+    TAB_CAPTIONS.put("Creatures", "Fauna");
+    TAB_CAPTIONS.put("Disasters", "Disasters");
+    TAB_CAPTIONS.put("Powers", "Powers");
   }
 
-  private static final float DOCK_ICON_MARGIN = 7f;
-  private static final float DOCK_WIDTH_ESTIMATE = 560f;
-  private static final float DOCK_TOP_Y = 200f;
+  // Short captions for the dock's per-tool icons - distinct from
+  // GodTools.ToolDef.name (used in the status line, where "Plant Forest" or
+  // "Found Nation" reads fine) since a caption under a ~40px icon has to
+  // stay short or it forces the column wider than the icon itself.
+  private static final Map<String, String> TOOL_CAPTIONS = new LinkedHashMap<>();
+  static {
+    TOOL_CAPTIONS.put("select", "Select");
+    TOOL_CAPTIONS.put("water", "Water");
+    TOOL_CAPTIONS.put("sand", "Sand");
+    TOOL_CAPTIONS.put("grass", "Grass");
+    TOOL_CAPTIONS.put("dirt", "Dirt");
+    TOOL_CAPTIONS.put("stone", "Stone");
+    TOOL_CAPTIONS.put("dig", "Dig");
+    TOOL_CAPTIONS.put("build", "Build");
+    TOOL_CAPTIONS.put("forest", "Forest");
+    TOOL_CAPTIONS.put("human", "Human");
+    TOOL_CAPTIONS.put("foundNation", "Nation");
+    TOOL_CAPTIONS.put("monster", "Kaiju");
+    TOOL_CAPTIONS.put("zombie", "Outbreak");
+    TOOL_CAPTIONS.put("fire", "Fire");
+    TOOL_CAPTIONS.put("meteor", "Meteor");
+    TOOL_CAPTIONS.put("nuke", "Nuke");
+    TOOL_CAPTIONS.put("earthquake", "Quake");
+    TOOL_CAPTIONS.put("tornado", "Tornado");
+    TOOL_CAPTIONS.put("extinguish", "Douse");
+    TOOL_CAPTIONS.put("storm", "Storm");
+    TOOL_CAPTIONS.put("blessing", "Bless");
+  }
+
+  private static final float DOCK_ICON_MARGIN = 6f;
+  private static final float DOCK_WIDTH_ESTIMATE = 620f;
 
   private Label activeToolLabel;
 
+  /** A column: an icon button on top, a small caption label centered
+   * beneath it - so a first-time player can tell what a glyph means
+   * without having to click it and read the status line first. */
+  private Container iconColumn(Button icon, String caption) {
+    Container col = new Container(new SpringGridLayout(Axis.Y, Axis.X));
+    col.addChild(icon);
+    Label lbl = col.addChild(new Label(caption));
+    lbl.setFontSize(10);
+    lbl.setColor(MUTED);
+    lbl.setTextHAlignment(com.simsilica.lemur.HAlignment.Center);
+    lbl.setPreferredSize(new Vector3f(Math.max(40, lbl.getPreferredSize().x), 13, 0));
+    return col;
+  }
+
   /** A WorldBox-style bottom dock: a row of category icons, a row of that
    * category's tool icons, and a compact status line (current tool name +
-   * brush size) - the whole god-tools UI in about 100px of height instead
+   * brush size) - the whole god-tools UI in about 130px of height instead
    * of a permanently-open sidebar. Select is pinned in the category row
    * since it's the default/most-used tool, not buried in a category. */
   private void buildToolbar() {
     Container tabRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     GodTools.ToolDef selectDef = GodTools.TOOLS.get(0);
-    Button selectBtn = tabRow.addChild(new Button(""));
+    Button selectBtn = new Button("");
     selectBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
         IconTextures.icon(selectDef.id), new com.jme3.math.Vector2f(0.8f, 0.8f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+    selectBtn.setBackground(UiTextures.iconSlotBackground());
     selectBtn.addClickCommands(src -> { ctx.setTool(selectDef.id); refreshToolButtons(); });
     toolButtons.put(selectDef.id, selectBtn);
+    tabRow.addChild(iconColumn(selectBtn, TOOL_CAPTIONS.get(selectDef.id)));
     tabRow.addChild(spacer(16));
     for (String tabName : TOOL_TABS) {
-      Button tabBtn = tabRow.addChild(new Button(""));
+      Button tabBtn = new Button("");
       tabBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
           IconTextures.icon(TAB_ICONS.get(tabName)), new com.jme3.math.Vector2f(0.68f, 0.68f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+      tabBtn.setBackground(UiTextures.iconSlotBackground());
       tabBtn.addClickCommands(src -> {
         activeToolTab = tabName;
         rebuildToolGroup();
       });
       toolTabButtons.put(tabName, tabBtn);
+      tabRow.addChild(iconColumn(tabBtn, TAB_CAPTIONS.get(tabName)));
     }
 
     toolGroupContainer = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     rebuildToolGroup();
+
+    Label rowGap = toolbar.addChild(new Label(" "));
+    rowGap.setPreferredSize(new Vector3f(1, 8, 0));
 
     Container statusRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     activeToolLabel = statusRow.addChild(new Label(selectDef.name));
@@ -305,22 +384,23 @@ public class GameHud {
     for (String tabName : TOOL_TABS) {
       Button b = toolTabButtons.get(tabName);
       boolean active = tabName.equals(activeToolTab);
-      b.setBackground(active ? UiTextures.activeButtonBackground() : null);
+      b.setBackground(active ? UiTextures.activeButtonBackground() : UiTextures.iconSlotBackground());
     }
     boolean first = true;
     for (GodTools.ToolDef tool : GodTools.TOOLS) {
       if (!tool.group.equals(activeToolTab)) continue;
       if (!first) toolGroupContainer.addChild(spacer(4));
       first = false;
-      Button b = toolGroupContainer.addChild(new Button(""));
+      Button b = new Button("");
       b.setIcon(new com.simsilica.lemur.component.IconComponent(
           IconTextures.icon(tool.id), new com.jme3.math.Vector2f(0.85f, 0.85f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
-      final String toolName = tool.name;
+      b.setBackground(UiTextures.iconSlotBackground());
       b.addClickCommands(src -> {
         ctx.setTool(tool.id);
         refreshToolButtons();
       });
       toolButtons.put(tool.id, b);
+      toolGroupContainer.addChild(iconColumn(b, TOOL_CAPTIONS.getOrDefault(tool.id, tool.name)));
     }
     refreshToolButtons();
   }
@@ -329,7 +409,7 @@ public class GameHud {
     String active = ctx.getTool();
     for (Map.Entry<String, Button> e : toolButtons.entrySet()) {
       boolean isActive = e.getKey().equals(active);
-      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : null);
+      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : UiTextures.iconSlotBackground());
     }
     for (GodTools.ToolDef tool : GodTools.TOOLS) {
       if (tool.id.equals(active) && activeToolLabel != null) activeToolLabel.setText(tool.name);
@@ -806,6 +886,9 @@ public class GameHud {
         bubble.setColor(greed > 0.5 ? DANGER : ACTIVE);
       }
     }
+    sidePanel.addChild(new Label(" "));
+    Button viewWorldChart = sidePanel.addChild(new Button("View World Chart"));
+    viewWorldChart.addClickCommands(src -> showGraph("world", -1));
   }
 
   private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation"};

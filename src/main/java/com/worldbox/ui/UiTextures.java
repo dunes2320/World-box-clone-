@@ -13,21 +13,23 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 
-/** Generates small rounded-rect panel textures at runtime (no image assets,
+/** Generates small rounded-rect chip textures at runtime (no image assets,
  * no extra dependency) for use as a Lemur nine-patch (TbtQuadBackgroundComponent)
- * background - the difference between "a gray rectangle" and a panel that
- * actually reads as a soft, bordered surface. Every prior HUD pass here
- * was limited to flat-color QuadBackgroundComponent (hard square corners,
- * no border) because the one real upgrade path - Lemur's built-in "glass"
- * style - hard-crashes on this project (it needs a Groovy scripting engine
- * dependency this project doesn't have, see the reverted attempt in the
- * V8 UI pass). Drawing a texture ourselves sidesteps that entirely. */
+ * background on small, fixed-size icon buttons - the difference between "a
+ * gray square" and a control that reads as a soft, bordered chip. The big
+ * structural panels (top bar/toolbar/side panel) use a plain flat
+ * QuadBackgroundComponent instead (see panelBackground()) - nine-patch
+ * backgrounds wide enough to span one of those panels reliably paint over
+ * their own text/icon children (confirmed by direct A/B testing), so
+ * nine-patch is reserved for genuinely small elements where it's proven
+ * safe. Lemur's built-in "glass" style would give rounded panels without
+ * any of this, but it hard-crashes on this project (needs a Groovy
+ * scripting engine dependency this project doesn't have, see the reverted
+ * attempt in the V8 UI pass) - drawing textures ourselves sidesteps that. */
 public final class UiTextures {
   private UiTextures() {}
 
-  public static final int MARGIN = 14;
   public static final int CHIP_MARGIN = 8;
-  private static final int SIZE = 48;
   private static final int CHIP_SIZE = 24;
 
   /** Packs a BufferedImage into a jME Texture2D - shared by every runtime-
@@ -88,7 +90,7 @@ public final class UiTextures {
 
   private static float clamp(float v) { return Math.max(0f, Math.min(1f, v)); }
 
-  private static Texture2D panelTex, buttonActiveTex, chipTex;
+  private static Texture2D buttonActiveTex, iconSlotTex;
 
   private static com.simsilica.lemur.component.TbtQuadBackgroundComponent nine(
       Texture2D tex, int margin) {
@@ -96,19 +98,19 @@ public final class UiTextures {
         tex, 1f, margin, margin, margin, margin, 0f, false);
   }
 
-  /** A fresh nine-patch background component for a structural panel
-   * (top bar / toolbar / side panel) - soft rounded corners and a faint
-   * accent-tinted border over a dark glass fill. Every caller gets its
-   * own component instance (a GuiComponent can only attach to one
-   * Panel) but they all share the same underlying texture. */
-  public static com.simsilica.lemur.component.TbtQuadBackgroundComponent panelBackground() {
-    if (panelTex == null) {
-      panelTex = roundedRect(SIZE, MARGIN,
-          new ColorRGBA(0.09f, 0.105f, 0.14f, 0.86f),
-          new ColorRGBA(0.36f, 0.44f, 0.56f, 0.55f),
-          2);
-    }
-    return nine(panelTex, MARGIN);
+  /** A flat, near-opaque panel background for the big structural panels
+   * (top bar / toolbar / side panel / toast). This is deliberately NOT the
+   * nine-patch rounded/bordered texture used for small chips below - a wide
+   * TbtQuadBackgroundComponent (proven by direct A/B testing: same colors,
+   * same alpha, only the component type changed) reliably paints OVER its
+   * own text/icon children once it gets wide enough, which is exactly what
+   * made the top bar's title and stat text unreadable. A plain
+   * QuadBackgroundComponent doesn't have that bug at any width, at the cost
+   * of square corners on the big panels only - small chips keep the rounded
+   * nine-patch look since that's proven safe at chip width. */
+  public static com.simsilica.lemur.component.QuadBackgroundComponent panelBackground() {
+    return new com.simsilica.lemur.component.QuadBackgroundComponent(
+        new ColorRGBA(0.07f, 0.08f, 0.11f, 0.97f));
   }
 
   /** The active/selected variant - an accent-tinted chip, so "this is the
@@ -124,16 +126,28 @@ public final class UiTextures {
     return nine(buttonActiveTex, CHIP_MARGIN);
   }
 
-  /** A tiny pill for the top-bar stat readouts (population, nation
-   * count, date) - a dashboard-style chip instead of plain inline text
-   * mashed together. */
-  public static com.simsilica.lemur.component.TbtQuadBackgroundComponent chipBackground() {
-    if (chipTex == null) {
-      chipTex = roundedRect(CHIP_SIZE, CHIP_MARGIN,
-          new ColorRGBA(1f, 1f, 1f, 0.045f),
-          new ColorRGBA(1f, 1f, 1f, 0.08f),
+  /** A pill for the top-bar stat readout (population, nation count, date).
+   * Flat, not nine-patch, for the same reason as panelBackground() above -
+   * this chip's width grows with its text (year counters, population) and
+   * can get wide enough to hit the same paint-over-its-own-text bug. */
+  public static com.simsilica.lemur.component.QuadBackgroundComponent chipBackground() {
+    return new com.simsilica.lemur.component.QuadBackgroundComponent(
+        new ColorRGBA(1f, 1f, 1f, 0.09f));
+  }
+
+  /** A permanent (not just active-state) soft dark slot behind every icon
+   * button - icon-only buttons with no background at all were the actual
+   * cause of "can't see the icons," since a near-white glyph only reads
+   * against a guaranteed-dark backdrop, not whatever's rendered underneath
+   * it. Distinct from activeButtonBackground() (accent blue) so selection
+   * still stands out. */
+  public static com.simsilica.lemur.component.TbtQuadBackgroundComponent iconSlotBackground() {
+    if (iconSlotTex == null) {
+      iconSlotTex = roundedRect(CHIP_SIZE, CHIP_MARGIN,
+          new ColorRGBA(0f, 0f, 0f, 0.3f),
+          new ColorRGBA(1f, 1f, 1f, 0.1f),
           1);
     }
-    return nine(chipTex, CHIP_MARGIN);
+    return nine(iconSlotTex, CHIP_MARGIN);
   }
 }
