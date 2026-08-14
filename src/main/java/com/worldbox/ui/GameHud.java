@@ -110,7 +110,6 @@ public class GameHud {
   private int graphNationId = -1;
   private String graphMetric = "marketcap"; // marketcap | unemployment | gdp | currency
 
-  private static final float TOOLBAR_WIDTH = 190f;
   private static final float TOPBAR_HEIGHT = 42f;
   private static final float SIDEPANEL_WIDTH = 330f;
   private static final float CHART_WIDTH = 290f;
@@ -119,10 +118,15 @@ public class GameHud {
 
   /** Coarse screen-space guard so a click on a HUD panel doesn't also paint
    * the world underneath it. Panel positions are fixed (non-resizable
-   * window), so a few hardcoded regions are enough. */
+   * window), so a few hardcoded regions are enough. The tool dock now
+   * lives bottom-center instead of running up the whole left edge, so its
+   * guard is a bounded box, not a full-height column. */
   public boolean isOverUi(float sx, float sy) {
     if (sy > screenH - TOPBAR_HEIGHT) return true;
-    if (sx < TOOLBAR_WIDTH) return true;
+    if (sy < DOCK_TOP_Y) {
+      float dockLeft = screenW / 2f - DOCK_WIDTH_ESTIMATE / 2f;
+      if (sx > dockLeft && sx < dockLeft + DOCK_WIDTH_ESTIMATE) return true;
+    }
     if (sidePanel.getCullHint() != com.jme3.scene.Spatial.CullHint.Always && sx > screenW - SIDEPANEL_WIDTH) return true;
     return false;
   }
@@ -133,59 +137,61 @@ public class GameHud {
     this.screenW = width;
     this.screenH = height;
 
+    // Minimal top bar: a wordmark, a couple of compact stat chips, speed
+    // controls, and icon buttons for the occasional-use menus - not a row
+    // of full-word buttons eating a quarter of the screen width.
     topBar.setLocalTranslation(0, height, 1);
     topBar.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(topBar);
 
-    Label title = topBar.addChild(new Label("WORLD BOX 3D"));
-    title.setFontSize(20);
+    Label title = topBar.addChild(new Label("WORLD BOX"));
+    title.setFontSize(18);
     title.setColor(TEXT);
-    topBar.addChild(spacer(30));
+    topBar.addChild(spacer(20));
     statLabel = topBar.addChild(new Label("Pop: 0   Nations: 0"));
     statLabel.setColor(MUTED);
     statLabel.setBackground(UiTextures.chipBackground());
-    topBar.addChild(spacer(30));
+    topBar.addChild(spacer(24));
 
     for (int speed : new int[]{0, 1, 2, 4}) {
       Button b = topBar.addChild(new Button(speedLabel(speed)));
+      b.setFontSize(13);
       b.addClickCommands(src -> { ctx.setGameSpeed(speed); refreshSpeedButtons(); });
       speedButtons.put(speed, b);
-      topBar.addChild(spacer(4));
+      topBar.addChild(spacer(3));
     }
-    topBar.addChild(spacer(20));
-    Button nationsBtn = topBar.addChild(new Button("Nations"));
-    nationsBtn.addClickCommands(src -> {
+    topBar.addChild(spacer(16));
+    topBar.addChild(menuIconButton("menu_nations", () -> {
       sidePanelMode = "nationsList".equals(sidePanelMode) ? null : "nationsList";
       ctx.setSelection(null);
       refreshSidePanel();
-    });
-    topBar.addChild(spacer(6));
-    Button marketBtn = topBar.addChild(new Button("Market"));
-    marketBtn.addClickCommands(src -> {
+    }));
+    topBar.addChild(menuIconButton("menu_market", () -> {
       sidePanelMode = "market".equals(sidePanelMode) ? null : "market";
       ctx.setSelection(null);
       refreshSidePanel();
-    });
-    topBar.addChild(spacer(6));
-    Button worldEconBtn = topBar.addChild(new Button("Market Index"));
-    worldEconBtn.addClickCommands(src -> showGraph("world", -1));
-    topBar.addChild(spacer(6));
-    Button logBtn = topBar.addChild(new Button("Log"));
-    logBtn.addClickCommands(src -> {
+    }));
+    topBar.addChild(menuIconButton("menu_log", () -> {
       sidePanelMode = "log".equals(sidePanelMode) ? null : "log";
       ctx.setSelection(null);
       resetListPage(-999);
       refreshSidePanel();
-    });
-    topBar.addChild(spacer(6));
-    Button settingsBtn = topBar.addChild(new Button("Settings"));
-    settingsBtn.addClickCommands(src -> {
+    }));
+    topBar.addChild(menuIconButton("menu_settings", () -> {
       sidePanelMode = "settings".equals(sidePanelMode) ? null : "settings";
       ctx.setSelection(null);
       refreshSidePanel();
-    });
+    }));
+    topBar.addChild(spacer(10));
+    topBar.addChild(menuIconButton("reset", ctx::resetWorld));
 
-    toolbar.setLocalTranslation(0, height - 46, 1);
+    // A bottom-center icon dock for the god tools, WorldBox-style, instead
+    // of a tall always-open text list running down the left edge of the
+    // screen - the previous layout's dominant source of visual clutter.
+    // Anchored with a small Y (this coordinate system's origin is bottom-
+    // left, Y increasing upward) so it sits near the bottom regardless of
+    // screen height, same as topBar anchors to the top via `height`.
+    toolbar.setLocalTranslation(width / 2f - DOCK_WIDTH_ESTIMATE / 2f, DOCK_TOP_Y, 1);
     toolbar.setBackground(UiTextures.panelBackground());
     guiNode.attachChild(toolbar);
     buildToolbar();
@@ -208,7 +214,6 @@ public class GameHud {
     toastLabel.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(toastLabel);
 
-    styleButtons(topBar);
     refreshSpeedButtons();
   }
 
@@ -216,21 +221,15 @@ public class GameHud {
     switch (s) { case 0: return "Pause"; case 1: return "1x"; case 2: return "2x"; default: return "4x"; }
   }
 
-  /** Walks every Button under a container and gives it the resting chip
-   * background if it doesn't already have a background set - lets a
-   * whole panel's worth of buttons (built across many call sites) get
-   * restyled from a couple of call sites instead of touching every
-   * individual `new Button(...)` construction. Buttons that already carry
-   * a specific background (the active tool/tab, an active-state row) are
-   * left alone so this doesn't stomp on that state. */
-  private void styleButtons(com.jme3.scene.Node root) {
-    for (com.jme3.scene.Spatial child : root.getChildren()) {
-      if (child instanceof Button) {
-        Button b = (Button) child;
-        if (b.getBackground() == null) b.setBackground(UiTextures.buttonBackground());
-      }
-      if (child instanceof com.jme3.scene.Node) styleButtons((com.jme3.scene.Node) child);
-    }
+  /** A small icon-only button for an infrequent top-bar action (open a
+   * menu, reset the world) - just the glyph, no permanent background, so
+   * it reads as part of the bar rather than a boxed-in control. */
+  private Button menuIconButton(String iconKey, Runnable onClick) {
+    Button b = new Button("");
+    b.setIcon(new com.simsilica.lemur.component.IconComponent(
+        IconTextures.icon(iconKey), new com.jme3.math.Vector2f(0.75f, 0.75f), 6, 6, 0, false));
+    b.addClickCommands(src -> onClick.run());
+    return b;
   }
 
   private Label spacer(float width) {
@@ -240,28 +239,38 @@ public class GameHud {
   }
 
   private static final String[] TOOL_TABS = {"Terrain", "Civilizations", "Creatures", "Disasters"};
+  private static final Map<String, String> TAB_ICONS = new LinkedHashMap<>();
+  static {
+    TAB_ICONS.put("Terrain", "tab_terrain");
+    TAB_ICONS.put("Civilizations", "tab_civ");
+    TAB_ICONS.put("Creatures", "tab_creatures");
+    TAB_ICONS.put("Disasters", "tab_disasters");
+  }
 
-  /** Tools used to be one long always-visible list; now they're grouped
-   * into clickable tabs (Select stays pinned above them since it's the
-   * default/most-used tool) so the toolbar reads as organized categories
-   * instead of a wall of buttons. */
+  private static final float DOCK_ICON_MARGIN = 7f;
+  private static final float DOCK_WIDTH_ESTIMATE = 560f;
+  private static final float DOCK_TOP_Y = 200f;
+
+  private Label activeToolLabel;
+
+  /** A WorldBox-style bottom dock: a row of category icons, a row of that
+   * category's tool icons, and a compact status line (current tool name +
+   * brush size) - the whole god-tools UI in about 100px of height instead
+   * of a permanently-open sidebar. Select is pinned in the category row
+   * since it's the default/most-used tool, not buried in a category. */
   private void buildToolbar() {
-    GodTools.ToolDef selectDef = GodTools.TOOLS.get(0);
-    Button selectBtn = toolbar.addChild(new Button(selectDef.name));
-    selectBtn.setTextHAlignment(com.simsilica.lemur.HAlignment.Left);
-    selectBtn.addClickCommands(src -> {
-      ctx.setTool(selectDef.id);
-      refreshToolButtons();
-    });
-    toolButtons.put(selectDef.id, selectBtn);
-
     Container tabRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-    boolean firstTab = true;
+    GodTools.ToolDef selectDef = GodTools.TOOLS.get(0);
+    Button selectBtn = tabRow.addChild(new Button(""));
+    selectBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
+        IconTextures.icon(selectDef.id), new com.jme3.math.Vector2f(0.8f, 0.8f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+    selectBtn.addClickCommands(src -> { ctx.setTool(selectDef.id); refreshToolButtons(); });
+    toolButtons.put(selectDef.id, selectBtn);
+    tabRow.addChild(spacer(16));
     for (String tabName : TOOL_TABS) {
-      if (!firstTab) tabRow.addChild(spacer(4));
-      firstTab = false;
-      Button tabBtn = tabRow.addChild(new Button(tabName));
-      tabBtn.setFontSize(12);
+      Button tabBtn = tabRow.addChild(new Button(""));
+      tabBtn.setIcon(new com.simsilica.lemur.component.IconComponent(
+          IconTextures.icon(TAB_ICONS.get(tabName)), new com.jme3.math.Vector2f(0.68f, 0.68f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
       tabBtn.addClickCommands(src -> {
         activeToolTab = tabName;
         rebuildToolGroup();
@@ -269,22 +278,25 @@ public class GameHud {
       toolTabButtons.put(tabName, tabBtn);
     }
 
-    toolGroupContainer = toolbar.addChild(new Container(new SpringGridLayout(Axis.Y, Axis.X)));
+    toolGroupContainer = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     rebuildToolGroup();
 
-    Label brushHeader = toolbar.addChild(new Label("BRUSH SIZE"));
+    Container statusRow = toolbar.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    activeToolLabel = statusRow.addChild(new Label(selectDef.name));
+    activeToolLabel.setColor(ACTIVE);
+    activeToolLabel.setFontSize(13);
+    activeToolLabel.setPreferredSize(new Vector3f(110, 18, 0));
+    statusRow.addChild(spacer(14));
+    Label brushHeader = statusRow.addChild(new Label("Brush"));
     brushHeader.setColor(MUTED);
     brushHeader.setFontSize(12);
-    brushSlider = toolbar.addChild(new Slider(new DefaultRangedValueModel(1, 9, ctx.getBrushSize()), Axis.X));
+    brushSlider = statusRow.addChild(new Slider(new DefaultRangedValueModel(1, 9, ctx.getBrushSize()), Axis.X));
     brushSlider.setDelta(1);
-    brushSlider.setPreferredSize(new Vector3f(150, 24, 0));
-    brushLabel = toolbar.addChild(new Label(String.valueOf(ctx.getBrushSize())));
+    brushSlider.setPreferredSize(new Vector3f(100, 20, 0));
+    brushLabel = statusRow.addChild(new Label(String.valueOf(ctx.getBrushSize())));
     brushLabel.setColor(MUTED);
+    brushLabel.setFontSize(12);
 
-    Button reset = toolbar.addChild(new Button("Reset World"));
-    reset.addClickCommands(src -> ctx.resetWorld());
-
-    styleButtons(toolbar);
     refreshToolButtons();
   }
 
@@ -293,20 +305,23 @@ public class GameHud {
     for (String tabName : TOOL_TABS) {
       Button b = toolTabButtons.get(tabName);
       boolean active = tabName.equals(activeToolTab);
-      b.setColor(active ? ACTIVE : TEXT);
-      b.setBackground(active ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
+      b.setBackground(active ? UiTextures.activeButtonBackground() : null);
     }
+    boolean first = true;
     for (GodTools.ToolDef tool : GodTools.TOOLS) {
       if (!tool.group.equals(activeToolTab)) continue;
-      Button b = toolGroupContainer.addChild(new Button(tool.name));
-      b.setTextHAlignment(com.simsilica.lemur.HAlignment.Left);
+      if (!first) toolGroupContainer.addChild(spacer(4));
+      first = false;
+      Button b = toolGroupContainer.addChild(new Button(""));
+      b.setIcon(new com.simsilica.lemur.component.IconComponent(
+          IconTextures.icon(tool.id), new com.jme3.math.Vector2f(0.85f, 0.85f), DOCK_ICON_MARGIN, DOCK_ICON_MARGIN, 0, false));
+      final String toolName = tool.name;
       b.addClickCommands(src -> {
         ctx.setTool(tool.id);
         refreshToolButtons();
       });
       toolButtons.put(tool.id, b);
     }
-    styleButtons(toolGroupContainer);
     refreshToolButtons();
   }
 
@@ -314,8 +329,10 @@ public class GameHud {
     String active = ctx.getTool();
     for (Map.Entry<String, Button> e : toolButtons.entrySet()) {
       boolean isActive = e.getKey().equals(active);
-      e.getValue().setColor(isActive ? ACTIVE : TEXT);
-      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
+      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : null);
+    }
+    for (GodTools.ToolDef tool : GodTools.TOOLS) {
+      if (tool.id.equals(active) && activeToolLabel != null) activeToolLabel.setText(tool.name);
     }
   }
 
@@ -326,7 +343,7 @@ public class GameHud {
     for (Map.Entry<Integer, Button> e : speedButtons.entrySet()) {
       boolean isActive = e.getKey() == active;
       e.getValue().setColor(isActive ? ACTIVE : TEXT);
-      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : UiTextures.buttonBackground());
+      e.getValue().setBackground(isActive ? UiTextures.activeButtonBackground() : null);
     }
   }
 
@@ -394,13 +411,10 @@ public class GameHud {
     }
     // "settings" is deliberately excluded from the periodic auto-refresh -
     // rebuilding the panel every second would recreate the slider mid-drag
-    // and reset it out from under the player's mouse.
-    // Every button in a rebuilt panel now carries its own background
-    // geometry (see styleButtons) instead of zero, so a full clear+rebuild
-    // is a heavier operation than it used to be - a slower refresh cadence
-    // trades a little UI freshness for a lot less GPU buffer churn over a
-    // long session.
-    if (now - lastPanelRefresh > 2.5 && !"settings".equals(sidePanelMode)) {
+    // and reset it out from under the player's mouse. The refresh cadence
+    // stays moderate (not every frame) since a full clear+rebuild still
+    // costs real GPU buffer churn even without per-row backgrounds.
+    if (now - lastPanelRefresh > 1.5 && !"settings".equals(sidePanelMode)) {
       lastPanelRefresh = now;
       refreshSidePanel();
     }
@@ -429,7 +443,6 @@ public class GameHud {
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
 
     sidePanel.setLocalTranslation(screenW - 320, screenH - 46, 1);
-    styleButtons(sidePanel);
 
     if (!"graph".equals(mode)) {
       chartNode.setCullHint(Spatial.CullHint.Always);
@@ -757,7 +770,6 @@ public class GameHud {
     int[] range = pager(events.size());
     for (WorldEvent e : events.subList(range[0], range[1])) {
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-      row.setBackground(UiTextures.cardBackground());
       Label dateLbl = row.addChild(new Label(com.worldbox.util.Calendar.dateString(e.tick)));
       dateLbl.setColor(MUTED);
       dateLbl.setFontSize(12);

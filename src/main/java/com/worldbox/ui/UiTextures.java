@@ -30,6 +30,41 @@ public final class UiTextures {
   private static final int SIZE = 48;
   private static final int CHIP_SIZE = 24;
 
+  /** Packs a BufferedImage into a jME Texture2D - shared by every runtime-
+   * drawn texture in this project (rounded panels here, icon glyphs in
+   * IconTextures). */
+  static Texture2D toTexture(BufferedImage img) {
+    int size = img.getWidth();
+    // jME texture rows run bottom-to-top (matches GL texture coords),
+    // BufferedImage rows run top-to-bottom - flip while packing or the
+    // image renders upside down
+    ByteBuffer buf = BufferUtils.createByteBuffer(size * img.getHeight() * 4);
+    for (int y = img.getHeight() - 1; y >= 0; y--) {
+      for (int x = 0; x < size; x++) {
+        int argb = img.getRGB(x, y);
+        buf.put((byte) ((argb >> 16) & 0xFF));
+        buf.put((byte) ((argb >> 8) & 0xFF));
+        buf.put((byte) (argb & 0xFF));
+        buf.put((byte) ((argb >> 24) & 0xFF));
+      }
+    }
+    buf.flip();
+    Image jmeImage = new Image(Image.Format.RGBA8, size, img.getHeight(), buf, ColorSpace.sRGB);
+    Texture2D tex = new Texture2D(jmeImage);
+    tex.setMagFilter(Texture.MagFilter.Bilinear);
+    tex.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+    tex.setWrap(Texture.WrapMode.EdgeClamp);
+    return tex;
+  }
+
+  static BufferedImage newCanvas(int size) {
+    BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g = img.createGraphics();
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    g.dispose();
+    return img;
+  }
+
   private static Texture2D roundedRect(int size, int margin, ColorRGBA fill, ColorRGBA border, int borderWidth) {
     BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
     Graphics2D g = img.createGraphics();
@@ -44,36 +79,16 @@ public final class UiTextures {
       g.drawRoundRect(half, half, size - borderWidth, size - borderWidth, arc, arc);
     }
     g.dispose();
-
-    // jME texture rows run bottom-to-top (matches GL texture coords),
-    // BufferedImage rows run top-to-bottom - flip while packing or the
-    // panel renders upside down
-    ByteBuffer buf = BufferUtils.createByteBuffer(size * size * 4);
-    for (int y = size - 1; y >= 0; y--) {
-      for (int x = 0; x < size; x++) {
-        int argb = img.getRGB(x, y);
-        buf.put((byte) ((argb >> 16) & 0xFF));
-        buf.put((byte) ((argb >> 8) & 0xFF));
-        buf.put((byte) (argb & 0xFF));
-        buf.put((byte) ((argb >> 24) & 0xFF));
-      }
-    }
-    buf.flip();
-    Image jmeImage = new Image(Image.Format.RGBA8, size, size, buf, ColorSpace.sRGB);
-    Texture2D tex = new Texture2D(jmeImage);
-    tex.setMagFilter(Texture.MagFilter.Bilinear);
-    tex.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
-    tex.setWrap(Texture.WrapMode.EdgeClamp);
-    return tex;
+    return toTexture(img);
   }
 
-  private static Color awt(ColorRGBA c) {
+  static Color awt(ColorRGBA c) {
     return new Color(clamp(c.r), clamp(c.g), clamp(c.b), clamp(c.a));
   }
 
   private static float clamp(float v) { return Math.max(0f, Math.min(1f, v)); }
 
-  private static Texture2D panelTex, cardTex, buttonTex, buttonActiveTex, chipTex;
+  private static Texture2D panelTex, buttonActiveTex, chipTex;
 
   private static com.simsilica.lemur.component.TbtQuadBackgroundComponent nine(
       Texture2D tex, int margin) {
@@ -94,32 +109,6 @@ public final class UiTextures {
           2);
     }
     return nine(panelTex, MARGIN);
-  }
-
-  /** A smaller/lighter variant for nested "card" rows (list rows, stat
-   * chips) sitting on top of a panel - just enough contrast lift to read
-   * as a distinct surface without competing with the panel itself. */
-  public static com.simsilica.lemur.component.TbtQuadBackgroundComponent cardBackground() {
-    if (cardTex == null) {
-      cardTex = roundedRect(SIZE, MARGIN,
-          new ColorRGBA(1f, 1f, 1f, 0.06f),
-          new ColorRGBA(1f, 1f, 1f, 0.09f),
-          1);
-    }
-    return nine(cardTex, MARGIN);
-  }
-
-  /** Every ordinary button's resting background - a small rounded chip,
-   * distinct enough from the panel behind it to read as a pressable
-   * surface instead of plain floating text. */
-  public static com.simsilica.lemur.component.TbtQuadBackgroundComponent buttonBackground() {
-    if (buttonTex == null) {
-      buttonTex = roundedRect(CHIP_SIZE, CHIP_MARGIN,
-          new ColorRGBA(1f, 1f, 1f, 0.055f),
-          new ColorRGBA(1f, 1f, 1f, 0.1f),
-          1);
-    }
-    return nine(buttonTex, CHIP_MARGIN);
   }
 
   /** The active/selected variant - an accent-tinted chip, so "this is the
