@@ -64,6 +64,8 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private ScreenshotAppState screenshotState;
   private boolean testMode;
   private double testModeExitAt = -1;
+  private int combatShotsTaken = 0;
+  private double lastCombatCheck = -999;
 
   public GameApp(int width, int height) {
     this.screenWidth = width;
@@ -498,6 +500,54 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
             + " monsterAlive=" + (state.monster != null));
       });
     }
+
+    // Wars break out organically at an unpredictable in-game year, so the
+    // fixed checkpoints above can't know when to aim at one - this instead
+    // polls every couple seconds for a settlement actively falling (best)
+    // or an army mid-fight (fallback), swings the camera in close, and
+    // queues a screenshot a moment later once the camera's actually
+    // settled there. DEBUG/temporary: for capturing combat screenshots on
+    // request, not part of the normal smoke-test checklist.
+    if ("true".equals(System.getProperty("worldbox.chaseCombat")) && combatShotsTaken < 6
+        && simTime - lastCombatCheck > 3.0 && simTime < duration - 1.5) {
+      lastCombatCheck = simTime;
+      com.worldbox.sim.Settlement fallingCity = null;
+      for (var s : state.settlements.values()) {
+        if (!s.abandoned && s.siegeProgress > 3) { fallingCity = s; break; }
+      }
+      Army fightingArmy = null;
+      for (Army a : state.armies.values()) {
+        if (!a.dead && a.combatFlashTimer > 0) { fightingArmy = a; break; }
+      }
+      if (fightingArmy == null) {
+        for (Army a : state.armies.values()) {
+          if (!a.dead && a.targetSettlementId != null) { fightingArmy = a; break; }
+        }
+      }
+      if (fallingCity != null) {
+        var s = fallingCity;
+        float h = state.grid.height[state.grid.idx(s.x, s.z)];
+        camTarget.set(s.x + 0.5f, h, s.z + 0.5f);
+        camDistance = camDistanceTarget = 10f;
+        camPitch = 0.4f;
+        combatShotsTaken++;
+        System.out.println("TESTMODE_CHASE falling city=" + s.name + " siegeProgress=" + s.siegeProgress);
+        testScript.put(simTime + 0.5, () -> screenshotState.takeScreenshot());
+      } else if (fightingArmy != null) {
+        Army a = fightingArmy;
+        int gx = Math.max(0, Math.min(state.grid.cols - 1, (int) a.x));
+        int gz = Math.max(0, Math.min(state.grid.rows - 1, (int) a.z));
+        float h = state.grid.height[state.grid.idx(gx, gz)];
+        camTarget.set((float) a.x, h, (float) a.z);
+        camDistance = camDistanceTarget = 9f;
+        camPitch = 0.4f;
+        combatShotsTaken++;
+        System.out.println("TESTMODE_CHASE army id=" + a.id + " state=" + a.state
+            + " combatFlashTimer=" + a.combatFlashTimer + " units=" + a.units);
+        testScript.put(simTime + 0.5, () -> screenshotState.takeScreenshot());
+      }
+    }
+
     for (var entry : new java.util.ArrayList<>(testScript.entrySet())) {
       if (simTime > entry.getKey()) {
         entry.getValue().run();
