@@ -111,6 +111,7 @@ public class EntityRenderer {
   private WorldGrid grid;
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
+  private final Mesh humanAxeTemplate, humanPickaxeTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
@@ -168,8 +169,14 @@ public class EntityRenderer {
   private final List<Geometry> tornadoGeoms = new ArrayList<>();
   private final Geometry selectionRing;
   private final Geometry brushRing;
-  private final Node nationLabelNode = new Node("nationLabelBillboard");
-  private final com.jme3.font.BitmapText nationLabelText;
+  // one floating name label per possible nation, always shown above its
+  // capital (not just while selected) - the selected nation's own label
+  // is bigger/brighter as the "highlight" the player asked for
+  private static final int NATION_LABEL_CAP = 64;
+  private final Node[] nationLabelNodes = new Node[NATION_LABEL_CAP];
+  private final com.jme3.font.BitmapText[] nationLabelTexts = new com.jme3.font.BitmapText[NATION_LABEL_CAP];
+  private static final ColorRGBA NATION_LABEL_COLOR = new ColorRGBA(0.93f, 0.95f, 0.99f, 0.92f);
+  private static final ColorRGBA NATION_LABEL_SELECTED_COLOR = new ColorRGBA(1f, 0.86f, 0.3f, 1f);
 
   public EntityRenderer(Node root, AssetManager assets, WorldGrid grid, NationColorLookup nationColor) {
     this.root = root;
@@ -196,9 +203,25 @@ public class EntityRenderer {
     // since a rock and an ore vein shouldn't look like the same thing.
     depositTemplate = MeshUtil.buildCrystalCluster(0.42f);
     stoneDepositTemplate = MeshUtil.buildRockCluster(0.5f);
-    humanTemplate = MeshUtil.mergeMeshes(
-        new Box(0.15f, 0.5f, 0.12f),
-        MeshUtil.translatedCopy(new Box(0.13f, 0.13f, 0.13f), 0, 0.63f, 0));
+    // a villager used to be one solid torso box plus a head - a believable
+    // silhouette from a distance, but a single blob up close with no sense
+    // of a person actually standing there. Separate legs plus a distinct
+    // torso/head read as an actual little figure instead, while keeping
+    // the same low-poly block style as everything else and the same
+    // overall footprint (local y -0.5..0.72, same as before) so placement
+    // math elsewhere doesn't need to change.
+    Mesh legL = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), -0.06f, -0.25f, 0);
+    Mesh legR = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), 0.06f, -0.25f, 0);
+    Mesh torso = MeshUtil.translatedCopy(new Box(0.15f, 0.22f, 0.1f), 0, 0.22f, 0);
+    Mesh head = MeshUtil.translatedCopy(new Box(0.12f, 0.14f, 0.12f), 0, 0.58f, 0);
+    humanTemplate = MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(legL, legR), MeshUtil.mergeMeshes(torso, head));
+    // job-appropriate gear, the same "silhouette carries the meaning, not
+    // color" trick already used for soldiers' carried weapons (a human is
+    // still one flat nation-colored solo material, so an axe vs a
+    // pickaxe vs bare hands is what actually reads as "this one's a
+    // lumberjack, this one's a miner")
+    humanAxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), axeMesh());
+    humanPickaxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), pickaxeMesh());
     armyTemplate = MeshUtil.mergeMeshes(
         new Box(0.24f, 0.55f, 0.2f),
         MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.16f), 0, 0.7f, 0));
@@ -503,18 +526,24 @@ public class EntityRenderer {
     brushRing.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(brushRing);
 
-    // billboarded nation-name label, shown floating above the capital
-    // whenever that nation is the current selection
+    // billboarded nation-name label, one per possible nation, always
+    // floating above its capital - the selected one is styled bigger and
+    // brighter in updateNationLabels() below
     com.jme3.font.BitmapFont font = assets.loadFont("Interface/Fonts/Default.fnt");
-    nationLabelText = new com.jme3.font.BitmapText(font);
-    nationLabelText.setSize(0.32f);
-    nationLabelText.setColor(ColorRGBA.White);
-    nationLabelNode.attachChild(nationLabelText);
-    nationLabelNode.addControl(new com.jme3.scene.control.BillboardControl());
-    nationLabelNode.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
-    nationLabelNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
-    nationLabelNode.setCullHint(Spatial.CullHint.Always);
-    root.attachChild(nationLabelNode);
+    for (int i = 0; i < NATION_LABEL_CAP; i++) {
+      com.jme3.font.BitmapText t = new com.jme3.font.BitmapText(font);
+      t.setSize(0.3f);
+      t.setColor(NATION_LABEL_COLOR);
+      Node n = new Node("NationLabel" + i);
+      n.attachChild(t);
+      n.addControl(new com.jme3.scene.control.BillboardControl());
+      n.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+      n.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+      n.setCullHint(Spatial.CullHint.Always);
+      root.attachChild(n);
+      nationLabelNodes[i] = n;
+      nationLabelTexts[i] = t;
+    }
 
     // a floating "CITY FALLING n%" billboard over any settlement whose
     // garrison has been wiped out/routed and is actively being captured -
@@ -540,6 +569,28 @@ public class EntityRenderer {
 
   private static boolean isVehicleWeapon(String weapon) {
     return weapon.equals("tank") || weapon.equals("artillery") || weapon.equals("cannon");
+  }
+
+  /** A lumberjack's axe, held at roughly hand height on a villager's
+   * detailed body - same "silhouette, not color, carries the meaning"
+   * trick as a soldier's weapon. */
+  private Mesh axeMesh() {
+    Mesh handle = new Box(0.018f, 0.15f, 0.018f);
+    Mesh blade = MeshUtil.translatedCopy(new Box(0.045f, 0.045f, 0.014f), 0.045f, 0.15f, 0);
+    Mesh w = MeshUtil.mergeMeshes(handle, blade);
+    MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.4f, Vector3f.UNIT_Z));
+    return MeshUtil.translatedCopy(w, 0.16f, 0.1f, 0.05f);
+  }
+
+  /** A miner's pickaxe - shared by stone/iron/gold jobs, since they're all
+   * "digging" work; only the axe/pickaxe/bare-hands split needs to read
+   * at a glance, not every individual resource. */
+  private Mesh pickaxeMesh() {
+    Mesh handle = new Box(0.018f, 0.17f, 0.018f);
+    Mesh head = MeshUtil.translatedCopy(new Box(0.08f, 0.018f, 0.018f), 0, 0.17f, 0);
+    Mesh w = MeshUtil.mergeMeshes(handle, head);
+    MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.35f, Vector3f.UNIT_Z));
+    return MeshUtil.translatedCopy(w, 0.16f, 0.1f, 0.05f);
   }
 
   /** Builds a carried-weapon mesh, positioned/angled near a soldier's hand,
@@ -609,16 +660,34 @@ public class EntityRenderer {
     }
   }
 
-  /** Shows `text` floating above (x,h,z), billboarded to always face the
-   * camera - used to hang a nation's name over its capital while that
-   * nation is selected. */
-  public void setNationLabel(String text, float x, float h, float z, boolean visible) {
-    nationLabelNode.setCullHint(visible ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
-    if (!visible) return;
-    if (!nationLabelText.getText().equals(text)) nationLabelText.setText(text);
-    float width = nationLabelText.getLineWidth();
-    nationLabelText.setLocalTranslation(-width / 2f, 0, 0);
-    nationLabelNode.setLocalTranslation(x, h + 4.2f, z);
+  /** Every living nation's name, always floating above its capital -
+   * previously only shown for whichever nation happened to be selected.
+   * The selected nation (selectedNationId, or -1 for none) gets a
+   * bigger, brighter, gold-colored label and sits a little higher so it
+   * reads as genuinely highlighted rather than just another label in the
+   * crowd. */
+  public void updateNationLabels(GameState state, int selectedNationId) {
+    int i = 0;
+    for (Nation n : state.nations.values()) {
+      if (i >= NATION_LABEL_CAP) break;
+      Settlement capital = state.settlements.get(n.capitalSettlementId);
+      if (capital == null) continue;
+      Node node = nationLabelNodes[i];
+      com.jme3.font.BitmapText t = nationLabelTexts[i];
+      boolean selected = n.id == selectedNationId;
+      String text = n.displayName();
+      if (!t.getText().equals(text)) t.setText(text);
+      float size = selected ? 0.48f : 0.3f;
+      if (Math.abs(t.getSize() - size) > 0.001f) t.setSize(size);
+      t.setColor(selected ? NATION_LABEL_SELECTED_COLOR : NATION_LABEL_COLOR);
+      float width = t.getLineWidth();
+      t.setLocalTranslation(-width / 2f, 0, 0);
+      float h = grid.height[grid.idx(capital.x, capital.z)];
+      node.setLocalTranslation(capital.x + 0.5f, h + (selected ? 4.8f : 4.2f), capital.z + 0.5f);
+      node.setCullHint(Spatial.CullHint.Inherit);
+      i++;
+    }
+    for (; i < NATION_LABEL_CAP; i++) nationLabelNodes[i].setCullHint(Spatial.CullHint.Always);
   }
 
   private Material vertexColorMaterial() {
@@ -830,7 +899,7 @@ public class EntityRenderer {
     updateFires(state, animTime);
     updateSmoke(state);
     updateSparkles(state);
-    updateWeather(state, animTime);
+    updateWeather(state, alpha, animTime);
   }
 
   private Mesh tierTemplate(int population) {
@@ -1196,6 +1265,13 @@ public class EntityRenderer {
         float yaw = (float) Math.atan2(dx, dz);
         g.setLocalRotation(new Quaternion().fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }
+      // job-appropriate gear: a lumberjack carries an axe, a miner (of
+      // any of the three dug resources) carries a pickaxe, everyone else
+      // (unemployed, gathering nothing) is bare-handed
+      Mesh jobMesh = "wood".equals(h.job) ? humanAxeTemplate
+          : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanPickaxeTemplate
+          : humanTemplate;
+      g.setMesh(jobMesh);
       ColorRGBA c = h.nationId == Config.UNDEAD_NATION_ID
           ? ZOMBIE_COLOR
           : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
@@ -1228,7 +1304,7 @@ public class EntityRenderer {
   private static final ColorRGBA STORM_COLOR = new ColorRGBA(0.42f, 0.45f, 0.5f, 0.92f);
   private static final float CLOUD_HEIGHT = 15f;
 
-  private void updateWeather(GameState state, float animTime) {
+  private void updateWeather(GameState state, float alpha, float animTime) {
     while (cloudGeoms.size() < state.clouds.size()) {
       Geometry g = new Geometry("Cloud", cloudTemplate);
       g.setMaterial(soloColorMaterial(CLOUD_COLOR));
@@ -1244,7 +1320,17 @@ public class EntityRenderer {
       Cloud c = state.clouds.get(i);
       Geometry g = cloudGeoms.get(i);
       float scale = (float) (c.radius / 5.0);
-      g.setLocalTranslation((float) c.x, CLOUD_HEIGHT, (float) c.z);
+      // clouds only move once per simulation tick, not every render
+      // frame - without interpolating between prevX/prevZ (same fix as
+      // armies/humans) they visibly hopped forward once per tick instead
+      // of drifting, which read as jitter
+      float cx = (float) (c.prevX + (c.x - c.prevX) * alpha);
+      float cz = (float) (c.prevZ + (c.z - c.prevZ) * alpha);
+      // a little per-cloud height variation (stable per id) so a mixed
+      // sky of big/small clouds also reads as layered, not all pinned to
+      // one flat plane
+      float height = CLOUD_HEIGHT + jitterAxis(c.id, 0, 91) * 2.5f;
+      g.setLocalTranslation(cx, height, cz);
       g.setLocalScale(scale);
       setSoloColor(g.getMaterial(), c.stormy ? STORM_COLOR : CLOUD_COLOR);
       if (c.stormy) stormClouds.add(c);

@@ -102,13 +102,30 @@ public class Settlement {
     return housed < capacity;
   }
 
-  /** Claims every cell in range, contested by "claim strength" (population
-   * + treasury + military power, falling off with distance from the
-   * settlement) rather than by whichever settlement's turn happened to
-   * come up last in this cycle - so a rich, powerful nation genuinely
-   * pushes into a weaker neighbor's territory instead of border cells
-   * just flickering between owners depending on iteration order. */
+  /** Claims cells in range that are either already ours or genuinely
+   * unclaimed wilderness - contested by "claim strength" (population +
+   * treasury + military power, falling off with distance) among rival
+   * claims on open land, same as before. Once a cell is held by another
+   * LIVING nation, ordinary peaceful growth can no longer take it no
+   * matter how much richer/stronger this settlement is - that's what
+   * war is for now (see Nation.transferSettlement's forced reclaim on
+   * conquest, and Settlement.abandon releasing a dead nation's cells
+   * back to unclaimed). */
   public static void claimTerritory(GameState state, Settlement settlement) {
+    claimTerritory(state, settlement, false);
+  }
+
+  /** Unconditionally hands this settlement's surrounding cells to its
+   * current nation regardless of who held them before - used right after
+   * a conquest (see Nation.transferSettlement) so the captured city's own
+   * land changes hands immediately instead of staying painted the
+   * defeated nation's color until the next peaceful claim pass silently
+   * refuses to touch it. */
+  public static void forceClaimTerritory(GameState state, Settlement settlement) {
+    claimTerritory(state, settlement, true);
+  }
+
+  private static void claimTerritory(GameState state, Settlement settlement, boolean force) {
     WorldGrid grid = state.grid;
     Nation nation = state.nations.get(settlement.nationId);
     double treasury = nation != null ? Math.max(0, nation.treasury) : 0;
@@ -117,8 +134,10 @@ public class Settlement {
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (grid.terrain[i] == Config.WATER) return;
+      boolean alreadyOurs = grid.ownerNation[i] == settlement.nationId;
+      if (!force && !alreadyOurs && grid.ownerNation[i] >= 0) return;
       float effective = strength - (float) d * 4f;
-      if (grid.ownerNation[i] == settlement.nationId || effective >= grid.claimStrength[i]) {
+      if (force || alreadyOurs || effective >= grid.claimStrength[i]) {
         grid.ownerNation[i] = settlement.nationId;
         grid.claimStrength[i] = effective;
         grid.markDirtyIdx(i);
@@ -190,6 +209,24 @@ public class Settlement {
         settlement.radius = Math.min(24, 3.5 + Math.sqrt(settlement.populationCount) * 0.85 + wealthBonus + powerBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
+
+        // public housing backstop: housingStock is built to track total
+        // population, not how many residents can actually afford to buy
+        // back in after a repossession (see Population.maybeBuyHouse), so
+        // a rising share could end up permanently homeless right next to
+        // a rising number of genuinely empty houses - "most homes go
+        // vacant" alongside a homelessness crisis, at the same time. If
+        // this settlement has any vacancy, hand one over to a resident
+        // still without a roof - gradual (one per cycle), not instant,
+        // but no longer stuck behind an unreachable savings bar either.
+        double houseRoom = settlement.housingStock * PEOPLE_PER_HOUSE;
+        int housedCount = 0;
+        for (Human h : state.humans) if (h.settlementId == settlement.id && h.hasHouse) housedCount++;
+        if (housedCount < houseRoom) {
+          for (Human h : state.humans) {
+            if (h.settlementId == settlement.id && !h.hasHouse) { h.hasHouse = true; break; }
+          }
+        }
       }
 
       int farmWorkers = Math.min(settlement.populationCount, settlement.farmCells);

@@ -447,6 +447,12 @@ public class Nation {
     Nation newNation = state.nations.get(newNationId);
     if (newNation != null) newNation.settlementIds.add(settlement.id);
     for (Human h : state.humans) if (h.settlementId == settlement.id) h.nationId = newNationId;
+    // territory is now locked against peaceful takeover (see
+    // Settlement.claimTerritory) - without this, a conquered city's own
+    // surrounding land would stay painted the defeated nation's color
+    // forever, since the new owner's normal claim pass now refuses to
+    // touch cells held by another (still-living) nation
+    Settlement.forceClaimTerritory(state, settlement);
     if (oldNation != null && oldNation.settlementIds.isEmpty()) {
       killNation(state, oldNation);
     }

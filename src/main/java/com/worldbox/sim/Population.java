@@ -163,7 +163,14 @@ public class Population {
    * ever taken just accumulates forever and homelessness only ever
    * ratchets upward across a long game. */
   private static void maybeBuyHouse(Nation nation, Human h) {
-    if (h.hasHouse || h.debt > 0 || h.wealth < HOUSE_PRICE * 1.5) return;
+    // was a 1.5x-price cushion (60) on top of being fully debt-free -
+    // for someone living off a modest unemployment benefit that bar was
+    // essentially unreachable, which is most of why homelessness only
+    // ever ratcheted up. Settlement.update's public-housing backstop
+    // (see the "housed < capacity" check there) now handles the "no
+    // savings at all" case gradually; this path just needs to still be
+    // reachable for anyone actually saving toward it.
+    if (h.hasHouse || h.debt > 0 || h.wealth < HOUSE_PRICE * 0.6) return;
     h.wealth -= HOUSE_PRICE;
     h.hasHouse = true;
     if (nation != null) nation.bank.reserves += HOUSE_PRICE;

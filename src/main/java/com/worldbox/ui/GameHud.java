@@ -799,6 +799,14 @@ public class GameHud {
     statRow("Settlements", String.valueOf(n.settlementIds.size()));
     statRow("Population", String.valueOf(pop));
     statRow("Military power", String.format("%.0f", military));
+    // how much of the map this nation actually controls right now - a
+    // direct answer to "how big is this nation" beyond settlement count,
+    // and one that now actually sticks once claimed (see
+    // Settlement.claimTerritory - peaceful growth can no longer take an
+    // already-claimed cell, only conquest can)
+    int territoryCells = 0;
+    for (int owner : state.grid.ownerNation) if (owner == id) territoryCells++;
+    statRow("Territory", territoryCells + " cells");
 
     Label govHeader = sidePanel.addChild(new Label("GOVERNMENT"));
     govHeader.setColor(MUTED); govHeader.setFontSize(fs(12));
@@ -848,6 +856,12 @@ public class GameHud {
     }
     statRow("Businesses", String.valueOf(bizCount));
     statRow("Business capital", (int) Math.floor(bizCapital) + " " + cur);
+    statRow("GDP (this window)", (int) Math.floor(n.gdpAccum) + " " + cur);
+    statRow("GDP per capita", (pop > 0 ? String.format("%.1f", n.gdpAccum / pop) : "-") + " " + cur);
+    statRow("Unemployment", String.format("%.0f%%", n.unemploymentRate * 100));
+    double totalWealth = 0; int counted = 0;
+    for (com.worldbox.sim.Human h : state.humans) if (h.nationId == id) { totalWealth += h.wealth; counted++; }
+    statRow("Avg citizen wealth", (counted > 0 ? String.format("%.1f", totalWealth / counted) : "-") + " " + cur);
 
     Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
     viewGraph.addClickCommands(src -> showGraph("nation", id));
@@ -895,6 +909,37 @@ public class GameHud {
       l.setColor(MUTED);
       return;
     }
+
+    // WORLD OVERVIEW: aggregate measures across every living nation, not
+    // just whichever one happens to be open - the world-scale economy
+    // readout the player asked for.
+    Label worldHeader = sidePanel.addChild(new Label("WORLD OVERVIEW"));
+    worldHeader.setColor(MUTED); worldHeader.setFontSize(fs(12));
+    long worldPop = 0;
+    double worldTreasury = 0, worldGdp = 0;
+    int claimedCells = 0;
+    for (int owner : state.grid.ownerNation) if (owner >= 0) claimedCells++;
+    for (Nation n : state.nations.values()) {
+      for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) worldPop += s.populationCount; }
+      worldTreasury += n.treasury;
+      worldGdp += n.gdpAccum;
+    }
+    int atWarPairs = 0, alliancePairs = 0;
+    for (var r : state.diplomacy.relations.values()) {
+      if (Config.WAR.equals(r.status)) atWarPairs++;
+      else if (Config.ALLIANCE.equals(r.status)) alliancePairs++;
+    }
+    double landCells = 0;
+    for (byte t : state.grid.terrain) if (t != Config.WATER) landCells++;
+    statRow("World population", String.valueOf(worldPop));
+    statRow("World treasury", (int) Math.floor(worldTreasury) + "g (combined)");
+    statRow("World GDP (window)", (int) Math.floor(worldGdp) + "g");
+    statRow("Land claimed", landCells > 0 ? String.format("%.0f%%", claimedCells / landCells * 100) : "0%");
+    statRow("Wars ongoing", String.valueOf(atWarPairs));
+    statRow("Alliances", String.valueOf(alliancePairs));
+
+    Label listHeader = sidePanel.addChild(new Label("BY TREASURY"));
+    listHeader.setColor(MUTED); listHeader.setFontSize(fs(12));
     resetListPage(-2); // fixed key: there's only one nations list, unlike per-nation panels
     java.util.List<Nation> sorted = new java.util.ArrayList<>(state.nations.values());
     sorted.sort((a, b) -> Double.compare(b.treasury, a.treasury));
@@ -1018,9 +1063,24 @@ public class GameHud {
       case "unemployment": return isWorld ? null : n.unemploymentHistory;
       case "gdp": return isWorld ? state.worldGdpHistory : n.gdpHistory;
       case "currency": return isWorld ? null : n.currencyHistory;
-      case "inflation": return isWorld ? null : n.inflationHistory;
+      case "inflation": return isWorld ? null : negated(n.inflationHistory);
       default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     }
+  }
+
+  /** The underlying inflationRate calculation is correct as designed (see
+   * Government.updateInflationAndExchangeRate) - a healthy, non-printing
+   * economy trends mildly deflationary, which is exactly what should
+   * strengthen its currency. But shown to the player as "-2% inflation"
+   * during ordinary healthy growth read as an obviously broken/flipped
+   * number. This flips only the DISPLAYED sign (chart included, via
+   * metricHistory above) so ordinary growth reads as a positive,
+   * reassuring number and only real reckless-printing inflation reads
+   * negative - the math driving exchangeRate itself is untouched. */
+  private static java.util.ArrayDeque<Double> negated(java.util.ArrayDeque<Double> src) {
+    java.util.ArrayDeque<Double> out = new java.util.ArrayDeque<>();
+    for (double v : src) out.addLast(-v);
+    return out;
   }
 
   private void renderGraph(GameState state) {
@@ -1097,16 +1157,19 @@ public class GameHud {
    * 20 ticks), which read as a near-meaningless "+0.1%/window" number to
    * a player. Averaging the last year's worth of windows and annualizing
    * that turns it into the plain "inflation over the last year" percentage
-   * everyone actually expects from an "Inflation" readout. */
+   * everyone actually expects from an "Inflation" readout. The sign is
+   * flipped from the raw economic value (see metricHistory's "inflation"
+   * case for why) so ordinary healthy growth reads as a reassuring
+   * positive number, not a confusing negative one. */
   private double annualInflation(Nation n) {
     int windowsPerYear = com.worldbox.util.Calendar.MONTHS_PER_YEAR;
     java.util.ArrayDeque<Double> hist = n.inflationHistory;
-    if (hist.isEmpty()) return n.inflationRate * windowsPerYear;
+    if (hist.isEmpty()) return -n.inflationRate * windowsPerYear;
     Double[] arr = hist.toArray(new Double[0]);
     int take = Math.min(windowsPerYear, arr.length);
     double sum = 0;
     for (int i = arr.length - take; i < arr.length; i++) sum += arr[i];
-    return (sum / take) * windowsPerYear;
+    return -(sum / take) * windowsPerYear;
   }
 
   private String econCycleLabel(double cycle) {

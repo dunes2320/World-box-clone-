@@ -31,6 +31,12 @@ public class Weather {
 
     List<Cloud> keep = new ArrayList<>();
     for (Cloud c : state.clouds) {
+      // clouds only move once per SIMULATION TICK (a few times a second),
+      // but the renderer draws every real frame - without prevX/prevZ to
+      // interpolate between (the same fix already applied to armies and
+      // humans), a cloud visibly jumped forward once per tick instead of
+      // drifting smoothly, which read as jitter.
+      c.prevX = c.x; c.prevZ = c.z;
       c.x += c.vx;
       c.z += c.vz;
 
@@ -91,7 +97,9 @@ public class Weather {
     double z = Math.random() * grid.rows;
     double vx = (fromWest ? 1 : -1) * CLOUD_SPEED * (0.6 + Math.random() * 0.8);
     double vz = (Math.random() - 0.5) * CLOUD_SPEED * 0.6;
-    double radius = 4 + Math.random() * 5;
+    // widened from 4-9 - clouds were all reading as roughly the same size;
+    // this gives a real mix of small wisps and big sprawling ones
+    double radius = 2.5 + Math.random() * 9;
     into.add(new Cloud(x, z, vx, vz, radius));
   }
 

@@ -689,26 +689,32 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   }
 
   private void updateSelectionRing() {
-    if (selection == null || !selection.type.equals("settlement")) {
-      entityRenderer.setSelection(0, 0, 0, false);
-      return;
+    if (selection != null && selection.type.equals("settlement")) {
+      var s = state.settlements.get(selection.id);
+      if (s != null) {
+        float h = state.grid.height[state.grid.idx(s.x, s.z)];
+        entityRenderer.setSelection(s.x + 0.5f, s.z + 0.5f, h, true);
+        return;
+      }
+    } else if (selection != null && selection.type.equals("nation")) {
+      // clicking a nation now highlights its capital with the same ring
+      // used for a settlement selection, on top of the bigger/brighter
+      // floating name label (see updateNationLabel below) - previously a
+      // nation selection showed only the label, nothing on the ground
+      Nation n = state.nations.get(selection.id);
+      var capital = n != null ? state.settlements.get(n.capitalSettlementId) : null;
+      if (capital != null) {
+        float h = state.grid.height[state.grid.idx(capital.x, capital.z)];
+        entityRenderer.setSelection(capital.x + 0.5f, capital.z + 0.5f, h, true);
+        return;
+      }
     }
-    var s = state.settlements.get(selection.id);
-    if (s == null) { entityRenderer.setSelection(0, 0, 0, false); return; }
-    float h = state.grid.height[state.grid.idx(s.x, s.z)];
-    entityRenderer.setSelection(s.x + 0.5f, s.z + 0.5f, h, true);
+    entityRenderer.setSelection(0, 0, 0, false);
   }
 
   private void updateNationLabel() {
-    if (selection == null || !selection.type.equals("nation")) {
-      entityRenderer.setNationLabel("", 0, 0, 0, false);
-      return;
-    }
-    Nation n = state.nations.get(selection.id);
-    var capital = n != null ? state.settlements.get(n.capitalSettlementId) : null;
-    if (capital == null) { entityRenderer.setNationLabel("", 0, 0, 0, false); return; }
-    float h = state.grid.height[state.grid.idx(capital.x, capital.z)];
-    entityRenderer.setNationLabel(n.displayName(), capital.x + 0.5f, h, capital.z + 0.5f, true);
+    int selectedNationId = (selection != null && selection.type.equals("nation")) ? selection.id : -1;
+    entityRenderer.updateNationLabels(state, selectedNationId);
   }
 
   // ---- HudContext ----

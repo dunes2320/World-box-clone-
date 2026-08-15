@@ -8,7 +8,7 @@ public class Cloud {
   private static int nextId = 1;
 
   public final int id;
-  public double x, z;
+  public double x, z, prevX, prevZ;
   public double vx, vz;
   public double radius;
   public boolean stormy = false;
@@ -16,7 +16,7 @@ public class Cloud {
 
   public Cloud(double x, double z, double vx, double vz, double radius) {
     this.id = nextId++;
-    this.x = x; this.z = z;
+    this.x = x; this.z = z; this.prevX = x; this.prevZ = z;
     this.vx = vx; this.vz = vz;
     this.radius = radius;
   }
