@@ -520,8 +520,17 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         if (!a.dead && a.combatFlashTimer > 0) { fightingArmy = a; break; }
       }
       if (fightingArmy == null) {
+        // fall back to a marching army, but only one currently, actually
+        // at war with its target - a targetSettlementId can linger from a
+        // war that's since gone to truce, which used to burn the whole
+        // shot budget stalking a harmless peacetime march
         for (Army a : state.armies.values()) {
-          if (!a.dead && a.targetSettlementId != null) { fightingArmy = a; break; }
+          if (a.dead || a.targetSettlementId == null) continue;
+          var target = state.settlements.get(a.targetSettlementId);
+          if (target == null) continue;
+          if (!state.diplomacy.getStatus(a.nationId, target.nationId).equals(Config.WAR)) continue;
+          fightingArmy = a;
+          break;
         }
       }
       if (fallingCity != null) {
