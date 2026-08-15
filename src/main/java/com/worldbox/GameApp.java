@@ -114,7 +114,11 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // at white. Neither needs any actual texture work, and both are cheap
     // screen-space post effects.
     com.jme3.post.FilterPostProcessor fpp = new com.jme3.post.FilterPostProcessor(assetManager);
-    com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 8.0f, 0.15f, 0.1f);
+    // intensity was 8.0 - jME's own SSAOFilter default is ~1.2, so this
+    // was nearly 7x stronger than a normal AO pass and crushed every
+    // block seam/crevice to near-black instead of a soft contact shadow.
+    // Bias bumped up too, to soften self-shadowing on flat faces.
+    com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 1.4f, 0.2f, 0.15f);
     fpp.addFilter(ssao);
     com.jme3.post.filters.BloomFilter bloom = new com.jme3.post.filters.BloomFilter(com.jme3.post.filters.BloomFilter.GlowMode.Scene);
     bloom.setBloomIntensity(0.9f);
@@ -159,6 +163,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   }
 
   private void setupInput() {
+    // SimpleApplication binds ESCAPE to its own built-in "quit immediately"
+    // action by default (INPUT_MAPPING_EXIT) - that mapping was still live
+    // alongside the custom "Escape" handling below, so every Escape press
+    // closed a popup (or opened Settings) AND quit the app in the same
+    // keystroke. Removing the default mapping leaves Escape entirely to
+    // the close-popup/open-Settings-with-its-own-Quit-button handling.
+    inputManager.deleteMapping(INPUT_MAPPING_EXIT);
     inputManager.addMapping("Paint", new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
     inputManager.addMapping("RotateCam", new MouseButtonTrigger(MouseInput.BUTTON_RIGHT));
     inputManager.addMapping("PanCam", new MouseButtonTrigger(MouseInput.BUTTON_MIDDLE));
