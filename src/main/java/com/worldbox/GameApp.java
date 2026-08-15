@@ -464,12 +464,14 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       testScript.put(midway + 2.4, () -> screenshotState.takeScreenshot());
       testScript.put(midway + 2.6, () -> hud.debugSetGraphMetric("currency"));
       testScript.put(midway + 2.8, () -> screenshotState.takeScreenshot());
-      testScript.put(midway + 3.0, () -> hud.debugShowGraph("world", -1));
-      testScript.put(midway + 3.5, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 3.0, () -> hud.debugSetGraphMetric("inflation"));
+      testScript.put(midway + 3.2, () -> screenshotState.takeScreenshot());
+      testScript.put(midway + 3.4, () -> hud.debugShowGraph("world", -1));
+      testScript.put(midway + 3.9, () -> screenshotState.takeScreenshot());
       // popups now pause the sim while open (see GameHud.refreshSidePanel) -
       // close this one out or the rest of the script would run against a
       // frozen simulation for the remainder of the test
-      testScript.put(midway + 4.0, () -> hud.debugSetPanelMode(null));
+      testScript.put(midway + 4.4, () -> hud.debugSetPanelMode(null));
       testScript.put(duration - 4.0, () -> {
         if (!state.settlements.isEmpty()) {
           var s = state.settlements.values().iterator().next();

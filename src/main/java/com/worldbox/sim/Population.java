@@ -418,6 +418,28 @@ public class Population {
         h.targetZ = clamp(h.z + Math.sin(away) * 6, 0, grid.rows - 1);
       }
 
+      // a civilian caught standing on enemy soil while the two nations are
+      // actually at war doesn't get to just wander around undisturbed -
+      // the locals run them off, and if they don't get out fast enough
+      // they get caught. This is ordinary-citizen-on-citizen hostility
+      // only: soldiers are Army entities, not Human ones (see Military,
+      // which pulls a recruit out of state.humans entirely), so this loop
+      // never touches or is touched by military combat either direction.
+      if (h.nationId >= 0) {
+        int occupier = grid.ownerNation[ci];
+        if (occupier >= 0 && occupier != h.nationId && state.diplomacy.getStatus(h.nationId, occupier).equals(Config.WAR)) {
+          h.state = "flee";
+          h.fleeTimer = 20;
+          Settlement home = state.settlements.get(h.settlementId);
+          double hx = home != null ? home.x : grid.cols / 2.0;
+          double hz = home != null ? home.z : grid.rows / 2.0;
+          double towardHome = Math.atan2(hz - h.z, hx - h.x);
+          h.targetX = clamp(h.x + Math.cos(towardHome) * 6, 0, grid.cols - 1);
+          h.targetZ = clamp(h.z + Math.sin(towardHome) * 6, 0, grid.rows - 1);
+          if (Math.random() < 0.07) { DeathStats.war++; continue; } // caught by a hostile mob before they could get out
+        }
+      }
+
       if (h.state.equals("flee")) {
         moveToward(grid, h, SPEED * 1.4);
         h.fleeTimer--;

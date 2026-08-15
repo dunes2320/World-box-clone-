@@ -125,18 +125,39 @@ public class Settlement {
     claimTerritory(state, settlement, true);
   }
 
+  /** Deterministic per-cell wobble on the claim falloff so a settlement's
+   * border reads as an organic, hand-drawn coastline instead of a
+   * mathematically perfect circle - stable across rebuilds (same trick
+   * used for foliage/tree jitter in EntityRenderer) since it's keyed off
+   * fixed cell coordinates and the settlement's own id, not anything that
+   * changes tick to tick. */
+  private static float borderNoise(int x, int y, int salt) {
+    int h = x * 374761393 + y * 668265263 + salt * 2147483647;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    return ((h & 0xFFFF) / 65535f - 0.5f) * 7f;
+  }
+
   private static void claimTerritory(GameState state, Settlement settlement, boolean force) {
     WorldGrid grid = state.grid;
     Nation nation = state.nations.get(settlement.nationId);
     double treasury = nation != null ? Math.max(0, nation.treasury) : 0;
-    double power = nation != null ? Nation.totalMilitaryPower(state, nation.id) : 0;
-    float strength = (float) (settlement.populationCount + treasury * 0.01 + power * 3);
+    // Military power deliberately does NOT feed peaceful claim strength -
+    // building an army and declaring war used to visibly balloon a
+    // settlement's territory on its own, which read as "we took land just
+    // by going to war" even though not one enemy cell actually changed
+    // hands. An army's only real effect on the map is what it physically
+    // does: win a siege and take the city (see Nation.transferSettlement's
+    // forceClaimTerritory below), which is the one and only way a rival's
+    // already-claimed soil is meant to change owners.
+    float strength = (float) (settlement.populationCount + treasury * 0.01);
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       if (grid.terrain[i] == Config.WATER) return;
       boolean alreadyOurs = grid.ownerNation[i] == settlement.nationId;
       if (!force && !alreadyOurs && grid.ownerNation[i] >= 0) return;
-      float effective = strength - (float) d * 4f;
+      float wobble = borderNoise(x, y, settlement.id);
+      float effective = strength - ((float) d + wobble) * 4f;
       if (force || alreadyOurs || effective >= grid.claimStrength[i]) {
         grid.ownerNation[i] = settlement.nationId;
         grid.claimStrength[i] = effective;
@@ -197,16 +218,23 @@ public class Settlement {
 
       if (state.tick % 25 == 0) {
         // territory used to be population-only and capped at a modest 11 -
-        // a nation's wealth and military never mattered, and even a
-        // flourishing empire topped out claiming a small patch around each
-        // town, leaving most of the map permanently unclaimed wilderness.
-        // Now a rich, powerful settlement genuinely presses outward
-        // further than a poor, defenseless one, and claimTerritory (below)
-        // lets that actually win contested cells from a weaker neighbor.
+        // even a flourishing empire topped out claiming a small patch
+        // around each town, leaving most of the map permanently unclaimed
+        // wilderness. Now a rich settlement genuinely presses outward
+        // further than a poor one, and claimTerritory (below) lets that
+        // win contested (unclaimed) cells from a weaker neighbor. Cap
+        // raised from 24 to 44 (and the growth rate itself bumped) - even
+        // a thriving, long-running world still had most of the map
+        // sitting empty since circles that size never grew large enough
+        // to meet their neighbors and fill the gaps between capitals.
+        // Deliberately NOT a function of military power - see the comment
+        // on claimTerritory's strength calc for why: growing an army
+        // shouldn't by itself balloon a nation's claimed land at all: the
+        // only thing an army does to the map is win a city, not grow a
+        // border.
         Nation homeNation = state.nations.get(settlement.nationId);
-        double wealthBonus = homeNation != null ? Math.sqrt(Math.max(0, homeNation.treasury)) * 0.11 : 0;
-        double powerBonus = homeNation != null ? Math.sqrt(Nation.totalMilitaryPower(state, homeNation.id)) * 0.6 : 0;
-        settlement.radius = Math.min(24, 3.5 + Math.sqrt(settlement.populationCount) * 0.85 + wealthBonus + powerBonus);
+        double wealthBonus = homeNation != null ? Math.sqrt(Math.max(0, homeNation.treasury)) * 0.16 : 0;
+        settlement.radius = Math.min(44, 4.5 + Math.sqrt(settlement.populationCount) * 1.1 + wealthBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
 

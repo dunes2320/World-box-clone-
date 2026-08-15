@@ -205,16 +205,31 @@ public class EntityRenderer {
     stoneDepositTemplate = MeshUtil.buildRockCluster(0.5f);
     // a villager used to be one solid torso box plus a head - a believable
     // silhouette from a distance, but a single blob up close with no sense
-    // of a person actually standing there. Separate legs plus a distinct
-    // torso/head read as an actual little figure instead, while keeping
-    // the same low-poly block style as everything else and the same
-    // overall footprint (local y -0.5..0.72, same as before) so placement
-    // math elsewhere doesn't need to change.
+    // of a person actually standing there. Separate legs, a distinct
+    // torso/head, plus a hair tuft, a collar and belt (clothing), and two
+    // small eye bumps (a face) read as an actual little figure instead,
+    // while keeping the same low-poly block style as everything else and
+    // the same overall footprint (local y -0.5..0.72) so placement math
+    // elsewhere doesn't need to change.
     Mesh legL = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), -0.06f, -0.25f, 0);
     Mesh legR = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), 0.06f, -0.25f, 0);
     Mesh torso = MeshUtil.translatedCopy(new Box(0.15f, 0.22f, 0.1f), 0, 0.22f, 0);
     Mesh head = MeshUtil.translatedCopy(new Box(0.12f, 0.14f, 0.12f), 0, 0.58f, 0);
-    humanTemplate = MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(legL, legR), MeshUtil.mergeMeshes(torso, head));
+    // clothing: a collar at the neckline and a belt at the waist - thin
+    // bands slightly wider than the body they wrap, so they read as
+    // fabric rather than more torso
+    Mesh collar = MeshUtil.translatedCopy(new Box(0.165f, 0.02f, 0.115f), 0, 0.44f, 0);
+    Mesh belt = MeshUtil.translatedCopy(new Box(0.165f, 0.02f, 0.115f), 0, 0f, 0);
+    // hair: a simple tuft sitting on top of the head
+    Mesh hair = MeshUtil.translatedCopy(new Box(0.1f, 0.035f, 0.1f), 0, 0.735f, 0);
+    // face: two small eye bumps on the front of the head, proud enough of
+    // the surface to catch a highlight/shadow (see the SSAO pass) instead
+    // of just disappearing into the block
+    Mesh eyeL = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), -0.05f, 0.6f, 0.125f);
+    Mesh eyeR = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), 0.05f, 0.6f, 0.125f);
+    humanTemplate = MeshUtil.mergeMeshes(
+        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(legL, legR), MeshUtil.mergeMeshes(torso, head)),
+        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(collar, belt), MeshUtil.mergeMeshes(hair, MeshUtil.mergeMeshes(eyeL, eyeR))));
     // job-appropriate gear, the same "silhouette carries the meaning, not
     // color" trick already used for soldiers' carried weapons (a human is
     // still one flat nation-colored solo material, so an axe vs a
@@ -222,9 +237,23 @@ public class EntityRenderer {
     // lumberjack, this one's a miner")
     humanAxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), axeMesh());
     humanPickaxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), pickaxeMesh());
+
+    // a soldier is a villager who was called up or volunteered, not a
+    // different kind of creature - same leg/torso/head body plan, but
+    // bulkier, and wearing a helmet and shoulder plates instead of hair,
+    // which is what actually reads as "in uniform" beyond just the
+    // weapon they're carrying (see weaponMesh/vehicleMesh below).
+    Mesh mLegL = MeshUtil.translatedCopy(new Box(0.075f, 0.25f, 0.09f), -0.09f, -0.3f, 0);
+    Mesh mLegR = MeshUtil.translatedCopy(new Box(0.075f, 0.25f, 0.09f), 0.09f, -0.3f, 0);
+    Mesh mTorso = MeshUtil.translatedCopy(new Box(0.2f, 0.23f, 0.14f), 0, 0.18f, 0);
+    Mesh mHead = MeshUtil.translatedCopy(new Box(0.13f, 0.15f, 0.13f), 0, 0.56f, 0);
+    Mesh mHelmet = MeshUtil.translatedCopy(new Box(0.16f, 0.06f, 0.16f), 0, 0.77f, 0);
+    Mesh mShoulderL = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), -0.25f, 0.37f, 0);
+    Mesh mShoulderR = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), 0.25f, 0.37f, 0);
+    Mesh mBelt = MeshUtil.translatedCopy(new Box(0.21f, 0.02f, 0.145f), 0, -0.05f, 0);
     armyTemplate = MeshUtil.mergeMeshes(
-        new Box(0.24f, 0.55f, 0.2f),
-        MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.16f), 0, 0.7f, 0));
+        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mLegL, mLegR), MeshUtil.mergeMeshes(mTorso, mHead)),
+        MeshUtil.mergeMeshes(mHelmet, MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mShoulderL, mShoulderR), mBelt)));
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
     hutTemplate = MeshUtil.mergeMeshes(
@@ -887,8 +916,8 @@ public class EntityRenderer {
 
   public void update(GameState state, float alpha, float animTime) {
     updateSettlements(state);
-    updateArmies(state, alpha);
-    updateHumans(state, alpha);
+    updateArmies(state, alpha, animTime);
+    updateHumans(state, alpha, animTime);
     updateBusinesses(state);
     updateBanks(state);
     updateStatues(state);
@@ -1165,7 +1194,7 @@ public class EntityRenderer {
     return jitterAxis(armyId * 31 + slot, axis, 41) * 2.4f;
   }
 
-  private void updateArmies(GameState state, float alpha) {
+  private void updateArmies(GameState state, float alpha, float animTime) {
     int slot = 0;
     for (Army a : state.armies.values()) {
       if (a.dead) continue;
@@ -1185,7 +1214,8 @@ public class EntityRenderer {
       // toward whatever it's engaged with so combat reads as two sides
       // facing off, not a formation mid-stride
       double dx = a.x - a.prevX, dz = a.z - a.prevZ;
-      float marchYaw = (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5) ? (float) Math.atan2(dx, dz) : 0f;
+      boolean marching = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
+      float marchYaw = marching ? (float) Math.atan2(dx, dz) : 0f;
 
       int visible = Math.min(SOLDIERS_PER_ARMY, Math.max(1, (int) Math.ceil(totalUnits / 4.0)));
       // sample which unit type each visible slot represents, weighted by
@@ -1213,7 +1243,11 @@ public class EntityRenderer {
           scale *= 1f + flash * 0.5f;
         }
         float groundOffset = vehicle ? 0.18f : 0.55f;
-        g.setLocalTranslation(px, h + groundOffset * scale, pz);
+        // a marching foot soldier bobs as it walks, same continuous-time
+        // trick as villagers, each one phased off by its own slot index
+        // so a squad doesn't bounce in unison
+        float bob = (marching && !vehicle) ? (float) Math.abs(Math.sin(animTime * 10.0 + slotIdx * 1.1)) * 0.06f * scale : 0f;
+        g.setLocalTranslation(px, h + groundOffset * scale + bob, pz);
         g.setLocalScale(scale);
         g.setLocalRotation(new Quaternion().fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
         setSoloColor(g.getMaterial(), color);
@@ -1249,7 +1283,7 @@ public class EntityRenderer {
     return last;
   }
 
-  private void updateHumans(GameState state, float alpha) {
+  private void updateHumans(GameState state, float alpha, float animTime) {
     List<Human> humans = state.humans;
     int n = Math.min(humans.size(), Config.MAX_HUMANS);
     for (int i = 0; i < n; i++) {
@@ -1259,9 +1293,15 @@ public class EntityRenderer {
       double z = h.prevZ + (h.z - h.prevZ) * alpha;
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float hgt = grid.height[grid.idx(gx, gz)];
-      g.setLocalTranslation((float) x, hgt + 0.5f, (float) z);
       double dx = h.x - h.prevX, dz = h.z - h.prevZ;
-      if (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5) {
+      boolean moving = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
+      // a small continuous up/down bounce while actually walking - real
+      // real-time animation (animTime, same continuous clock as fire/
+      // rain/clouds), not a per-tick snap, with each person's own phase
+      // offset (their id) so a crowd doesn't bob in lockstep
+      float bob = moving ? (float) Math.abs(Math.sin(animTime * 9.0 + h.id * 0.9)) * 0.05f : 0f;
+      g.setLocalTranslation((float) x, hgt + 0.5f + bob, (float) z);
+      if (moving) {
         float yaw = (float) Math.atan2(dx, dz);
         g.setLocalRotation(new Quaternion().fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }

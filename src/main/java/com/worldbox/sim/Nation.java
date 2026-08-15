@@ -326,6 +326,7 @@ public class Nation {
 
   public static void update(GameState state) {
     if (state.tick % 30 == 0) updateRoads(state);
+    if (state.tick % 150 == 0) fillTerritoryGaps(state);
 
     for (Nation nation : new ArrayList<>(state.nations.values())) {
       if (!nation.alive) continue;
@@ -358,6 +359,37 @@ public class Nation {
   /** Wipes a nation's world presence: its armies, and the nation record
    * itself (with all its stats/history). Settlements were already released
    * back to no-man's-land by Settlement.abandon() before this is called. */
+  /** Mops up small unclaimed pockets fully enclosed by one nation's own
+   * territory (a "donut hole" where two of that nation's overlapping
+   * circular claims almost but didn't quite meet) - a real border still
+   * only ever moves by growth or conquest (see Settlement.claimTerritory),
+   * this just stops the map from being visibly perforated with tiny
+   * unclaimed gaps inside a nation's own borders. Deliberately narrow
+   * (every one of a cell's 4 neighbors must already agree) so it never
+   * bites into genuinely contested or neutral wilderness between two
+   * different nations. */
+  private static void fillTerritoryGaps(GameState state) {
+    WorldGrid grid = state.grid;
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        int i = grid.idx(x, y);
+        if (grid.terrain[i] == Config.WATER || grid.ownerNation[i] >= 0) continue;
+        int owner = -2;
+        boolean unanimous = true;
+        int neighbors = 0;
+        if (x > 0) { neighbors++; int o = grid.ownerNation[grid.idx(x - 1, y)]; if (o < 0) { unanimous = false; } else if (owner == -2) owner = o; else if (owner != o) unanimous = false; }
+        if (x < grid.cols - 1) { neighbors++; int o = grid.ownerNation[grid.idx(x + 1, y)]; if (o < 0) { unanimous = false; } else if (owner == -2) owner = o; else if (owner != o) unanimous = false; }
+        if (y > 0) { neighbors++; int o = grid.ownerNation[grid.idx(x, y - 1)]; if (o < 0) { unanimous = false; } else if (owner == -2) owner = o; else if (owner != o) unanimous = false; }
+        if (y < grid.rows - 1) { neighbors++; int o = grid.ownerNation[grid.idx(x, y + 1)]; if (o < 0) { unanimous = false; } else if (owner == -2) owner = o; else if (owner != o) unanimous = false; }
+        if (unanimous && neighbors == 4 && owner >= 0) {
+          grid.ownerNation[i] = owner;
+          grid.claimStrength[i] = 1f;
+          grid.markDirtyIdx(i);
+        }
+      }
+    }
+  }
+
   public static void killNation(GameState state, Nation nation) {
     nation.alive = false;
     for (int aid : new ArrayList<>(nation.armyIds)) {

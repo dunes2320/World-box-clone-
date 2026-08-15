@@ -94,6 +94,28 @@ public class GameHud {
     if (key != listPageKey) { listPageKey = key; listPage = 0; }
   }
 
+  // The nation panel grew a leader/currency/government/economy/diplomacy
+  // section over several rounds until it was taller than the screen with
+  // no way to scroll to the rest - same fix as the list pagination above:
+  // split it into tabs so each one fits, and jump back to the first tab
+  // whenever a different nation gets selected.
+  private static final String[] NATION_TABS = {"Overview", "Government", "Economy", "Diplomacy"};
+  private String nationTab = NATION_TABS[0];
+  private int nationTabKey = Integer.MIN_VALUE;
+
+  private void resetNationTab(int key) {
+    if (key != nationTabKey) { nationTabKey = key; nationTab = NATION_TABS[0]; }
+  }
+
+  private void nationTabBar() {
+    Container tabs = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    for (String t : NATION_TABS) {
+      Button b = tabs.addChild(new Button(t));
+      if (t.equals(nationTab)) b.setColor(ACTIVE);
+      b.addClickCommands(src -> { nationTab = t; refreshSidePanel(); });
+    }
+  }
+
   /** Adds Prev/Page/Next controls beneath a paginated section. Returns the
    * [start, end) row range the caller should actually render. */
   private int[] pager(int totalItems) {
@@ -126,7 +148,6 @@ public class GameHud {
   private final float SIDEPANEL_WIDTH;
   private final float CHART_WIDTH;
   private final float CHART_HEIGHT;
-  private final float CHART_TOP_OFFSET; // px below sidePanel's top edge
 
   // Measured after topBar's children are built rather than hardcoded - the
   // bar's real height depends on its tallest child (the icon buttons), and
@@ -172,7 +193,6 @@ public class GameHud {
     this.SIDEPANEL_WIDTH = 330f * uiScale;
     this.CHART_WIDTH = 290f * uiScale;
     this.CHART_HEIGHT = 150f * uiScale;
-    this.CHART_TOP_OFFSET = 226f * uiScale;
     this.DOCK_ICON_MARGIN = 6f * uiScale;
     this.DOCK_WIDTH_ESTIMATE = 620f * uiScale;
 
@@ -763,108 +783,109 @@ public class GameHud {
     title.setFontSize(fs(17));
     title.setColor(new ColorRGBA(((n.color >> 16) & 0xFF) / 255f, ((n.color >> 8) & 0xFF) / 255f, (n.color & 0xFF) / 255f, 1f));
     closeButton();
-
-    if (n.leader != null) {
-      Label leaderHeader = sidePanel.addChild(new Label("LEADER"));
-      leaderHeader.setColor(MUTED); leaderHeader.setFontSize(fs(12));
-      statRow(n.leader.title, n.leader.name);
-      statRow("Character", n.leader.personality.archetype());
-    }
+    resetNationTab(id);
+    nationTabBar();
 
     int pop = 0;
     double military = 0;
     for (int sid : n.settlementIds) { Settlement s = state.settlements.get(sid); if (s != null) pop += s.populationCount; }
     for (var a : state.armies.values()) if (a.nationId == id) military += a.strength;
-
     String cur = currencyAbbrev(n);
-    statRow("Treasury", (int) Math.floor(n.treasury) + " " + cur);
-    statRow("Tax rate", (int) Math.round(n.taxRate * 100) + "%");
-    statRow("Wage policy", (int) Math.round(n.wagePolicy * 100) + "% of sale value");
 
-    Label currencyHeader = sidePanel.addChild(new Label("CURRENCY: " + n.currencyName));
-    currencyHeader.setColor(MUTED); currencyHeader.setFontSize(fs(12));
-    if (n.currencyCollapsed) {
-      Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
-      collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
-      statRow("Pegged to", n.goldStandard ? "gold (peg broken)" : "nothing (was floating fiat)");
-      statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
-    } else {
-      statRow("Pegged to", n.goldStandard ? "gold" : "nothing (free-floating fiat)");
-      statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
-      statRow("Worth vs peg", String.format("%.3fx", n.exchangeRate));
-      statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
-      statRow("Monetary policy", n.monetaryPolicy);
+    if (nationTab.equals("Overview")) {
+      if (n.leader != null) {
+        Label leaderHeader = sidePanel.addChild(new Label("LEADER"));
+        leaderHeader.setColor(MUTED); leaderHeader.setFontSize(fs(12));
+        statRow(n.leader.title, n.leader.name);
+        statRow("Character", n.leader.personality.archetype());
+      }
+      statRow("Treasury", (int) Math.floor(n.treasury) + " " + cur);
+      statRow("Tax rate", (int) Math.round(n.taxRate * 100) + "%");
+      statRow("Wage policy", (int) Math.round(n.wagePolicy * 100) + "% of sale value");
+      statRow("Settlements", String.valueOf(n.settlementIds.size()));
+      statRow("Population", String.valueOf(pop));
+      statRow("Military power", String.format("%.0f", military));
+      // how much of the map this nation actually controls right now - a
+      // direct answer to "how big is this nation" beyond settlement count,
+      // and one that now actually sticks once claimed (see
+      // Settlement.claimTerritory - peaceful growth can no longer take an
+      // already-claimed cell, only conquest can)
+      int territoryCells = 0;
+      for (int owner : state.grid.ownerNation) if (owner == id) territoryCells++;
+      statRow("Territory", territoryCells + " cells");
+    } else if (nationTab.equals("Government")) {
+      statRow("Type", n.government);
+      Container stabilityRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Label stabLabel = stabilityRow.addChild(new Label("Stability"));
+      stabLabel.setColor(MUTED);
+      stabLabel.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
+      Label stabValue = stabilityRow.addChild(new Label(String.format("%.0f%%", n.stability)));
+      stabValue.setColor(n.stability < 25 ? DANGER : n.stability < 50 ? ACTIVE : GOOD);
+      if (n.stability < 15) {
+        Label unrest = sidePanel.addChild(new Label("Unrest brewing - revolt risk!"));
+        unrest.setColor(DANGER);
+      }
+      Container govButtons = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      for (String gtype : Government.TYPES) {
+        Button gb = govButtons.addChild(new Button(gtype));
+        if (gtype.equals(n.government)) gb.setColor(ACTIVE);
+        gb.addClickCommands(src -> { n.government = gtype; refreshSidePanel(); });
+      }
+      Button gift = sidePanel.addChild(new Button("Gift 200 gold"));
+      gift.setColor(GOOD);
+      gift.addClickCommands(src -> Diplomacy.divineGift(state, id, 200));
+    } else if (nationTab.equals("Economy")) {
+      Label currencyHeader = sidePanel.addChild(new Label("CURRENCY: " + n.currencyName));
+      currencyHeader.setColor(MUTED); currencyHeader.setFontSize(fs(12));
+      if (n.currencyCollapsed) {
+        Label collapsed = sidePanel.addChild(new Label("COLLAPSED - worthless, permanently"));
+        collapsed.setColor(new ColorRGBA(0.9f, 0.25f, 0.25f, 1f));
+        statRow("Pegged to", n.goldStandard ? "gold (peg broken)" : "nothing (was floating fiat)");
+        statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
+      } else {
+        statRow("Pegged to", n.goldStandard ? "gold" : "nothing (free-floating fiat)");
+        statRow("In circulation", (int) Math.floor(n.moneySupply) + " " + cur);
+        statRow("Worth vs peg", String.format("%.3fx", n.exchangeRate));
+        statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
+        statRow("Monetary policy", n.monetaryPolicy);
+      }
+
+      Label econHeader = sidePanel.addChild(new Label("ECONOMY"));
+      econHeader.setColor(MUTED); econHeader.setFontSize(fs(12));
+      Container cycleRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Label cycleLbl = cycleRow.addChild(new Label("Business cycle"));
+      cycleLbl.setColor(MUTED);
+      cycleLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
+      Label cycleVal = cycleRow.addChild(new Label(econCycleLabel(n.econCycle)));
+      cycleVal.setColor(n.econCycle > 1.08 ? GOOD : n.econCycle < 0.92 ? DANGER : TEXT);
+      statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + " " + cur);
+      statRow("Bank loans", (int) Math.floor(n.bank.loans) + " " + cur);
+      if (n.bank.justCrashed) {
+        Label crashLabel = sidePanel.addChild(new Label("BANK RUN! Reserves wiped out."));
+        crashLabel.setColor(DANGER);
+      }
+
+      int bizCount = 0;
+      double bizCapital = 0;
+      for (Business b : state.businesses.values()) {
+        if (b.nationId != id) continue;
+        bizCount++;
+        bizCapital += b.capital;
+      }
+      statRow("Businesses", String.valueOf(bizCount));
+      statRow("Business capital", (int) Math.floor(bizCapital) + " " + cur);
+      statRow("GDP (this window)", (int) Math.floor(n.gdpAccum) + " " + cur);
+      statRow("GDP per capita", (pop > 0 ? String.format("%.1f", n.gdpAccum / pop) : "-") + " " + cur);
+      statRow("Unemployment", String.format("%.0f%%", n.unemploymentRate * 100));
+      double totalWealth = 0; int counted = 0;
+      for (com.worldbox.sim.Human h : state.humans) if (h.nationId == id) { totalWealth += h.wealth; counted++; }
+      statRow("Avg citizen wealth", (counted > 0 ? String.format("%.1f", totalWealth / counted) : "-") + " " + cur);
+
+      Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
+      viewGraph.addClickCommands(src -> showGraph("nation", id));
+      return;
     }
-
-    statRow("Settlements", String.valueOf(n.settlementIds.size()));
-    statRow("Population", String.valueOf(pop));
-    statRow("Military power", String.format("%.0f", military));
-    // how much of the map this nation actually controls right now - a
-    // direct answer to "how big is this nation" beyond settlement count,
-    // and one that now actually sticks once claimed (see
-    // Settlement.claimTerritory - peaceful growth can no longer take an
-    // already-claimed cell, only conquest can)
-    int territoryCells = 0;
-    for (int owner : state.grid.ownerNation) if (owner == id) territoryCells++;
-    statRow("Territory", territoryCells + " cells");
-
-    Label govHeader = sidePanel.addChild(new Label("GOVERNMENT"));
-    govHeader.setColor(MUTED); govHeader.setFontSize(fs(12));
-    statRow("Type", n.government);
-    Container stabilityRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-    Label stabLabel = stabilityRow.addChild(new Label("Stability"));
-    stabLabel.setColor(MUTED);
-    stabLabel.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
-    Label stabValue = stabilityRow.addChild(new Label(String.format("%.0f%%", n.stability)));
-    stabValue.setColor(n.stability < 25 ? DANGER : n.stability < 50 ? ACTIVE : GOOD);
-    if (n.stability < 15) {
-      Label unrest = sidePanel.addChild(new Label("Unrest brewing - revolt risk!"));
-      unrest.setColor(DANGER);
-    }
-    Container govButtons = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-    for (String gtype : Government.TYPES) {
-      Button gb = govButtons.addChild(new Button(gtype));
-      if (gtype.equals(n.government)) gb.setColor(ACTIVE);
-      gb.addClickCommands(src -> { n.government = gtype; refreshSidePanel(); });
-    }
-
-    Button gift = sidePanel.addChild(new Button("Gift 200 gold"));
-    gift.setColor(GOOD);
-    gift.addClickCommands(src -> Diplomacy.divineGift(state, id, 200));
-
-    Label econHeader = sidePanel.addChild(new Label("ECONOMY"));
-    econHeader.setColor(MUTED); econHeader.setFontSize(fs(12));
-    Container cycleRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-    Label cycleLbl = cycleRow.addChild(new Label("Business cycle"));
-    cycleLbl.setColor(MUTED);
-    cycleLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
-    Label cycleVal = cycleRow.addChild(new Label(econCycleLabel(n.econCycle)));
-    cycleVal.setColor(n.econCycle > 1.08 ? GOOD : n.econCycle < 0.92 ? DANGER : TEXT);
-    statRow("Bank reserves", (int) Math.floor(n.bank.reserves) + " " + cur);
-    statRow("Bank loans", (int) Math.floor(n.bank.loans) + " " + cur);
-    if (n.bank.justCrashed) {
-      Label crashLabel = sidePanel.addChild(new Label("BANK RUN! Reserves wiped out."));
-      crashLabel.setColor(DANGER);
-    }
-
-    int bizCount = 0;
-    double bizCapital = 0;
-    for (Business b : state.businesses.values()) {
-      if (b.nationId != id) continue;
-      bizCount++;
-      bizCapital += b.capital;
-    }
-    statRow("Businesses", String.valueOf(bizCount));
-    statRow("Business capital", (int) Math.floor(bizCapital) + " " + cur);
-    statRow("GDP (this window)", (int) Math.floor(n.gdpAccum) + " " + cur);
-    statRow("GDP per capita", (pop > 0 ? String.format("%.1f", n.gdpAccum / pop) : "-") + " " + cur);
-    statRow("Unemployment", String.format("%.0f%%", n.unemploymentRate * 100));
-    double totalWealth = 0; int counted = 0;
-    for (com.worldbox.sim.Human h : state.humans) if (h.nationId == id) { totalWealth += h.wealth; counted++; }
-    statRow("Avg citizen wealth", (counted > 0 ? String.format("%.1f", totalWealth / counted) : "-") + " " + cur);
-
-    Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
-    viewGraph.addClickCommands(src -> showGraph("nation", id));
+    if (!nationTab.equals("Diplomacy")) return;
 
     Label relHeader = sidePanel.addChild(new Label("DIPLOMACY"));
     relHeader.setColor(MUTED); relHeader.setFontSize(fs(12));
@@ -1211,7 +1232,16 @@ public class GameHud {
     double span = Math.max(1.0, max - min);
 
     float originX = sidePanel.getLocalTranslation().x + 16;
-    float baselineY = sidePanel.getLocalTranslation().y - CHART_TOP_OFFSET - CHART_HEIGHT;
+    // was a hardcoded guess (CHART_TOP_OFFSET) at how tall the panel's
+    // text content above the chart would be - stale ever since more stat
+    // rows were added to the nation panel, so the chart increasingly
+    // drew too low, off the bottom of the (now also centered rather than
+    // always anchored near the top) panel in fullscreen. The chart
+    // spacer reserves exactly (CHART_HEIGHT+16) at the bottom of the
+    // panel's real, measured height - whatever's left over is exactly
+    // how much content actually precedes it, however much that's grown.
+    float contentAboveChart = sidePanel.getPreferredSize().y - (CHART_HEIGHT + 16f);
+    float baselineY = sidePanel.getLocalTranslation().y - contentAboveChart - CHART_HEIGHT;
     float stepX = CHART_WIDTH / (values.size() - 1);
     float lineThickness = 2.5f;
 
