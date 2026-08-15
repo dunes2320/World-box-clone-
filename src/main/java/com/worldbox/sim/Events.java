@@ -15,19 +15,43 @@ import java.util.Set;
 public class Events {
 
   // ---- fire + vegetation: always running ----
+  /** Starts a brand-new fire at (x,y) - gets its own randomly rolled max
+   * spread radius (see randomFireRadius) so how big this particular fire
+   * is allowed to grow varies fire to fire, instead of every fire being
+   * free to creep outward indefinitely. */
   public static void igniteCell(WorldGrid grid, int x, int y, int life) {
+    igniteCellBounded(grid, x, y, life, x, y, randomFireRadius());
+  }
+
+  public static void igniteCell(WorldGrid grid, int x, int y) { igniteCell(grid, x, y, 0); }
+
+  /** A fresh fire's total reach from its own origin - small flare-ups most
+   * of the time, an occasional real sprawling blaze, but always some
+   * bounded amount rather than unlimited. Rerolled independently every
+   * time a new fire starts (not shared across fires), which is what
+   * makes the cap "different each time" rather than a fixed constant. */
+  private static float randomFireRadius() {
+    return 4f + (float) (Math.random() * 22);
+  }
+
+  /** Ignites (x,y) as part of an existing fire, inheriting that fire's
+   * origin and max radius rather than rolling a new one - used both for
+   * a brand-new fire (origin = itself) and for natural spread to a
+   * neighboring cell (origin = the spreading cell's own origin). */
+  private static void igniteCellBounded(WorldGrid grid, int x, int y, int life, float originX, float originZ, float maxRadius) {
     if (!grid.inBounds(x, y)) return;
     int i = grid.idx(x, y);
     if (grid.terrain[i] == Config.WATER || grid.terrain[i] == Config.STONE) return;
     if (!grid.burning[i] && (grid.terrain[i] == Config.GRASS || grid.resource[i] == Config.RES_FOREST)) {
       grid.burning[i] = true;
       grid.burnTimer[i] = life > 0 ? life : (int) (20 + Math.random() * 25);
+      grid.fireOriginX[i] = originX;
+      grid.fireOriginZ[i] = originZ;
+      grid.fireMaxRadius[i] = maxRadius;
       grid.burningCells.add(i);
       grid.markDirtyIdx(i);
     }
   }
-
-  public static void igniteCell(WorldGrid grid, int x, int y) { igniteCell(grid, x, y, 0); }
 
   // a burning cell used to have a >1 expected number of neighbors it went
   // on to ignite over its lifetime (4 neighbors x 10%/tick x ~30 ticks),
@@ -91,7 +115,16 @@ public class Events {
         int ni = grid.idx(nx, ny);
         if (grid.burning[ni]) continue;
         boolean flammable = grid.terrain[ni] == Config.GRASS || grid.resource[ni] == Config.RES_FOREST;
-        if (flammable && Math.random() < 0.045) igniteCell(grid, nx, ny, (int) (20 + Math.random() * 25));
+        if (!flammable || Math.random() >= 0.045) continue;
+        // stay within this fire's own rolled-at-ignition radius (see
+        // igniteCell/randomFireRadius) - this is the actual containment:
+        // without it, a fire's global-cap-limited *instantaneous* size
+        // never stopped its *front* from creeping cell-by-cell across
+        // the whole map given enough time, one burnt-out cell freeing a
+        // slot for the next just past it.
+        double d2 = Math.hypot(nx - grid.fireOriginX[i], ny - grid.fireOriginZ[i]);
+        if (d2 > grid.fireMaxRadius[i]) continue;
+        igniteCellBounded(grid, nx, ny, (int) (20 + Math.random() * 25), grid.fireOriginX[i], grid.fireOriginZ[i], grid.fireMaxRadius[i]);
       }
     }
   }

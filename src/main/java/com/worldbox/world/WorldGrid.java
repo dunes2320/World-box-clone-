@@ -19,6 +19,14 @@ public class WorldGrid {
   public final int[] resourceAmount = new int[n];
   public final boolean[] burning = new boolean[n];
   public final int[] burnTimer = new int[n];
+  /** Where this cell's fire originally started, and how far from that
+   * point it's allowed to spread - set fresh (randomly) whenever a new
+   * fire ignites and inherited unchanged by every cell it spreads to, so
+   * one fire caps out as a bounded patch instead of being free to creep
+   * across the whole map given enough time. See Events.igniteCell. */
+  public final float[] fireOriginX = new float[n];
+  public final float[] fireOriginZ = new float[n];
+  public final float[] fireMaxRadius = new float[n];
   public final int[] ownerNation = new int[n];
   public final int[] settlementAt = new int[n];
   /** Tilled farmland (recomputed alongside a settlement's farmCells) and

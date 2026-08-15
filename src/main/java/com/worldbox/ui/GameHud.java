@@ -135,6 +135,17 @@ public class GameHud {
   private float topBarHeight = 48f;
   private float dockTopY = 200f;
 
+  // Current on-screen bounding box of sidePanel (updated every refresh,
+  // see refreshSidePanel) - used by isOverUi since the panel is now
+  // centered rather than docked to a fixed screen edge, so its bounds
+  // move depending on content.
+  private float sidePanelX, sidePanelY, sidePanelW, sidePanelH;
+
+  // Whether any popup (side panel or a world-object selection) was open
+  // last refresh - drives the auto-pause-while-reading behavior below.
+  private boolean panelWasOpen = false;
+  private int speedBeforePause = 1;
+
   /** Coarse screen-space guard so a click on a HUD panel doesn't also paint
    * the world underneath it. Panel positions are fixed (non-resizable
    * window), so a few hardcoded regions are enough. The tool dock now
@@ -146,7 +157,9 @@ public class GameHud {
       float dockLeft = screenW / 2f - DOCK_WIDTH_ESTIMATE / 2f;
       if (sx > dockLeft && sx < dockLeft + DOCK_WIDTH_ESTIMATE) return true;
     }
-    if (sidePanel.getCullHint() != com.jme3.scene.Spatial.CullHint.Always && sx > screenW - SIDEPANEL_WIDTH) return true;
+    if (sidePanel.getCullHint() != com.jme3.scene.Spatial.CullHint.Always
+        && sx >= sidePanelX && sx <= sidePanelX + sidePanelW
+        && sy <= sidePanelY && sy >= sidePanelY - sidePanelH) return true;
     return false;
   }
 
@@ -525,6 +538,23 @@ public class GameHud {
     GameState.Selection sel = ctx.getSelection();
     String mode = sel != null ? sel.type : sidePanelMode;
 
+    // Any popup - a settlement/nation/human selection or a menu panel -
+    // pauses the sim while it's open so the player can actually read it
+    // instead of numbers/positions changing underneath them. Only the
+    // open/close transition touches game speed, not every periodic
+    // refresh (this runs every ~1.5s while a panel stays open), and a
+    // speed the player explicitly picks while a panel is open is left
+    // alone - closing only restores the old speed if nothing since un-
+    // paused it.
+    boolean opening = mode != null;
+    if (opening && !panelWasOpen) {
+      speedBeforePause = ctx.getGameSpeed();
+      ctx.setGameSpeed(0);
+    } else if (!opening && panelWasOpen) {
+      if (ctx.getGameSpeed() == 0) ctx.setGameSpeed(speedBeforePause);
+    }
+    panelWasOpen = opening;
+
     sidePanel.clearChildren();
     if (mode == null) {
       sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
@@ -542,7 +572,21 @@ public class GameHud {
     else if ("settings".equals(mode)) renderSettings();
     else sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
 
-    sidePanel.setLocalTranslation(screenW - 320, screenH - 46, 1);
+    // Centered on screen (clamped below the top bar, with a margin on
+    // every side) instead of docked at a hardcoded 320px from the right
+    // edge - that fixed offset was smaller than the panel's real,
+    // uiScale-dependent width (up to 330*1.9=627px), so in fullscreen or
+    // on a tall display the right side of every popup - including the
+    // whole economy chart - rendered off-screen. Measuring the panel's
+    // actual preferred size after it's populated keeps this correct at
+    // any resolution instead of guessing a fixed position.
+    Vector3f pref = sidePanel.getPreferredSize();
+    float w = pref.x, h = pref.y;
+    float margin = 16f * uiScale;
+    float x = Math.max(margin, Math.min(screenW - w - margin, (screenW - w) / 2f));
+    float y = Math.max(h + margin, Math.min(screenH - topBarHeight - margin, (screenH + h) / 2f));
+    sidePanel.setLocalTranslation(x, y, 1);
+    sidePanelX = x; sidePanelY = y; sidePanelW = w; sidePanelH = h;
 
     if (!"graph".equals(mode)) {
       chartNode.setCullHint(Spatial.CullHint.Always);
