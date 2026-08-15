@@ -1090,7 +1090,10 @@ public class EntityRenderer {
    * (armyId, slot) so an individual soldier doesn't jitter to a new spot
    * every frame. */
   private static float scrumOffset(int armyId, int slot, int axis) {
-    return jitterAxis(armyId * 31 + slot, axis, 41) * 1.6f;
+    // widened from 1.6 - at the default play camera distance a tight
+    // 8-soldier huddle read as a single indistinct speck; a wider spread
+    // reads as an actual group of people even zoomed out
+    return jitterAxis(armyId * 31 + slot, axis, 41) * 2.4f;
   }
 
   private void updateArmies(GameState state, float alpha) {
@@ -1131,11 +1134,14 @@ public class EntityRenderer {
         float px = (float) x + ox, pz = (float) z + oz;
         int gx = clampIdx((int) Math.floor(px), grid.cols), gz = clampIdx((int) Math.floor(pz), grid.rows);
         float h = grid.height[grid.idx(gx, gz)];
-        float scale = vehicle ? 0.9f : 0.85f;
+        // bumped up from 0.9/0.85 - too small to actually read as
+        // soldiers at the game's normal (fairly zoomed-out) play camera
+        // distance, which is most of why combat felt invisible
+        float scale = vehicle ? 1.3f : 1.15f;
         if (fighting) {
-          px += (float) (Math.random() - 0.5) * 0.2f;
-          pz += (float) (Math.random() - 0.5) * 0.2f;
-          scale *= 1f + flash * 0.2f;
+          px += (float) (Math.random() - 0.5) * 0.3f;
+          pz += (float) (Math.random() - 0.5) * 0.3f;
+          scale *= 1f + flash * 0.5f;
         }
         float groundOffset = vehicle ? 0.18f : 0.55f;
         g.setLocalTranslation(px, h + groundOffset * scale, pz);

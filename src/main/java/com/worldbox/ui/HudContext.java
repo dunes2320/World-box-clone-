@@ -15,4 +15,5 @@ public interface HudContext {
   void resetWorld();
   float getZoomSensitivity();
   void setZoomSensitivity(float v);
+  void quitGame();
 }

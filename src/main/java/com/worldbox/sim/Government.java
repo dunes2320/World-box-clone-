@@ -124,10 +124,18 @@ public class Government {
     // real output growth is a much gentler counterweight than money
     // printing is a danger - this is deliberately asymmetric so healthy
     // growth nudges a currency up slowly, while reckless printing can
-    // genuinely wreck it
+    // genuinely wreck it. This factor used to be 0.1, which - since
+    // supplyGrowth is 0 whenever a nation isn't actively printing to cover
+    // a deficit (the common case) - made "inflation" read as persistently
+    // NEGATIVE for basically every healthy, growing nation, every single
+    // window, with no printing involved at all. Technically self-consistent
+    // (real deflation, currency slowly strengthening) but read as an
+    // obviously-flipped/broken number to a player who reasonably expects
+    // inflation to sit near zero (or positive) during ordinary growth and
+    // only turn sharply positive when a government is actually printing.
     double supplyGrowth = n.moneySupply > 1 ? n.printedThisWindow / n.moneySupply : 0;
     double outputGrowth = n.moneySupply > 1 ? Math.max(0, n.gdpAccum) / Math.max(400, n.moneySupply * 4) : 0;
-    double windowInflation = supplyGrowth - outputGrowth * 0.1;
+    double windowInflation = supplyGrowth - outputGrowth * 0.02;
     n.inflationRate = n.inflationRate * 0.85 + windowInflation * 0.15;
     n.printedThisWindow = 0;
 

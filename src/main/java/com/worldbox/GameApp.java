@@ -106,6 +106,24 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
     viewPort.addProcessor(shadowRenderer);
 
+    // Genre peers this style draws from (Townscaper, Kingdoms and Castles,
+    // WorldBox's own newer look) all lean on the same two cheap tricks to
+    // read as "a considered art style" rather than "flat untextured
+    // blocks": soft contact shadows in every crevice (ambient occlusion),
+    // and a gentle glow on the brightest surfaces instead of a hard clip
+    // at white. Neither needs any actual texture work, and both are cheap
+    // screen-space post effects.
+    com.jme3.post.FilterPostProcessor fpp = new com.jme3.post.FilterPostProcessor(assetManager);
+    com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 8.0f, 0.15f, 0.1f);
+    fpp.addFilter(ssao);
+    com.jme3.post.filters.BloomFilter bloom = new com.jme3.post.filters.BloomFilter(com.jme3.post.filters.BloomFilter.GlowMode.Scene);
+    bloom.setBloomIntensity(0.9f);
+    bloom.setExposurePower(4.2f);
+    bloom.setExposureCutOff(0.25f);
+    bloom.setBlurScale(1.1f);
+    fpp.addFilter(bloom);
+    viewPort.addProcessor(fpp);
+
     voxelRenderer = new VoxelChunkRenderer(state.voxels, state.grid, assetManager, this::nationColorFor);
     voxelRenderer.rebuildAll();
     rootNode.attachChild(voxelRenderer.solidNode);
@@ -155,9 +173,10 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     inputManager.addMapping("MoveLeft", new KeyTrigger(KeyInput.KEY_A), new KeyTrigger(KeyInput.KEY_LEFT));
     inputManager.addMapping("MoveRight", new KeyTrigger(KeyInput.KEY_D), new KeyTrigger(KeyInput.KEY_RIGHT));
     inputManager.addMapping("ToggleFullscreen", new KeyTrigger(KeyInput.KEY_F11));
+    inputManager.addMapping("Escape", new KeyTrigger(KeyInput.KEY_ESCAPE));
     inputManager.addListener(this, "Paint", "RotateCam", "PanCam",
         "MouseXPos", "MouseXNeg", "MouseYPos", "MouseYNeg", "WheelUp", "WheelDown",
-        "MoveForward", "MoveBack", "MoveLeft", "MoveRight", "ToggleFullscreen");
+        "MoveForward", "MoveBack", "MoveLeft", "MoveRight", "ToggleFullscreen", "Escape");
   }
 
   /** F11: toggles between the windowed resolution and exclusive fullscreen
@@ -197,6 +216,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       case "MoveLeft": moveLeft = isPressed; break;
       case "MoveRight": moveRight = isPressed; break;
       case "ToggleFullscreen": if (isPressed) toggleFullscreen(); break;
+      case "Escape": if (isPressed) hud.handleEscape(); break;
       default: break;
     }
   }
@@ -695,6 +715,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   @Override public void setGameSpeed(int n) { speed = n; }
   @Override public float getZoomSensitivity() { return zoomSensitivity; }
   @Override public void setZoomSensitivity(float v) { zoomSensitivity = v; }
+  @Override public void quitGame() { stop(); }
 
   @Override
   public void resetWorld() {

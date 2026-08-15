@@ -478,6 +478,22 @@ public class GameHud {
     refreshSidePanel();
   }
 
+  /** Escape: closes whatever popup is open (a selection or a menu panel);
+   * if nothing's open, it opens Settings instead - the standard "escape
+   * always gets you somewhere useful, and eventually to quit" convention. */
+  public void handleEscape() {
+    boolean anyOpen = ctx.getSelection() != null || sidePanelMode != null;
+    if (anyOpen) {
+      sidePanelMode = null;
+      ctx.setSelection(null);
+      graphView = null;
+    } else {
+      sidePanelMode = "settings";
+      ctx.setSelection(null);
+    }
+    refreshSidePanel();
+  }
+
   public void notifySelectionChanged() {
     GameState.Selection sel = ctx.getSelection();
     if (sel != null) sidePanelMode = sel.type;
@@ -639,6 +655,12 @@ public class GameHud {
     zoomSlider.setPreferredSize(new Vector3f(260 * uiScale, 24 * uiScale, 0));
     zoomLabel = sidePanel.addChild(new Label(String.format("%.1fx", ctx.getZoomSensitivity())));
     zoomLabel.setColor(MUTED);
+
+    Label gameHeader = sidePanel.addChild(new Label("GAME"));
+    gameHeader.setColor(MUTED); gameHeader.setFontSize(fs(12));
+    Button quit = sidePanel.addChild(new Button("Quit Game"));
+    quit.setColor(DANGER);
+    quit.addClickCommands(src -> ctx.quitGame());
   }
 
   private void renderSettlement(GameState state, int id) {

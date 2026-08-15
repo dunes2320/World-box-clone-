@@ -98,7 +98,15 @@ public class Diplomacy {
             dip.setStatus(nation.id, other.id, Config.ALLIANCE);
             dip.adjustScore(nation.id, other.id, 10);
             if (nation.id < other.id) EventLog.log(state, "war", nation.name + " and " + other.name + " formed an alliance");
-          } else if (score < -35 && myPower > theirPower * (1.5 - ambition * 0.4) && Math.random() < 0.15 + ambition * 0.3) {
+            // a -35 score plus needing a 50-90% power ADVANTAGE plus only a
+            // 15-45% roll meant most border pairs that soured never
+            // actually fought - they just sat at a cold, war-less stalemate
+            // while territory kept quietly shifting hands through ordinary
+            // claim-strength pressure (see Settlement.claimTerritory), so
+            // the whole military system read as invisible/pointless. War
+            // now needs only a slight edge (or none, for a bold leader) and
+            // fires much more reliably once tension is real.
+          } else if (score < -20 && myPower > theirPower * (1.05 - ambition * 0.3) && Math.random() < 0.35 + ambition * 0.35) {
             dip.setStatus(nation.id, other.id, Config.WAR);
             dip.adjustScore(nation.id, other.id, -20);
             EventLog.log(state, "war", nation.name + " declared war on " + other.name);

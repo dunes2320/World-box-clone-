@@ -40,6 +40,11 @@
       <version>${jme3.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.jmonkeyengine</groupId>
+      <artifactId>jme3-effects</artifactId>
+      <version>${jme3.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.simsilica</groupId>
       <artifactId>lemur</artifactId>
       <version>${lemur.version}</version>

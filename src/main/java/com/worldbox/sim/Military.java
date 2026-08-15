@@ -270,9 +270,13 @@ public class Military {
         if (attackTotal > defense) {
           settlement.garrisonHp = Math.max(0, defense - (defense * 0.25 + (attackTotal - defense) * 0.15));
           for (Army a : attackers) applyDamage(state, a, defense * 0.08 * (armyStrength(a) / attackTotal));
+          // an overwhelmed defense means the fighting is spilling into the
+          // streets - real, visible cost, not just an abstract number
+          inflictWarDamage(state, settlement, 0.05);
         } else {
           settlement.garrisonHp = Math.max(0, defense - attackTotal * 0.06);
           for (Army a : attackers) applyDamage(state, a, defense * 0.12 / attackers.size());
+          inflictWarDamage(state, settlement, 0.015);
         }
         // a badly mauled garrison can break outright rather than fight to
         // its literal last defender - covers the "or ran away" half of
@@ -285,6 +289,7 @@ public class Military {
 
       if (settlement.garrisonHp <= 0) {
         settlement.siegeProgress += 9;
+        inflictWarDamage(state, settlement, 0.08);
       }
 
       if (settlement.siegeProgress >= 100) {
@@ -293,6 +298,7 @@ public class Military {
         int oldNationId = settlement.nationId;
         Nation winnerNation = state.nations.get(winner.nationId);
         Nation loserNation = state.nations.get(oldNationId);
+        int sacked = sackSettlement(state, settlement);
         Nation.transferSettlement(state, settlement, winner.nationId);
         settlement.siegeProgress = 0;
         settlement.garrisonHp = -1;
@@ -300,9 +306,49 @@ public class Military {
         Diplomacy.onConquest(state, winner.nationId, oldNationId);
         EventLog.log(state, "war", (winnerNation != null ? winnerNation.name : "An unknown power")
             + " conquered " + settlement.name
-            + (loserNation != null ? " from " + loserNation.name : ""));
+            + (loserNation != null ? " from " + loserNation.name : "")
+            + (sacked > 0 ? " - " + sacked + " killed in the sack" : ""));
       }
     }
+  }
+
+  /** Real, visible cost of a siege while it's under way - not just a
+   * number quietly ticking - a chance each tick (scaled by how hard the
+   * fighting is right now) of a civilian casualty and some of the
+   * settlement's stock/housing actually being wrecked. */
+  private static void inflictWarDamage(GameState state, Settlement settlement, double severity) {
+    if (Math.random() < severity) {
+      List<Human> residents = new ArrayList<>();
+      for (Human h : state.humans) if (h.settlementId == settlement.id) residents.add(h);
+      if (!residents.isEmpty()) {
+        residents.get((int) (Math.random() * residents.size())).dead = true;
+        DeathStats.war++;
+      }
+    }
+    if (Math.random() < severity * 0.4 && settlement.housingStock > 1) {
+      settlement.housingStock = Math.max(1, settlement.housingStock - 1);
+    }
+    for (String key : new String[]{"food", "wood", "stone"}) {
+      double have = settlement.stock.getOrDefault(key, 0.0);
+      if (have > 0) settlement.stock.put(key, have - have * severity * 0.5);
+    }
+  }
+
+  /** The final toll when a city actually falls - a real sack, not a quiet
+   * flag flip: a chunk of whoever's left dies or scatters and a chunk of
+   * the housing is left in ruins for the new owner to rebuild. Returns
+   * how many died, for the conquest log line. */
+  private static int sackSettlement(GameState state, Settlement settlement) {
+    List<Human> residents = new ArrayList<>();
+    for (Human h : state.humans) if (h.settlementId == settlement.id) residents.add(h);
+    int killCount = (int) Math.round(residents.size() * (0.12 + Math.random() * 0.18));
+    for (int i = 0; i < killCount && !residents.isEmpty(); i++) {
+      residents.remove((int) (Math.random() * residents.size())).dead = true;
+      DeathStats.war++;
+    }
+    state.humans.removeIf(h -> h.dead);
+    settlement.housingStock = Math.max(1, settlement.housingStock * 0.55);
+    return killCount;
   }
 
   private static void resolveFieldBattles(GameState state) {
