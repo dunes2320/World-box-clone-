@@ -22,6 +22,7 @@ import com.worldbox.render.EntityRenderer;
 import com.worldbox.render.NationColorLookup;
 import com.worldbox.render.Picking;
 import com.worldbox.render.VoxelChunkRenderer;
+import com.worldbox.save.SaveManager;
 import com.worldbox.sim.Army;
 import com.worldbox.sim.GameState;
 import com.worldbox.sim.Nation;
@@ -496,6 +497,19 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         }
       });
       testScript.put(duration - 3.7, () -> screenshotState.takeScreenshot());
+      testScript.put(duration - 3.5, () -> {
+        // exercise the save/load round trip end to end: save the live
+        // world, then immediately load it straight back and confirm the
+        // reload actually put a real world back (not an empty/broken one)
+        int humansBefore = state.humans.size(), tickBefore = state.tick;
+        boolean saveOk = saveToSlot(5);
+        boolean loadOk = loadFromSlot(5);
+        System.out.println("TESTMODE_SAVELOAD saveOk=" + saveOk + " loadOk=" + loadOk
+            + " humansBefore=" + humansBefore + " humansAfter=" + state.humans.size()
+            + " tickBefore=" + tickBefore + " tickAfter=" + state.tick
+            + " nationsAfter=" + state.nations.size() + " settlementsAfter=" + state.settlements.size());
+        deleteSlot(5);
+      });
       testScript.put(duration - 2.0, () -> {
         if (!state.settlements.isEmpty()) {
           com.worldbox.sim.Settlement biggest = null;
@@ -760,4 +774,41 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     lastTickTime = simTime;
     hud.notifySelectionChanged();
   }
+
+  @Override public SaveManager.SlotInfo[] listSaveSlots() { return SaveManager.listSlots(); }
+
+  @Override
+  public boolean saveToSlot(int slot) {
+    try {
+      SaveManager.save(state, slot);
+      com.worldbox.sim.EventLog.log(state, "economy", "World saved to slot " + slot);
+      return true;
+    } catch (java.io.IOException | RuntimeException e) {
+      com.worldbox.sim.EventLog.log(state, "economy", "Save failed: " + e);
+      return false;
+    }
+  }
+
+  @Override
+  public boolean loadFromSlot(int slot) {
+    GameState loaded;
+    try {
+      loaded = SaveManager.load(slot);
+    } catch (java.io.IOException | ClassNotFoundException | RuntimeException e) {
+      // couldn't load - leave the current world running rather than
+      // crash out of the game over a bad or missing save file, but still
+      // say so instead of a load button that silently does nothing
+      com.worldbox.sim.EventLog.log(state, "economy", "Load failed: " + e);
+      return false;
+    }
+    state = loaded;
+    voxelRenderer.rebind(state.voxels, state.grid);
+    entityRenderer.setGrid(state);
+    selection = null;
+    lastTickTime = simTime;
+    hud.notifySelectionChanged();
+    return true;
+  }
+
+  @Override public void deleteSlot(int slot) { SaveManager.delete(slot); }
 }

@@ -339,6 +339,8 @@ public class Economy {
             if (b.nationId == n.id) b.capital -= 30;
           }
           bank.justCrashed = true;
+          EventLog.log(state, "economy", "The " + n.currencyName + " bank of " + n.name
+              + " suffered a run - over-leveraged on loans it couldn't cover, its reserves were wiped out");
         }
       }
     }

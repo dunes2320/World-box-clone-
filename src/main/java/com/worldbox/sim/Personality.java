@@ -7,7 +7,7 @@ package com.worldbox.sim;
  * expansion and war, greed drives corruption, wisdom drives stability.
  * A single shared model so a leader really is just an unusually
  * consequential individual, not a separate system. */
-public class Personality {
+public class Personality implements java.io.Serializable {
   public final double industriousness; // 0..1: work ethic / how much of the day is spent working
   public final double ambition;        // 0..1: risk-taking, expansionism, willingness to fight
   public final double greed;           // 0..1: self-interest vs public good

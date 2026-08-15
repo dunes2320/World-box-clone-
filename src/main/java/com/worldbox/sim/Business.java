@@ -3,8 +3,13 @@ package com.worldbox.sim;
 /** A privately owned, nation-taxed economic actor that specializes in one
  * resource, skimming surplus into its own capital and boosting local
  * output. Businesses can go bankrupt in a market crash. */
-public class Business {
+public class Business implements java.io.Serializable {
   private static int nextId = 1;
+
+  /** Loading a save must never let a freshly created instance reuse an id
+   * already present in the loaded data - bump the counter past whatever
+   * the save actually contained. */
+  public static void restoreNextId(int maxSeenId) { if (maxSeenId >= nextId) nextId = maxSeenId + 1; }
 
   public final int id;
   public int settlementId;

@@ -9,7 +9,7 @@ import com.worldbox.util.NameGen;
  * it into the ground with reckless money-printing. A new leader is chosen
  * at founding and again at every succession or coup, so a nation's
  * character can genuinely shift over its lifetime. */
-public class Leader {
+public class Leader implements java.io.Serializable {
   public final String name;
   public final Personality personality;
   public final String title;

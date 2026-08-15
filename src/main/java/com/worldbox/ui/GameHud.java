@@ -676,6 +676,28 @@ public class GameHud {
     zoomLabel = sidePanel.addChild(new Label(String.format("%.1fx", ctx.getZoomSensitivity())));
     zoomLabel.setColor(MUTED);
 
+    Label saveHeader = sidePanel.addChild(new Label("SAVE / LOAD"));
+    saveHeader.setColor(MUTED); saveHeader.setFontSize(fs(12));
+    for (com.worldbox.save.SaveManager.SlotInfo slot : ctx.listSaveSlots()) {
+      Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      String[] lines = slot.summary.split("\n");
+      Label name = row.addChild(new Label("Slot " + slot.slot + ": " + lines[0]));
+      name.setPreferredSize(new Vector3f(280 * uiScale, 20 * uiScale, 0));
+      name.setColor(slot.occupied ? TEXT : MUTED);
+
+      Container actions = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Button save = actions.addChild(new Button("Save"));
+      save.setColor(GOOD);
+      save.addClickCommands(src -> { ctx.saveToSlot(slot.slot); refreshSidePanel(); });
+      if (slot.occupied) {
+        Button load = actions.addChild(new Button("Load"));
+        load.addClickCommands(src -> { ctx.loadFromSlot(slot.slot); refreshSidePanel(); });
+        Button del = actions.addChild(new Button("Delete"));
+        del.setColor(DANGER);
+        del.addClickCommands(src -> { ctx.deleteSlot(slot.slot); refreshSidePanel(); });
+      }
+    }
+
     Label gameHeader = sidePanel.addChild(new Label("GAME"));
     gameHeader.setColor(MUTED); gameHeader.setFontSize(fs(12));
     Button quit = sidePanel.addChild(new Button("Quit Game"));
@@ -1058,8 +1080,8 @@ public class GameHud {
     viewWorldChart.addClickCommands(src -> showGraph("world", -1));
   }
 
-  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth"};
-  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp"};
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability"};
+  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability"};
 
   private String metricTabLabel(String metric) {
     switch (metric) {
@@ -1068,6 +1090,7 @@ public class GameHud {
       case "currency": return "FX";
       case "inflation": return "Inflation";
       case "wealth": return "Wealth";
+      case "stability": return "Stability";
       default: return "Cap";
     }
   }
@@ -1079,6 +1102,7 @@ public class GameHud {
       case "currency": return "Exchange Rate";
       case "inflation": return "Inflation";
       case "wealth": return "Average Citizen Wealth";
+      case "stability": return "Stability";
       default: return "Market Cap";
     }
   }
@@ -1089,14 +1113,16 @@ public class GameHud {
       case "currency": return String.format("%.3fx", v);
       case "inflation": return String.format("%+.1f%%", v * 100);
       case "wealth": return String.format("%.1f", v) + "g";
+      case "stability": return String.format("%.0f%%", v);
       default: return (int) Math.floor(v) + "g";
     }
   }
 
-  /** Every metric but market cap needs a specific nation (unemployment,
-   * exchange rate, inflation and average wealth aren't tracked world-wide -
-   * there's no single meaningful "world inflation rate" the way a
-   * nation's is). */
+  /** Every metric but market cap/GDP/stability needs a specific nation
+   * (unemployment, exchange rate, inflation and average wealth aren't
+   * tracked world-wide - there's no single meaningful "world inflation
+   * rate" the way a nation's is). Stability IS tracked world-wide too -
+   * see Government.update's population-weighted worldStabilityHistory. */
   private java.util.ArrayDeque<Double> metricHistory(GameState state, String metric, boolean isWorld, Nation n) {
     switch (metric) {
       case "unemployment": return isWorld ? null : n.unemploymentHistory;
@@ -1104,6 +1130,7 @@ public class GameHud {
       case "currency": return isWorld ? null : n.currencyHistory;
       case "inflation": return isWorld ? null : negated(n.inflationHistory);
       case "wealth": return isWorld ? null : n.wealthHistory;
+      case "stability": return isWorld ? state.worldStabilityHistory : n.stabilityHistory;
       default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     }
   }

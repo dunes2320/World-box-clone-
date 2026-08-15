@@ -3,8 +3,13 @@ package com.worldbox.sim;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class Army {
+public class Army implements java.io.Serializable {
   private static int nextId = 1;
+
+  /** Loading a save must never let a freshly created instance reuse an id
+   * already present in the loaded data - bump the counter past whatever
+   * the save actually contained. */
+  public static void restoreNextId(int maxSeenId) { if (maxSeenId >= nextId) nextId = maxSeenId + 1; }
 
   public final int id;
   public int nationId;

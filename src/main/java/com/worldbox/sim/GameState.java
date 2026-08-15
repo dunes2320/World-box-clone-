@@ -11,7 +11,7 @@ import java.util.Map;
 
 /** Everything about a running game world lives here so systems can be
  * simple static functions that take (GameState) and mutate it in place. */
-public class GameState {
+public class GameState implements java.io.Serializable {
   public WorldGrid grid;
   public VoxelWorld voxels;
   public List<Human> humans = new ArrayList<>();
@@ -27,6 +27,9 @@ public class GameState {
   public final java.util.ArrayDeque<Double> worldMarketCapHistory = new java.util.ArrayDeque<>();
   /** last ~120 periodic readings of world-wide business+trade revenue. */
   public final java.util.ArrayDeque<Double> worldGdpHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of population-weighted average stability across
+   * every living nation - "how stable is the world overall right now". */
+  public final java.util.ArrayDeque<Double> worldStabilityHistory = new java.util.ArrayDeque<>();
   public GlobalMarket market = new GlobalMarket();
   public DiplomacyManager diplomacy = new DiplomacyManager();
   public List<Tornado> tornadoes = new ArrayList<>();
@@ -38,7 +41,7 @@ public class GameState {
    * the HUD log book - see EventLog. */
   public final java.util.ArrayDeque<WorldEvent> eventLog = new java.util.ArrayDeque<>();
 
-  public static class Selection {
+  public static class Selection implements java.io.Serializable {
     public final String type; // "settlement" | "nation"
     public final int id;
     public Selection(String type, int id) { this.type = type; this.id = id; }

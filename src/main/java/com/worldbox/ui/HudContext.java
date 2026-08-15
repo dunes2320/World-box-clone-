@@ -16,4 +16,8 @@ public interface HudContext {
   float getZoomSensitivity();
   void setZoomSensitivity(float v);
   void quitGame();
+  com.worldbox.save.SaveManager.SlotInfo[] listSaveSlots();
+  boolean saveToSlot(int slot);
+  boolean loadFromSlot(int slot);
+  void deleteSlot(int slot);
 }

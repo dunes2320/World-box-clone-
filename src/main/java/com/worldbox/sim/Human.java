@@ -5,8 +5,13 @@ import com.worldbox.util.NameGen;
 /** An individual villager (or, if nationId == UNDEAD_NATION_ID, a zombie).
  * Every one is a named individual with a personality that colors how they
  * spend their day - not just an interchangeable population counter. */
-public class Human {
+public class Human implements java.io.Serializable {
   private static int nextId = 1;
+
+  /** Loading a save must never let a freshly created instance reuse an id
+   * already present in the loaded data - bump the counter past whatever
+   * the save actually contained. */
+  public static void restoreNextId(int maxSeenId) { if (maxSeenId >= nextId) nextId = maxSeenId + 1; }
 
   public final int id;
   public final String name = NameGen.fullName();

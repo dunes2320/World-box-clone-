@@ -1,6 +1,6 @@
 package com.worldbox.sim;
 
-public class Tornado {
+public class Tornado implements java.io.Serializable {
   public double x, z;
   public double angle;
   public int life;

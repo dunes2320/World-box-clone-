@@ -8,7 +8,7 @@ import java.util.Set;
 /** The "physical layer" of the world: elevation, terrain type, resource
  * deposits, fire state and territory ownership. Everything else
  * (population, settlements, nations) reads/writes into this shared layer. */
-public class WorldGrid {
+public class WorldGrid implements java.io.Serializable {
   public final int cols = Config.COLS;
   public final int rows = Config.ROWS;
   private final int n = cols * rows;

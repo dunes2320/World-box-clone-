@@ -15,7 +15,7 @@ import java.util.Set;
  * topmost solid block (see Simulation/GameApp), so every existing
  * gameplay system keeps working unchanged against a slightly blockier
  * surface. */
-public class VoxelWorld {
+public class VoxelWorld implements java.io.Serializable {
   public static final byte AIR = 0;
   public static final byte GRASS = 1;
   public static final byte DIRT = 2;

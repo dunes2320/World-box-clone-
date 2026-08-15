@@ -345,10 +345,13 @@ public class EntityRenderer {
     flowerTemplate = MeshUtil.buildGem(0.07f, 0.14f);
 
     // small satellite houses scattered around a settlement's main building
-    // - the town-hall marker alone read as a single icon, not a village
+    // - the town-hall marker alone read as a single icon, not a village.
+    // Base size bumped up (was 0.34/0.22, rendered at a further 0.55-0.82x
+    // on top of that) - a house that ends up smaller than the person
+    // standing next to it doesn't read as a building at all.
     houseTemplate = MeshUtil.mergeMeshes(
-        new Box(0.34f, 0.22f, 0.34f),
-        MeshUtil.translatedCopy(new Box(0.25f, 0.14f, 0.25f), 0, 0.36f, 0));
+        new Box(0.4f, 0.3f, 0.4f),
+        MeshUtil.translatedCopy(new Box(0.3f, 0.16f, 0.3f), 0, 0.46f, 0));
 
     treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
     treesGeom.setMaterial(vertexColorMaterial());
@@ -938,22 +941,24 @@ public class EntityRenderer {
       // out at 10 no matter how big it's grown
       int houseCount = Math.min(32, Math.max(2 + s.populationCount / 3, occupiedHouses));
       for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
-        // a spiral placement (radius grows with i) reads as an organic
-        // cluster of streets/blocks instead of a single uniform ring.
-        // Starts at 1.8 rather than 1.0 - a big city's own marker (scaled
-        // up with population) can be wide enough that the old start
-        // radius put the first couple of houses right on top of it.
-        float angle = i * 2.4f + s.id * 0.7f;
-        float radius = 1.8f + (i % 6) * 0.5f + (i / 6) * 0.7f;
-        float hx = s.x + 0.5f + (float) Math.cos(angle) * radius;
-        float hz = s.z + 0.5f + (float) Math.sin(angle) * radius;
+        // spiral placement (radius grows with i, see Settlement.housePosition)
+        // reads as an organic cluster of streets/blocks instead of a single
+        // uniform ring - and is the same formula Nation.updateRoads routes
+        // its street spurs out to, so the roads actually reach the houses.
+        double[] spot = Settlement.housePosition(s, i);
+        float hx = (float) spot[0], hz = (float) spot[1];
         int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
         float hh = grid.height[grid.idx(gx, gz)];
         ColorRGBA c = i < occupiedHouses ? color : vacantColor;
-        float houseScale = 0.55f + (i % 4) * 0.09f;
+        // was 0.55-0.82x on top of an already-small base - a house ended
+        // up smaller than the person standing next to it. Now bigger than
+        // a villager (roughly 1.2 units tall) without dwarfing the
+        // town-hall marker it clusters around.
+        float houseScale = 0.95f + (i % 4) * 0.14f;
+        float angle = i * 2.4f + s.id * 0.7f;
         // houseTemplate's base box is centered at its own origin (half-
-        // height 0.22) so it needs lifting by half its scaled height
-        houses.add(new PropBatcher.Placement(hx, hh + 0.22f * houseScale, hz, angle, houseScale, c));
+        // height 0.3) so it needs lifting by half its scaled height
+        houses.add(new PropBatcher.Placement(hx, hh + 0.3f * houseScale, hz, angle, houseScale, c));
       }
     }
     housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));

@@ -1,6 +1,6 @@
 package com.worldbox.sim;
 
-public class Monster {
+public class Monster implements java.io.Serializable {
   public double x, z;
   public double hp, maxHp;
   public int life;

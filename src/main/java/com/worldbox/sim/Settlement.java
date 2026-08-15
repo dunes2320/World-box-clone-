@@ -9,8 +9,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class Settlement {
+public class Settlement implements java.io.Serializable {
   private static int nextId = 1;
+
+  /** Loading a save must never let a freshly created instance reuse an id
+   * already present in the loaded data - bump the counter past whatever
+   * the save actually contained. */
+  public static void restoreNextId(int maxSeenId) { if (maxSeenId >= nextId) nextId = maxSeenId + 1; }
 
   private static final String[] NAME_A = {
       "Oak", "Stone", "River", "North", "South", "East", "West", "Iron", "Gold", "Sun", "Wind", "Hill",
@@ -89,6 +94,24 @@ public class Settlement {
 
     claimTerritory(state, settlement);
     return settlement;
+  }
+
+  /** Where house #i of this settlement's spiral cluster actually sits in
+   * world space - the single source of truth for that layout, shared by
+   * EntityRenderer (drawing the houses) and Nation (routing road spurs
+   * out to them) so the streets actually reach the houses instead of the
+   * two computing independent, uncoordinated patterns. */
+  public static double[] housePosition(Settlement s, int i) {
+    float angle = i * 2.4f + s.id * 0.7f;
+    float radius = 2.4f + (i % 6) * 0.75f + (i / 6) * 1.0f;
+    return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
+  }
+
+  /** How many houses a settlement this size actually gets placed - kept
+   * in step with EntityRenderer's own cap so road spurs don't reach past
+   * where the last house actually is. */
+  public static int estimatedHouseCount(Settlement s) {
+    return Math.min(32, Math.max(2 + s.populationCount / 3, 2));
   }
 
   /** Whether this settlement currently has an unoccupied house to give a

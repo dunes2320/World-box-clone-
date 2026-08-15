@@ -4,7 +4,7 @@ package com.worldbox.sim;
  * disasters, nations rising and falling, that kind of thing. Nothing
  * reads this for simulation purposes; it exists purely so a player can
  * look back and see what actually happened in their world. */
-public class WorldEvent {
+public class WorldEvent implements java.io.Serializable {
   public final int tick;
   public final String category; // "war" | "disaster" | "nation" | "economy"
   public final String message;

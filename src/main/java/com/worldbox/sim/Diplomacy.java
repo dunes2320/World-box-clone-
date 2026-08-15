@@ -109,13 +109,17 @@ public class Diplomacy {
           } else if (score < -20 && myPower > theirPower * (1.05 - ambition * 0.3) && Math.random() < 0.35 + ambition * 0.35) {
             dip.setStatus(nation.id, other.id, Config.WAR);
             dip.adjustScore(nation.id, other.id, -20);
-            EventLog.log(state, "war", nation.name + " declared war on " + other.name);
+            String cause = ambition > 0.7 ? "an ambitious leader sensing an opening"
+                : myPower > theirPower * 1.5 ? "a clear military edge"
+                : "years of border tension boiling over";
+            EventLog.log(state, "war", nation.name + " declared war on " + other.name + " - " + cause);
           }
         } else if (status.equals(Config.WAR)) {
           if (myPower < theirPower * 0.35 || myPower < 3) {
             dip.setStatus(nation.id, other.id, Config.TRUCE, 220);
             dip.adjustScore(nation.id, other.id, 6);
-            if (nation.id < other.id) EventLog.log(state, "war", nation.name + " and " + other.name + " agreed to a truce");
+            if (nation.id < other.id) EventLog.log(state, "war", nation.name + " and " + other.name
+                + " agreed to a truce - " + nation.name + " too weakened to keep fighting");
           }
         } else if (status.equals(Config.ALLIANCE)) {
           if (score < 10 && Math.random() < 0.03) {

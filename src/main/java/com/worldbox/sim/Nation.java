@@ -10,7 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-public class Nation {
+public class Nation implements java.io.Serializable {
   private static int nextId = 1;
   private static int colorCursor = 0;
 
@@ -18,6 +18,13 @@ public class Nation {
    * tooling report an extinction rate (founded vs. currently alive)
    * instead of only ever seeing whoever's still standing. */
   public static int totalFounded() { return nextId - 1; }
+
+  /** Loading a save must never let a freshly founded nation reuse an id
+   * already present in the loaded data, or hand out a color already worn
+   * by a loaded nation for a lap of the palette - bump both counters past
+   * whatever the save actually contained. */
+  public static void restoreNextId(int maxSeenId) { if (maxSeenId >= nextId) nextId = maxSeenId + 1; }
+  public static void restoreColorCursor(int atLeast) { if (atLeast > colorCursor) colorCursor = atLeast; }
 
   private static final String[] NAME_PREFIX = {
       "Val", "Kor", "Thal", "Bran", "Els", "Dun", "Mor", "Ash", "Vor", "Cal", "Ost", "Fen",
@@ -92,6 +99,11 @@ public class Nation {
    * ordinary-person view of the economy, distinct from treasury (the
    * government's money) or GDP (total output). */
   public final java.util.ArrayDeque<Double> wealthHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of this nation's overall stability (0-100, see
+   * Government.updateStability) - the single "how healthy is this
+   * country right now" line, folding in treasury, war, unemployment and
+   * leadership all at once instead of reading five separate numbers. */
+  public final java.util.ArrayDeque<Double> stabilityHistory = new java.util.ArrayDeque<>();
   /** true once this nation only prints to cover deficits with no reserve
    * backing - once dominant enough, a currency can leave the gold standard
    * and never goes back, same as real reserve currencies. */
@@ -432,12 +444,13 @@ public class Nation {
     }
   }
 
-  /** A local street grid inside a single settlement - an 8-point star out
-   * from the town center plus a ring road at half that reach, connecting
-   * the center toward where its houses/farms actually cluster (see
-   * EntityRenderer's house spiral) instead of leaving every city's
-   * interior as untouched open ground with only the inter-city highway
-   * passing nearby. */
+  /** A local street grid inside a single settlement - a short spur run out
+   * to every one of its actual houses (Settlement.housePosition - the
+   * exact same spiral EntityRenderer places them at, so the streets
+   * genuinely reach the buildings instead of a decorative ring that
+   * doesn't lead anywhere) plus one out to the edge of its farmland, on
+   * top of the 8-point star giving the settlement's interior some general
+   * road coverage beyond just the inter-city highway passing nearby. */
   private static void drawSettlementStreets(WorldGrid grid, Settlement s) {
     int cx = s.x, cz = s.z;
     int reach = (int) Math.max(2, Math.min(9, s.radius * 0.55));
@@ -447,16 +460,17 @@ public class Nation {
       int tz = cz + (int) Math.round(Math.sin(ang) * reach);
       drawRoad(grid, cx, cz, tx, tz);
     }
-    int ringSteps = 16;
-    int ringR = Math.max(1, reach / 2);
-    int px = cx + ringR, pz = cz;
-    for (int k = 1; k <= ringSteps; k++) {
-      double ang = k * (2 * Math.PI / ringSteps);
-      int nx = cx + (int) Math.round(Math.cos(ang) * ringR);
-      int nz = cz + (int) Math.round(Math.sin(ang) * ringR);
-      drawRoad(grid, px, pz, nx, nz);
-      px = nx; pz = nz;
+    int houseCount = Settlement.estimatedHouseCount(s);
+    for (int i = 0; i < houseCount; i++) {
+      double[] spot = Settlement.housePosition(s, i);
+      drawRoad(grid, cx, cz, (int) Math.round(spot[0]), (int) Math.round(spot[1]));
     }
+    // a spur out to the edge of the tilled farm ring (see
+    // Settlement.countFarmCells' plotRadius) so fields aren't left
+    // completely unconnected from the settlement's own street grid
+    double plotRadius = Math.min(4.5, 2.2 + Math.sqrt(s.populationCount) * 0.25);
+    int fx = cx + (int) Math.round(plotRadius);
+    drawRoad(grid, cx, cz, fx, cz);
   }
 
   private static void drawRoad(WorldGrid grid, int x0, int z0, int x1, int z1) {
@@ -478,17 +492,62 @@ public class Nation {
 
   public static void transferSettlement(GameState state, Settlement settlement, int newNationId) {
     Nation oldNation = state.nations.get(settlement.nationId);
+    int oldNationId = settlement.nationId;
     if (oldNation != null) oldNation.settlementIds.remove(settlement.id);
     settlement.nationId = newNationId;
     Nation newNation = state.nations.get(newNationId);
     if (newNation != null) newNation.settlementIds.add(settlement.id);
-    for (Human h : state.humans) if (h.settlementId == settlement.id) h.nationId = newNationId;
+
+    // a captured city's people aren't just relabeled en masse - each one
+    // makes their own call: stay under the new flag (and actually convert,
+    // taking up the new nation's citizenship) or stay loyal to the nation
+    // they grew up in and leave for one of its other cities. A wiser,
+    // more settled person is likelier to stay put and adapt; a more
+    // ambitious one is likelier to walk rather than submit. Someone whose
+    // old nation has nowhere else left becomes a homeless wanderer
+    // instead - a real refugee, with the same chance any isolated
+    // wanderer has of eventually founding a new nation of their own (see
+    // Population.updateWanderer).
+    List<Settlement> oldNationRemainingSettlements = new ArrayList<>();
+    if (oldNation != null) {
+      for (int sid : oldNation.settlementIds) {
+        Settlement s = state.settlements.get(sid);
+        if (s != null) oldNationRemainingSettlements.add(s);
+      }
+    }
+    int stayed = 0, left = 0, refugees = 0;
+    for (Human h : state.humans) {
+      if (h.settlementId != settlement.id || h.nationId != oldNationId) continue;
+      double stayChance = 0.45 + h.personality.wisdom * 0.25 - h.personality.ambition * 0.2;
+      if (Math.random() < stayChance) {
+        h.nationId = newNationId;
+        stayed++;
+      } else if (!oldNationRemainingSettlements.isEmpty()) {
+        Settlement dest = oldNationRemainingSettlements.get((int) (Math.random() * oldNationRemainingSettlements.size()));
+        h.settlementId = dest.id;
+        h.x = dest.x + 0.5; h.z = dest.z + 0.5;
+        h.prevX = h.x; h.prevZ = h.z;
+        h.hasHouse = false; // their old house was back in the city they just left
+        left++;
+      } else {
+        h.nationId = -1;
+        h.settlementId = -1;
+        h.hasHouse = false;
+        refugees++;
+      }
+    }
+
     // territory is now locked against peaceful takeover (see
     // Settlement.claimTerritory) - without this, a conquered city's own
     // surrounding land would stay painted the defeated nation's color
     // forever, since the new owner's normal claim pass now refuses to
     // touch cells held by another (still-living) nation
     Settlement.forceClaimTerritory(state, settlement);
+    if (left > 0 || refugees > 0) {
+      EventLog.log(state, "war", (stayed) + " of " + settlement.name + "'s people stayed and swore allegiance to "
+          + (newNation != null ? newNation.name : "their new rulers") + "; " + (left + refugees)
+          + " fled rather than submit" + (refugees > 0 ? " (" + refugees + " with nowhere left to go)" : ""));
+    }
     if (oldNation != null && oldNation.settlementIds.isEmpty()) {
       killNation(state, oldNation);
     }

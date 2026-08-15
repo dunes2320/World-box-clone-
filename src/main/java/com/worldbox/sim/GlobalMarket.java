@@ -11,7 +11,7 @@ import java.util.Map;
  * it, which is what makes it "international" rather than a simple
  * nation-to-nation ledger: everyone trades against the same floating
  * prices. */
-public class GlobalMarket {
+public class GlobalMarket implements java.io.Serializable {
   private static final String[] KEYS = {"food", "wood", "stone", "iron", "gold_ore"};
   private static final int HISTORY_LEN = 90;
 

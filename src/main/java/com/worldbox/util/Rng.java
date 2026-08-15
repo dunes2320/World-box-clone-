@@ -6,7 +6,7 @@ import java.util.List;
  * world; also handy as a general-purpose gameplay RNG. Java's int math
  * already wraps to 32 bits, so this is a direct port of the JS version
  * without needing an explicit Math.imul-style helper. */
-public class Rng {
+public class Rng implements java.io.Serializable {
   private int a;
 
   public Rng(long seed) {

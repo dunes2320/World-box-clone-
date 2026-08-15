@@ -7,8 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public class DiplomacyManager {
-  public static class Relation {
+public class DiplomacyManager implements java.io.Serializable {
+  public static class Relation implements java.io.Serializable {
     public String status = Config.PEACE;
     public double score = 0;
     public int truceTimer = 0;

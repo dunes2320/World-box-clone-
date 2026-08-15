@@ -28,6 +28,8 @@ public class Government {
     double worldTreasury = 0;
     double worldMarketCap = 0;
     double worldGdp = 0;
+    double worldStabilityWeighted = 0;
+    int worldPop = 0;
     java.util.Map<Integer, Double> marketCapByNation = null;
     java.util.Map<Integer, int[]> laborByNation = null; // [total, unemployed]
     java.util.Map<Integer, double[]> wealthByNation = null; // [totalWealth, count]
@@ -96,9 +98,17 @@ public class Government {
         double[] wealth = wealthByNation.getOrDefault(n.id, new double[2]);
         n.wealthHistory.addLast(wealth[1] > 0 ? wealth[0] / wealth[1] : 0);
         trim(n.wealthHistory);
+
+        n.stabilityHistory.addLast(n.stability);
+        trim(n.stabilityHistory);
+        worldStabilityWeighted += n.stability * labor[0];
+        worldPop += labor[0];
       }
     }
     if (sample) {
+      state.worldStabilityHistory.addLast(worldPop > 0 ? worldStabilityWeighted / worldPop : 0);
+      trim(state.worldStabilityHistory);
+
       state.worldEconomyHistory.addLast(worldTreasury);
       trim(state.worldEconomyHistory);
 
@@ -224,9 +234,31 @@ public class Government {
     }
   }
 
+  /** Stability is one clamped number folding in half a dozen different
+   * pressures (see updateStability) - by the time it actually triggers a
+   * revolt, a player reading "X was rocked by revolt" has no way to tell
+   * which of those pressures actually did it. Re-checks the same signals
+   * updateStability reads and names whichever is currently worst, so the
+   * log entry says why, not just what. */
+  private static String dominantInstabilityCause(GameState state, Nation n) {
+    int atWar = 0;
+    for (DiplomacyManager.PairInfo p : state.diplomacy.pairsInvolving(n.id)) {
+      if (p.relation.status.equals(Config.WAR)) atWar++;
+    }
+    if (n.bank.justCrashed) return "a bank run";
+    if (atWar >= 2) return "fighting on multiple fronts";
+    if (atWar == 1) return "the strain of war";
+    if (n.unemploymentRate > 0.25) return "runaway unemployment";
+    if (n.treasury < 0) return "an empty treasury";
+    if (n.leader != null && n.leader.personality.greed > 0.75) return "a corrupt, self-dealing leader";
+    if (n.unemploymentRate > 0.15) return "rising unemployment";
+    return "long-simmering discontent";
+  }
+
   private static void maybeRevolt(GameState state, Nation n) {
     if (n.stability > 15) return;
     if (Math.random() > 0.02) return;
+    String cause = dominantInstabilityCause(state, n);
 
     for (int sid : n.settlementIds) {
       Settlement s = state.settlements.get(sid);
@@ -252,13 +284,13 @@ public class Government {
         && state.nations.size() < Config.MAX_NATIONS) {
       String oldName = n.name;
       secede(state, n);
-      EventLog.log(state, "nation", "A breakaway settlement seceded from " + oldName);
+      EventLog.log(state, "nation", "A breakaway settlement seceded from " + oldName + ", driven by " + cause);
     } else {
       String oldGov = n.government;
       n.government = nextGovernmentAfterUnrest(n.government);
       n.leader = new Leader(n.government); // a coup/revolt installs a new leader
       n.issueNewCurrency(); // ...and the new regime issues its own currency
-      EventLog.log(state, "nation", n.name + " was rocked by revolt - " + oldGov + " gave way to " + n.government);
+      EventLog.log(state, "nation", n.name + " was rocked by revolt over " + cause + " - " + oldGov + " gave way to " + n.government);
     }
     n.stability = 40;
   }
