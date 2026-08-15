@@ -183,20 +183,32 @@ public class Population {
    * money back from someone with nothing, so it repossesses their house
    * and sells it, recovering only about half the original loan's value -
    * the rest is a straight loss. Either way nobody's wealth just sits at
-   * -400 forever with no consequence. */
+   * -400 forever with no consequence.
+   *
+   * The loan itself is now underwritten on affordability, not handed out
+   * unconditionally: a job means steady income to actually pay it back,
+   * so an employed citizen still qualifies automatically. Someone with no
+   * job has no such income - the bank will only extend credit if their
+   * wealth on top of this debt already covers a real multiple of the loan
+   * (real collateral, not a promise), otherwise it's the same default
+   * outcome as already being unable to pay. */
+  private static final double LOAN_AMOUNT = 20;
+  private static final double LOAN_UNEMPLOYED_COVERAGE = 2.5;
+
   private static void resolveFinances(GameState state, Human h) {
     if (h.wealth >= -5) return;
     Nation nation = state.nations.get(h.nationId);
-    if (h.debt <= 0) {
+    boolean qualifies = h.debt <= 0
+        && (h.job != null || h.wealth + LOAN_AMOUNT >= LOAN_AMOUNT * LOAN_UNEMPLOYED_COVERAGE);
+    if (qualifies) {
       // the loan is real borrowed money, not conjured out of nowhere - it
       // comes out of the nation's own bank, same pool business loans draw
       // from, so total money in the system stays accountable
-      double loan = 20;
-      h.debt += loan;
-      h.wealth += loan;
+      h.debt += LOAN_AMOUNT;
+      h.wealth += LOAN_AMOUNT;
       if (nation != null) {
-        nation.bank.reserves = Math.max(0, nation.bank.reserves - loan);
-        nation.bank.loans += loan;
+        nation.bank.reserves = Math.max(0, nation.bank.reserves - LOAN_AMOUNT);
+        nation.bank.loans += LOAN_AMOUNT;
       }
     } else {
       defaultOnLoan(nation, h);

@@ -88,6 +88,10 @@ public class Nation {
   /** last ~120 windowed inflation readings - the rate new money entered
    * circulation outpacing real output growth. */
   public final java.util.ArrayDeque<Double> inflationHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of the average citizen's personal wealth - the
+   * ordinary-person view of the economy, distinct from treasury (the
+   * government's money) or GDP (total output). */
+  public final java.util.ArrayDeque<Double> wealthHistory = new java.util.ArrayDeque<>();
   /** true once this nation only prints to cover deficits with no reserve
    * backing - once dominant enough, a currency can leave the gold standard
    * and never goes back, same as real reserve currencies. */

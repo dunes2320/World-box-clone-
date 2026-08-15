@@ -36,6 +36,11 @@ import java.util.Map;
  * markers. */
 public class EntityRenderer {
   private static final ColorRGBA ZOMBIE_COLOR = new ColorRGBA(0.353f, 0.353f, 0.431f, 1f);
+  // skin stays a neutral flesh tone regardless of nation - two endpoints
+  // individuals get blended between (see skinTone/skinToneForSlot) for
+  // some real variety instead of every person sharing one identical tone
+  private static final ColorRGBA SKIN_TONE_A = new ColorRGBA(0.89f, 0.70f, 0.55f, 1f);
+  private static final ColorRGBA SKIN_TONE_B = new ColorRGBA(0.45f, 0.30f, 0.20f, 1f);
   private static final Map<Byte, ColorRGBA> DEPOSIT_COLORS = new HashMap<>();
   static {
     DEPOSIT_COLORS.put(Config.RES_STONE, new ColorRGBA(0.604f, 0.627f, 0.659f, 1f));
@@ -112,6 +117,12 @@ public class EntityRenderer {
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
   private final Mesh humanAxeTemplate, humanPickaxeTemplate;
+  /** Skin (head/face) is a separate mesh+geometry from clothing/gear, each
+   * with its own material - skin stays a neutral, individually-varied
+   * flesh tone while clothing/hair/tools/uniform take the nation's accent
+   * color, instead of the whole body reading as one flat nation-colored
+   * blob. */
+  private final Mesh humanSkinTemplate, armySkinTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
@@ -143,7 +154,9 @@ public class EntityRenderer {
   private final Node siegeLabelsNode = new Node("siegeLabels");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] soldierPool = new Geometry[SOLDIER_CAP];
+  private final Geometry[] soldierSkinPool = new Geometry[SOLDIER_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
+  private final Geometry[] humanSkinPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
   private final Geometry[] statuePool = new Geometry[BANK_CAP];
@@ -227,12 +240,16 @@ public class EntityRenderer {
     // of just disappearing into the block
     Mesh eyeL = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), -0.05f, 0.6f, 0.125f);
     Mesh eyeR = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), 0.05f, 0.6f, 0.125f);
+    // skin (head + face) is its own mesh/material, kept out of the
+    // nation-colored group entirely - see humanSkinTemplate's field
+    // comment for why
+    humanSkinTemplate = MeshUtil.mergeMeshes(head, MeshUtil.mergeMeshes(eyeL, eyeR));
     humanTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(legL, legR), MeshUtil.mergeMeshes(torso, head)),
-        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(collar, belt), MeshUtil.mergeMeshes(hair, MeshUtil.mergeMeshes(eyeL, eyeR))));
+        MeshUtil.mergeMeshes(legL, legR),
+        MeshUtil.mergeMeshes(torso, MeshUtil.mergeMeshes(collar, MeshUtil.mergeMeshes(belt, hair))));
     // job-appropriate gear, the same "silhouette carries the meaning, not
-    // color" trick already used for soldiers' carried weapons (a human is
-    // still one flat nation-colored solo material, so an axe vs a
+    // color" trick already used for soldiers' carried weapons (clothing
+    // is still one flat nation-accented solo material, so an axe vs a
     // pickaxe vs bare hands is what actually reads as "this one's a
     // lumberjack, this one's a miner")
     humanAxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), axeMesh());
@@ -251,9 +268,10 @@ public class EntityRenderer {
     Mesh mShoulderL = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), -0.25f, 0.37f, 0);
     Mesh mShoulderR = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), 0.25f, 0.37f, 0);
     Mesh mBelt = MeshUtil.translatedCopy(new Box(0.21f, 0.02f, 0.145f), 0, -0.05f, 0);
+    armySkinTemplate = mHead;
     armyTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mLegL, mLegR), MeshUtil.mergeMeshes(mTorso, mHead)),
-        MeshUtil.mergeMeshes(mHelmet, MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mShoulderL, mShoulderR), mBelt)));
+        MeshUtil.mergeMeshes(mLegL, mLegR),
+        MeshUtil.mergeMeshes(mTorso, MeshUtil.mergeMeshes(mHelmet, MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mShoulderL, mShoulderR), mBelt))));
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
     hutTemplate = MeshUtil.mergeMeshes(
@@ -388,6 +406,12 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Always);
       armiesNode.attachChild(g);
       soldierPool[i] = g;
+
+      Geometry skin = new Geometry("SoldierSkin" + i, armySkinTemplate);
+      skin.setMaterial(soloColorMaterial(SKIN_TONE_A));
+      skin.setCullHint(Spatial.CullHint.Always);
+      armiesNode.attachChild(skin);
+      soldierSkinPool[i] = skin;
     }
     root.attachChild(armiesNode);
 
@@ -397,6 +421,12 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Always);
       humansNode.attachChild(g);
       humanPool[i] = g;
+
+      Geometry skin = new Geometry("HumanSkin" + i, humanSkinTemplate);
+      skin.setMaterial(soloColorMaterial(SKIN_TONE_A));
+      skin.setCullHint(Spatial.CullHint.Always);
+      humansNode.attachChild(skin);
+      humanSkinPool[i] = skin;
     }
     root.attachChild(humansNode);
 
@@ -786,6 +816,22 @@ public class EntityRenderer {
     h = (h ^ (h >>> 13)) * 1274126177;
     h = h ^ (h >>> 16);
     return (h & 0xFFFF) / 65535f;
+  }
+
+  /** A villager's skin tone: stable per-individual (keyed off their own id,
+   * not their pooled render slot, so it doesn't shuffle as slots get
+   * reused between different people frame to frame), blended between the
+   * two neutral endpoints above - independent of their nation's color. */
+  private static ColorRGBA skinTone(int personId) {
+    return SKIN_TONE_A.clone().interpolateLocal(SKIN_TONE_B, hash01(personId, 911, 37));
+  }
+
+  /** Same idea for a soldier - an Army has no individual Human identity
+   * for its rendered units (recruits are removed from state.humans
+   * entirely), so this keys off the army and slot instead, same as the
+   * other per-slot soldier variation (scrumOffset, armySlotSeed) below. */
+  private static ColorRGBA skinToneForSlot(int armyId, int slotIdx) {
+    return SKIN_TONE_A.clone().interpolateLocal(SKIN_TONE_B, hash01(armyId * 31 + slotIdx, 911, 37));
   }
 
   /** Trees/deposits/houses barely move; rebuild their instance lists on a
@@ -1253,9 +1299,27 @@ public class EntityRenderer {
         setSoloColor(g.getMaterial(), color);
         g.setUserData("armyId", a.id);
         g.setCullHint(Spatial.CullHint.Inherit);
+
+        // a vehicle's mesh replaces the whole body - there's no separate
+        // head to show a face on, so hide the skin geometry for those
+        // slots; a foot soldier's rides along with its body exactly like
+        // a villager's does in updateHumans
+        Geometry skin = soldierSkinPool[slot];
+        if (vehicle) {
+          skin.setCullHint(Spatial.CullHint.Always);
+        } else {
+          skin.setLocalTranslation(g.getLocalTranslation());
+          skin.setLocalScale(scale);
+          skin.setLocalRotation(g.getLocalRotation());
+          setSoloColor(skin.getMaterial(), skinToneForSlot(a.id, slotIdx));
+          skin.setCullHint(Spatial.CullHint.Inherit);
+        }
       }
     }
-    for (; slot < SOLDIER_CAP; slot++) soldierPool[slot].setCullHint(Spatial.CullHint.Always);
+    for (; slot < SOLDIER_CAP; slot++) {
+      soldierPool[slot].setCullHint(Spatial.CullHint.Always);
+      soldierSkinPool[slot].setCullHint(Spatial.CullHint.Always);
+    }
   }
 
   /** Deterministic pseudo-random 0..1 for picking which unit type a given
@@ -1312,14 +1376,25 @@ public class EntityRenderer {
           : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanPickaxeTemplate
           : humanTemplate;
       g.setMesh(jobMesh);
-      ColorRGBA c = h.nationId == Config.UNDEAD_NATION_ID
-          ? ZOMBIE_COLOR
-          : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
+      boolean zombie = h.nationId == Config.UNDEAD_NATION_ID;
+      ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
       setSoloColor(g.getMaterial(), c);
       g.setUserData("humanId", h.id);
       g.setCullHint(Spatial.CullHint.Inherit);
+
+      // skin geometry rides along with the clothing one - same position,
+      // rotation and bob, just its own neutral (or, for the undead, still
+      // sickly-tinted) tone instead of the nation's accent color
+      Geometry skin = humanSkinPool[i];
+      skin.setLocalTranslation(g.getLocalTranslation());
+      skin.setLocalRotation(g.getLocalRotation());
+      setSoloColor(skin.getMaterial(), zombie ? ZOMBIE_COLOR : skinTone(h.id));
+      skin.setCullHint(Spatial.CullHint.Inherit);
     }
-    for (int i = n; i < Config.MAX_HUMANS; i++) humanPool[i].setCullHint(Spatial.CullHint.Always);
+    for (int i = n; i < Config.MAX_HUMANS; i++) {
+      humanPool[i].setCullHint(Spatial.CullHint.Always);
+      humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
+    }
   }
 
   private void updateMonster(GameState state) {

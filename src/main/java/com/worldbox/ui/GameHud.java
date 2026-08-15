@@ -881,6 +881,20 @@ public class GameHud {
       for (com.worldbox.sim.Human h : state.humans) if (h.nationId == id) { totalWealth += h.wealth; counted++; }
       statRow("Avg citizen wealth", (counted > 0 ? String.format("%.1f", totalWealth / counted) : "-") + " " + cur);
 
+      Label housingHeader = sidePanel.addChild(new Label("HOUSING MARKET"));
+      housingHeader.setColor(MUTED); housingHeader.setFontSize(fs(12));
+      int owners = 0;
+      for (com.worldbox.sim.Human h : state.humans) if (h.nationId == id && h.hasHouse) owners++;
+      double ownRate = pop > 0 ? (double) owners / pop * 100 : 0;
+      statRow("Homeowners", owners + " / " + pop + " (" + String.format("%.0f%%", ownRate) + ")");
+      int totalHouses = 0;
+      for (int sid : n.settlementIds) {
+        Settlement s = state.settlements.get(sid);
+        if (s != null) totalHouses += s.housingStock;
+      }
+      double houseCapacity = totalHouses * Settlement.PEOPLE_PER_HOUSE;
+      statRow("Vacant house room", String.format("%.0f", Math.max(0, houseCapacity - owners)));
+
       Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
       viewGraph.addClickCommands(src -> showGraph("nation", id));
       return;
@@ -1044,7 +1058,7 @@ public class GameHud {
     viewWorldChart.addClickCommands(src -> showGraph("world", -1));
   }
 
-  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation"};
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth"};
   private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp"};
 
   private String metricTabLabel(String metric) {
@@ -1053,6 +1067,7 @@ public class GameHud {
       case "gdp": return "GDP";
       case "currency": return "FX";
       case "inflation": return "Inflation";
+      case "wealth": return "Wealth";
       default: return "Cap";
     }
   }
@@ -1063,6 +1078,7 @@ public class GameHud {
       case "gdp": return "GDP";
       case "currency": return "Exchange Rate";
       case "inflation": return "Inflation";
+      case "wealth": return "Average Citizen Wealth";
       default: return "Market Cap";
     }
   }
@@ -1072,19 +1088,22 @@ public class GameHud {
       case "unemployment": return String.format("%.1f%%", v * 100);
       case "currency": return String.format("%.3fx", v);
       case "inflation": return String.format("%+.1f%%", v * 100);
+      case "wealth": return String.format("%.1f", v) + "g";
       default: return (int) Math.floor(v) + "g";
     }
   }
 
   /** Every metric but market cap needs a specific nation (unemployment,
-   * exchange rate and inflation aren't tracked world-wide - there's no
-   * single meaningful "world inflation rate" the way a nation's is). */
+   * exchange rate, inflation and average wealth aren't tracked world-wide -
+   * there's no single meaningful "world inflation rate" the way a
+   * nation's is). */
   private java.util.ArrayDeque<Double> metricHistory(GameState state, String metric, boolean isWorld, Nation n) {
     switch (metric) {
       case "unemployment": return isWorld ? null : n.unemploymentHistory;
       case "gdp": return isWorld ? state.worldGdpHistory : n.gdpHistory;
       case "currency": return isWorld ? null : n.currencyHistory;
       case "inflation": return isWorld ? null : negated(n.inflationHistory);
+      case "wealth": return isWorld ? null : n.wealthHistory;
       default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     }
   }

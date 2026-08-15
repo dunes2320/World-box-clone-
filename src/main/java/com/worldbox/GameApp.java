@@ -509,6 +509,21 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         camPitch = 0.55f;
       });
       testScript.put(duration - 1.7, () -> screenshotState.takeScreenshot());
+      testScript.put(duration - 1.65, () -> {
+        // a tight close-up on one specific villager - the settlement-wide
+        // shot above is too far out to actually verify per-person detail
+        // (skin tone vs. clothing color, hair, gear) at a glance
+        if (!state.humans.isEmpty()) {
+          com.worldbox.sim.Human h = state.humans.get(0);
+          float hh = state.grid.height[state.grid.idx(
+              Math.max(0, Math.min(Config.COLS - 1, (int) h.x)),
+              Math.max(0, Math.min(Config.ROWS - 1, (int) h.z)))];
+          camTarget.set((float) h.x, hh, (float) h.z);
+          camDistance = camDistanceTarget = 2.2f;
+          camPitch = 0.15f;
+        }
+      });
+      testScript.put(duration - 1.62, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 1.6, () -> {
         int fx = -1, fz = -1;
         search:

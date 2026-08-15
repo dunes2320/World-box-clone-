@@ -30,6 +30,7 @@ public class Government {
     double worldGdp = 0;
     java.util.Map<Integer, Double> marketCapByNation = null;
     java.util.Map<Integer, int[]> laborByNation = null; // [total, unemployed]
+    java.util.Map<Integer, double[]> wealthByNation = null; // [totalWealth, count]
     if (sample) {
       marketCapByNation = new java.util.HashMap<>();
       for (Business b : state.businesses.values()) {
@@ -37,6 +38,7 @@ public class Government {
         worldMarketCap += b.valuation;
       }
       laborByNation = new java.util.HashMap<>();
+      wealthByNation = new java.util.HashMap<>();
       for (Human h : state.humans) {
         if (h.nationId == Config.UNDEAD_NATION_ID || h.nationId < 0) continue;
         int[] counts = laborByNation.computeIfAbsent(h.nationId, k -> new int[2]);
@@ -45,6 +47,10 @@ public class Government {
         // work and can't - not just off duty on their scheduled home/
         // leisure time, which would otherwise inflate this hugely
         if (h.job == null && h.routine.equals("work")) counts[1]++;
+
+        double[] wealth = wealthByNation.computeIfAbsent(h.nationId, k -> new double[2]);
+        wealth[0] += h.wealth;
+        wealth[1]++;
       }
     }
     for (Nation n : new ArrayList<>(state.nations.values())) {
@@ -86,6 +92,10 @@ public class Government {
         trim(n.currencyHistory);
         n.inflationHistory.addLast(n.inflationRate);
         trim(n.inflationHistory);
+
+        double[] wealth = wealthByNation.getOrDefault(n.id, new double[2]);
+        n.wealthHistory.addLast(wealth[1] > 0 ? wealth[0] / wealth[1] : 0);
+        trim(n.wealthHistory);
       }
     }
     if (sample) {
