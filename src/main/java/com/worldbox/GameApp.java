@@ -330,20 +330,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     if (tool.equals("select")) {
       Integer sid = Picking.pickPoolId(cam, entityRenderer.getSettlementsNode(), cursor, "settlementId");
       if (sid != null) { setSelection(new GameState.Selection("settlement", sid)); return; }
+      // a soldier is a real, specific person drawn from the population
+      // (see Military.raiseArmy) - rendered through the exact same
+      // humansNode pool as any civilian (see EntityRenderer.updateHumans'
+      // soldier branch), so clicking one already opens their own info
+      // panel here, same as any civilian, with no separate lookup needed.
       Integer hid = Picking.pickPoolId(cam, entityRenderer.getHumansNode(), cursor, "humanId");
       if (hid != null) { setSelection(new GameState.Selection("human", hid)); return; }
-      // a soldier is a real, specific person (see Military.raiseArmy) -
-      // clicking one opens their own info panel, same as any civilian,
-      // not the nation's. Only fall back to the nation panel for a
-      // vehicle slot or the rare case a slot has no roster member (see
-      // EntityRenderer.updateArmies).
-      Integer soldierHid = Picking.pickPoolId(cam, entityRenderer.getArmiesNode(), cursor, "humanId");
-      if (soldierHid != null && soldierHid >= 0) { setSelection(new GameState.Selection("human", soldierHid)); return; }
-      Integer aid = Picking.pickPoolId(cam, entityRenderer.getArmiesNode(), cursor, "armyId");
-      if (aid != null) {
-        Army army = state.armies.get(aid);
-        if (army != null) { setSelection(new GameState.Selection("nation", army.nationId)); return; }
-      }
       // nothing specific under the cursor - if it's inside a nation's
       // territory, clicking anywhere on the ground pulls up that nation
       Picking.CellHit territoryCell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);

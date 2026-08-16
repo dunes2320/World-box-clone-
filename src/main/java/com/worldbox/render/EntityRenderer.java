@@ -37,8 +37,8 @@ import java.util.Map;
 public class EntityRenderer {
   private static final ColorRGBA ZOMBIE_COLOR = new ColorRGBA(0.353f, 0.353f, 0.431f, 1f);
   // skin stays a neutral flesh tone regardless of nation - two endpoints
-  // individuals get blended between (see skinTone/skinToneForSlot) for
-  // some real variety instead of every person sharing one identical tone
+  // individuals get blended between (see skinTone) for some real variety
+  // instead of every person sharing one identical tone
   private static final ColorRGBA SKIN_TONE_A = new ColorRGBA(0.89f, 0.70f, 0.55f, 1f);
   private static final ColorRGBA SKIN_TONE_B = new ColorRGBA(0.45f, 0.30f, 0.20f, 1f);
   // a civilian's shoulder joint, in the clothes/skin geometry's own
@@ -65,7 +65,6 @@ public class EntityRenderer {
   private final Quaternion scratchYaw = new Quaternion();
   private final Quaternion scratchSwing = new Quaternion();
   private final Quaternion scratchArmRot = new Quaternion();
-  private final Quaternion scratchSoldierYaw = new Quaternion();
   private static final ColorRGBA COMBAT_FLASH_COLOR = new ColorRGBA(1f, 0.15f, 0.05f, 1f);
   private static final Map<Byte, ColorRGBA> DEPOSIT_COLORS = new HashMap<>();
   static {
@@ -115,13 +114,6 @@ public class EntityRenderer {
   // business that's fully real in the simulation but invisible in the
   // world - reads exactly like "cities vanishing")
   private static final int SETTLEMENT_CAP = 400;
-  private static final int ARMY_CAP = 96;
-  // WorldBox-style combat doesn't render every single unit in an army (a
-  // large war would be thousands of tiny figures) - a capped, sampled
-  // handful of individual soldiers per army reads as "actual people
-  // fighting" without the cost of one geometry per unit.
-  private static final int SOLDIERS_PER_ARMY = 8;
-  private static final int SOLDIER_CAP = ARMY_CAP * SOLDIERS_PER_ARMY;
   private static final int SIEGE_LABEL_CAP = 20;
   private static final int LANDMARK_CAP = 120;
   private static final int BUSINESS_CAP = 600;
@@ -145,36 +137,36 @@ public class EntityRenderer {
   private final NationColorLookup nationColor;
   private WorldGrid grid;
 
-  private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
+  private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate;
   /** A civilian's arms are their own separate meshes/geometries, pivoted
    * at the shoulder (mesh-local y=0) so they can actually swing with the
    * walk cycle instead of being rigidly baked into the torso - see
    * updateHumans. The right arm carries whatever job tool (axe/pickaxe)
    * this person is using, merged onto the arm itself so the tool swings
-   * with the hand instead of floating fixed on the body. */
+   * with the hand instead of floating fixed on the body. A serving
+   * soldier is rendered through this exact same pipeline (see
+   * updateHumans' soldier branch) - not a separate creature model - with
+   * a weapon mesh on the same arm instead of a job tool. */
   private final Mesh humanArmLTemplate, humanArmRTemplate, humanArmRAxeTemplate, humanArmRPickaxeTemplate;
+  /** one merged right-arm+weapon mesh per distinct weapon (see
+   * Config.UnitSpec.weapon), keyed by that weapon string - which one a
+   * given soldier gets is decided per real person (see pickUnitForHuman),
+   * same "swap the mesh, not the geometry" trick as the axe/pickaxe. */
+  private final Map<String, Mesh> humanArmRWeaponTemplates;
   /** Skin (head/face) is a separate mesh+geometry from clothing/gear, each
    * with its own material - skin stays a neutral, individually-varied
-   * flesh tone while clothing/hair/tools/uniform take the nation's accent
-   * color, instead of the whole body reading as one flat nation-colored
-   * blob. */
-  private final Mesh humanSkinTemplate, armySkinTemplate;
+   * flesh tone while clothing/hair/tools take the nation's accent color,
+   * instead of the whole body reading as one flat nation-colored blob. */
+  private final Mesh humanSkinTemplate;
   private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
   private final Mesh cloudTemplate, rainTemplate, foliageTemplate, flowerTemplate;
-  /** one merged body(+carried weapon, or full vehicle silhouette for
-   * tank/cannon/artillery) mesh per unit type, keyed by Config.UNIT_TYPES'
-   * key - swapped onto a soldierPool slot's Geometry per frame so each
-   * individual soldier actually looks like what it's fighting with. */
-  private final Map<String, Mesh> soldierTemplates = new HashMap<>();
-  private final Map<String, Boolean> soldierIsVehicle = new HashMap<>();
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
   private final Geometry foliageGeom, flowersGeom;
 
   private final Node settlementsNode = new Node("settlements");
-  private final Node armiesNode = new Node("armies");
   private final Node humansNode = new Node("humans");
   private final Node businessesNode = new Node("businesses");
   private final Node banksNode = new Node("banks");
@@ -189,8 +181,6 @@ public class EntityRenderer {
   private final Node cloudsNode = new Node("clouds");
   private final Node siegeLabelsNode = new Node("siegeLabels");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
-  private final Geometry[] soldierPool = new Geometry[SOLDIER_CAP];
-  private final Geometry[] soldierSkinPool = new Geometry[SOLDIER_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanSkinPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanArmLPool = new Geometry[Config.MAX_HUMANS];
@@ -222,7 +212,7 @@ public class EntityRenderer {
   // far each pool reached last frame means only the newly-vacated slots
   // (last frame's count down to this frame's) ever need re-culling - zero
   // work once a pool's occupancy stops shrinking.
-  private int lastHumanCount = 0, lastSoldierSlotCount = 0, lastSettlementCount = 0, lastBusinessCount = 0;
+  private int lastHumanCount = 0, lastSettlementCount = 0, lastBusinessCount = 0;
 
   /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
    * trees/deposits in rebuildStatics() and consumed every frame by the
@@ -322,23 +312,20 @@ public class EntityRenderer {
     humanArmRAxeTemplate = MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(axeMesh(), 0, -SHOULDER_Y, 0));
     humanArmRPickaxeTemplate = MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(pickaxeMesh(), 0, -SHOULDER_Y, 0));
 
-    // a soldier is a villager who was called up or volunteered, not a
-    // different kind of creature - same leg/torso/head body plan, but
-    // bulkier, and wearing a helmet and shoulder plates instead of hair,
-    // which is what actually reads as "in uniform" beyond just the
-    // weapon they're carrying (see weaponMesh/vehicleMesh below).
-    Mesh mLegL = MeshUtil.translatedCopy(new Box(0.075f, 0.25f, 0.09f), -0.09f, -0.3f, 0);
-    Mesh mLegR = MeshUtil.translatedCopy(new Box(0.075f, 0.25f, 0.09f), 0.09f, -0.3f, 0);
-    Mesh mTorso = MeshUtil.translatedCopy(new Box(0.2f, 0.23f, 0.14f), 0, 0.18f, 0);
-    Mesh mHead = MeshUtil.translatedCopy(new Box(0.13f, 0.15f, 0.13f), 0, 0.56f, 0);
-    Mesh mHelmet = MeshUtil.translatedCopy(new Box(0.16f, 0.06f, 0.16f), 0, 0.77f, 0);
-    Mesh mShoulderL = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), -0.25f, 0.37f, 0);
-    Mesh mShoulderR = MeshUtil.translatedCopy(new Box(0.06f, 0.05f, 0.11f), 0.25f, 0.37f, 0);
-    Mesh mBelt = MeshUtil.translatedCopy(new Box(0.21f, 0.02f, 0.145f), 0, -0.05f, 0);
-    armySkinTemplate = mHead;
-    armyTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.mergeMeshes(mLegL, mLegR),
-        MeshUtil.mergeMeshes(mTorso, MeshUtil.mergeMeshes(mHelmet, MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(mShoulderL, mShoulderR), mBelt))));
+    // a soldier is a real person from this settlement's own population
+    // (see Military.raiseArmy) - not a different creature model wearing a
+    // uniform. They're drawn as exactly the same villager body as anyone
+    // else; the only visual difference is what's in their hand, same
+    // "silhouette carries the meaning" trick as a civilian's job tool -
+    // just a weapon instead of an axe/pickaxe, merged onto the same right
+    // arm template, shifted into its shoulder-relative frame the same way.
+    Map<String, Mesh> weaponArmTemplates = new HashMap<>();
+    for (Config.UnitSpec spec : Config.UNIT_TYPES.values()) {
+      if (weaponArmTemplates.containsKey(spec.weapon)) continue;
+      weaponArmTemplates.put(spec.weapon,
+          MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(weaponMesh(spec.weapon), 0, -SHOULDER_Y, 0)));
+    }
+    humanArmRWeaponTemplates = weaponArmTemplates;
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
     hutTemplate = MeshUtil.mergeMeshes(
@@ -458,32 +445,6 @@ public class EntityRenderer {
       settlementPool[i] = g;
     }
     root.attachChild(settlementsNode);
-
-    // one merged body+weapon (or vehicle) mesh per unit type - built once
-    // here and swapped onto whichever soldierPool slot needs it each
-    // frame, the same "swap the mesh, not the geometry" trick already
-    // used for settlement tiers/business types below
-    for (Map.Entry<String, Config.UnitSpec> e : Config.UNIT_TYPES.entrySet()) {
-      String weapon = e.getValue().weapon;
-      boolean vehicle = isVehicleWeapon(weapon);
-      Mesh mesh = vehicle ? vehicleMesh(weapon) : MeshUtil.mergeMeshes(armyTemplate.deepClone(), weaponMesh(weapon));
-      soldierTemplates.put(e.getKey(), mesh);
-      soldierIsVehicle.put(e.getKey(), vehicle);
-    }
-    for (int i = 0; i < SOLDIER_CAP; i++) {
-      Geometry g = new Geometry("Soldier" + i, armyTemplate);
-      g.setMaterial(soloColorMaterial(ColorRGBA.White));
-      g.setCullHint(Spatial.CullHint.Always);
-      armiesNode.attachChild(g);
-      soldierPool[i] = g;
-
-      Geometry skin = new Geometry("SoldierSkin" + i, armySkinTemplate);
-      skin.setMaterial(soloColorMaterial(SKIN_TONE_A));
-      skin.setCullHint(Spatial.CullHint.Always);
-      armiesNode.attachChild(skin);
-      soldierSkinPool[i] = skin;
-    }
-    root.attachChild(armiesNode);
 
     for (int i = 0; i < Config.MAX_HUMANS; i++) {
       Geometry g = new Geometry("Human" + i, humanTemplate);
@@ -708,10 +669,6 @@ public class EntityRenderer {
     root.attachChild(siegeLabelsNode);
   }
 
-  private static boolean isVehicleWeapon(String weapon) {
-    return weapon.equals("tank") || weapon.equals("artillery") || weapon.equals("cannon");
-  }
-
   /** A lumberjack's axe, held at roughly hand height on a villager's
    * detailed body - same "silhouette, not color, carries the meaning"
    * trick as a soldier's weapon. */
@@ -767,37 +724,6 @@ public class EntityRenderer {
         return MeshUtil.translatedCopy(w, 0.22f, 0.5f, 0.1f);
       default:
         return MeshUtil.translatedCopy(new Box(0.03f, 0.2f, 0.03f), 0.2f, 0.5f, 0.05f);
-    }
-  }
-
-  /** A blocky vehicle silhouette (no humanoid body) for the modern-era
-   * crew-served weapons - a cannon carriage, a turreted tank, or a towed
-   * artillery piece, each reading as a distinct shape at a glance. */
-  private Mesh vehicleMesh(String weapon) {
-    switch (weapon) {
-      case "cannon": {
-        Mesh carriage = new Box(0.22f, 0.16f, 0.16f);
-        Mesh wheelA = MeshUtil.translatedCopy(new Box(0.05f, 0.14f, 0.14f), -0.2f, -0.02f, 0);
-        Mesh wheelB = MeshUtil.translatedCopy(new Box(0.05f, 0.14f, 0.14f), 0.2f, -0.02f, 0);
-        Mesh barrel = MeshUtil.translatedCopy(new Box(0.06f, 0.06f, 0.32f), 0, 0.1f, 0.3f);
-        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(carriage, wheelA), MeshUtil.mergeMeshes(wheelB, barrel));
-      }
-      case "tank": {
-        Mesh hull = new Box(0.32f, 0.18f, 0.5f);
-        Mesh turret = MeshUtil.translatedCopy(new Box(0.2f, 0.12f, 0.24f), 0, 0.3f, -0.05f);
-        Mesh barrel = MeshUtil.translatedCopy(new Box(0.04f, 0.04f, 0.34f), 0, 0.3f, 0.4f);
-        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(hull, turret), barrel);
-      }
-      case "artillery": {
-        Mesh chassis = new Box(0.3f, 0.14f, 0.55f);
-        Mesh mount = MeshUtil.translatedCopy(new Box(0.14f, 0.14f, 0.14f), 0, 0.22f, -0.1f);
-        Mesh barrel = new Box(0.05f, 0.05f, 0.5f);
-        MeshUtil.rotateInPlace(barrel, new Quaternion().fromAngleAxis(-0.5f, Vector3f.UNIT_X));
-        Mesh barrelP = MeshUtil.translatedCopy(barrel, 0, 0.4f, 0.15f);
-        return MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(chassis, mount), barrelP);
-      }
-      default:
-        return new Box(0.3f, 0.2f, 0.3f);
     }
   }
 
@@ -917,14 +843,6 @@ public class EntityRenderer {
    * two neutral endpoints above - independent of their nation's color. */
   private static ColorRGBA skinTone(int personId) {
     return SKIN_TONE_A.clone().interpolateLocal(SKIN_TONE_B, hash01(personId, 911, 37));
-  }
-
-  /** Same idea for a soldier - an Army has no individual Human identity
-   * for its rendered units (recruits are removed from state.humans
-   * entirely), so this keys off the army and slot instead, same as the
-   * other per-slot soldier variation (scrumOffset, armySlotSeed) below. */
-  private static ColorRGBA skinToneForSlot(int armyId, int slotIdx) {
-    return SKIN_TONE_A.clone().interpolateLocal(SKIN_TONE_B, hash01(armyId * 31 + slotIdx, 911, 37));
   }
 
   /** Trees/deposits/houses barely move; rebuild their instance lists on a
@@ -1057,7 +975,7 @@ public class EntityRenderer {
 
   public void update(GameState state, float alpha, float animTime) {
     updateSettlements(state);
-    updateArmies(state, alpha, animTime);
+    buildSoldierPositions(state);
     updateHumans(state, alpha, animTime);
     updateBusinesses(state);
     updateBanks(state);
@@ -1333,121 +1251,53 @@ public class EntityRenderer {
    * around a rally point rather than marching in ranks. Stable per
    * (armyId, slot) so an individual soldier doesn't jitter to a new spot
    * every frame. */
-  private static float scrumOffset(int armyId, int slot, int axis) {
-    // widened from 1.6 - at the default play camera distance a tight
-    // 8-soldier huddle read as a single indistinct speck; a wider spread
-    // reads as an actual group of people even zoomed out
-    return jitterAxis(armyId * 31 + slot, axis, 41) * 2.4f;
+  /** A soldier's position (their army's, since Population.update stops
+   * moving a person the moment they enlist - see Human.role) plus
+   * whatever else updateHumans' soldier branch needs to draw them,
+   * gathered once per frame in buildSoldierPositions rather than re-
+   * searching every army for every soldier. */
+  private static final class SoldierPos {
+    final Army army; final int totalUnits;
+    final double x, z, prevX, prevZ;
+    SoldierPos(Army army, int totalUnits, double x, double z, double prevX, double prevZ) {
+      this.army = army; this.totalUnits = totalUnits;
+      this.x = x; this.z = z; this.prevX = prevX; this.prevZ = prevZ;
+    }
   }
+  private final Map<Integer, SoldierPos> soldierPosByHumanId = new HashMap<>();
 
-  private void updateArmies(GameState state, float alpha, float animTime) {
-    int slot = 0;
+  /** Built once per frame, before updateHumans - a soldier is drawn
+   * through the exact same per-person pipeline as any civilian (see
+   * updateHumans), just positioned at their army's current location
+   * instead of their own (frozen since they enlisted) x/z. One shared
+   * SoldierPos per army, not one per person, since a whole army's roster
+   * shares the same position/composition. */
+  private void buildSoldierPositions(GameState state) {
+    soldierPosByHumanId.clear();
     for (Army a : state.armies.values()) {
-      if (a.dead) continue;
+      if (a.dead || a.memberHumanIds.isEmpty()) continue;
       int totalUnits = 0;
       for (int c : a.units.values()) totalUnits += c;
       if (totalUnits <= 0) continue;
-
-      double x = a.prevX + (a.x - a.prevX) * alpha;
-      double z = a.prevZ + (a.z - a.prevZ) * alpha;
-      boolean fighting = a.combatFlashTimer > 0;
-      float flash = fighting ? a.combatFlashTimer / 18f : 0f;
-      Nation nation = state.nations.get(a.nationId);
-      ColorRGBA baseColor = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
-      ColorRGBA color = fighting ? baseColor.clone().interpolateLocal(COMBAT_FLASH_COLOR, flash) : baseColor;
-
-      // face the army's actual heading; a fighting army instead squares up
-      // toward whatever it's engaged with so combat reads as two sides
-      // facing off, not a formation mid-stride
-      double dx = a.x - a.prevX, dz = a.z - a.prevZ;
-      boolean marching = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
-      float marchYaw = marching ? (float) Math.atan2(dx, dz) : 0f;
-
-      // never show more soldier avatars than there are real people on the
-      // roster to represent - a "visible slot" with no actual person
-      // behind it is exactly the "random dude" abstraction this was
-      // built to get rid of.
-      int visible = Math.min(Math.min(SOLDIERS_PER_ARMY, Math.max(1, (int) Math.ceil(totalUnits / 4.0))), a.memberHumanIds.size());
-      if (visible <= 0) continue;
-      // sample which unit type each visible slot represents, weighted by
-      // the army's actual composition, so a mixed army shows a mix of
-      // spearmen/archers/knights/etc rather than only its first unit type
-      for (int slotIdx = 0; slotIdx < visible && slot < SOLDIER_CAP; slotIdx++, slot++) {
-        String unitType = pickUnitForSlot(a, totalUnits, armySlotSeed(a.id, slotIdx));
-        Mesh mesh = soldierTemplates.get(unitType);
-        boolean vehicle = soldierIsVehicle.getOrDefault(unitType, false);
-        Geometry g = soldierPool[slot];
-        g.setMesh(mesh);
-
-        float ox = scrumOffset(a.id, slotIdx, 101);
-        float oz = scrumOffset(a.id, slotIdx, 103);
-        float px = (float) x + ox, pz = (float) z + oz;
-        int gx = clampIdx((int) Math.floor(px), grid.cols), gz = clampIdx((int) Math.floor(pz), grid.rows);
-        float h = grid.height[grid.idx(gx, gz)];
-        // bumped up from 0.9/0.85 - too small to actually read as
-        // soldiers at the game's normal (fairly zoomed-out) play camera
-        // distance, which is most of why combat felt invisible
-        float scale = vehicle ? 1.3f : 1.15f;
-        if (fighting) {
-          px += (float) (Math.random() - 0.5) * 0.3f;
-          pz += (float) (Math.random() - 0.5) * 0.3f;
-          scale *= 1f + flash * 0.5f;
-        }
-        float groundOffset = vehicle ? 0.18f : 0.55f;
-        // a marching foot soldier bobs as it walks, same continuous-time
-        // trick as villagers, each one phased off by its own slot index
-        // so a squad doesn't bounce in unison
-        float bob = (marching && !vehicle) ? (float) Math.abs(Math.sin(animTime * 10.0 + slotIdx * 1.1)) * 0.06f * scale : 0f;
-        g.setLocalTranslation(px, h + groundOffset * scale + bob, pz);
-        g.setLocalScale(scale);
-        g.setLocalRotation(scratchSoldierYaw.fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
-        setSoloColor(g.getMaterial(), color);
-        g.setUserData("armyId", a.id);
-        // a visible slot is a specific real person, not a faceless unit -
-        // tag it with whichever actual roster member (Army.memberHumanIds,
-        // populated by Military.raiseArmy) occupies this slot so clicking
-        // a soldier opens THEIR own info panel, same as clicking any
-        // civilian, instead of falling back to the nation's panel.
-        g.setUserData("humanId", a.memberHumanIds.get(slotIdx));
-        g.setCullHint(Spatial.CullHint.Inherit);
-
-        // a vehicle's mesh replaces the whole body - there's no separate
-        // head to show a face on, so hide the skin geometry for those
-        // slots; a foot soldier's rides along with its body exactly like
-        // a villager's does in updateHumans
-        Geometry skin = soldierSkinPool[slot];
-        if (vehicle) {
-          skin.setCullHint(Spatial.CullHint.Always);
-        } else {
-          skin.setLocalTranslation(g.getLocalTranslation());
-          skin.setLocalScale(scale);
-          skin.setLocalRotation(g.getLocalRotation());
-          setSoloColor(skin.getMaterial(), skinToneForSlot(a.id, slotIdx));
-          skin.setCullHint(Spatial.CullHint.Inherit);
-        }
-      }
+      SoldierPos pos = new SoldierPos(a, totalUnits, a.x, a.z, a.prevX, a.prevZ);
+      for (int hid : a.memberHumanIds) soldierPosByHumanId.put(hid, pos);
     }
-    int activeSlots = slot;
-    for (; slot < Math.max(activeSlots, lastSoldierSlotCount); slot++) {
-      soldierPool[slot].setCullHint(Spatial.CullHint.Always);
-      soldierSkinPool[slot].setCullHint(Spatial.CullHint.Always);
-    }
-    lastSoldierSlotCount = activeSlots;
   }
 
   /** Deterministic pseudo-random 0..1 for picking which unit type a given
-   * (armyId, slot) represents - stable across frames so a soldier doesn't
-   * flicker between unit types, but still varies slot-to-slot. */
-  private static float armySlotSeed(int armyId, int slot) {
-    return hash01(armyId * 17 + slot, slot * 7 + 3, 71);
+   * real person in the army currently represents - stable across frames
+   * (keyed off their own actual id, not a reused render slot) so a
+   * soldier doesn't flicker between unit types tick to tick. */
+  private static float humanUnitSeed(int armyId, int humanId) {
+    return hash01(armyId * 17 + humanId, humanId * 7 + 3, 71);
   }
 
   /** Walks the army's unit composition in insertion order (weakest-to-
    * strongest, matching Config.UNIT_TYPES) and picks whichever type the
    * seed falls into, weighted by that type's share of the army's total
-   * headcount - so a mostly-militia army with a few knights shows mostly
-   * spearmen and only occasionally a knight. */
-  private static String pickUnitForSlot(Army army, int totalUnits, float seed) {
+   * headcount - so a mostly-militia army's people show mostly spears and
+   * only occasionally a knight's lance. */
+  private static String pickUnitForHuman(Army army, int totalUnits, float seed) {
     float target = seed * totalUnits;
     float acc = 0;
     String last = "militia";
@@ -1466,22 +1316,44 @@ public class EntityRenderer {
     for (int i = 0; i < n; i++) {
       Human h = humans.get(i);
       Geometry g = humanPool[i];
-      // a serving soldier isn't standing around as a civilian anymore -
-      // they're drawn (abstractly, for now) as part of their army's own
-      // marching/garrison visuals instead; see pickUnitForSlot. Rendering
-      // them here too would double them up.
-      if ("soldier".equals(h.role)) {
+      // a serving soldier is a real person from this population, not a
+      // separate creature model - they're drawn through this exact same
+      // pipeline as any civilian (see WorldBox's own approach: population
+      // figures fight in place, there's no distinct "unit" sprite), just
+      // positioned at their army's current location (buildSoldierPositions)
+      // instead of their own x/z, which Population.update stops updating
+      // the moment they enlist.
+      boolean isSoldier = "soldier".equals(h.role);
+      SoldierPos sp = isSoldier ? soldierPosByHumanId.get(h.id) : null;
+      if (isSoldier && sp == null) {
+        // no live army roster found for them (shouldn't normally happen) -
+        // nothing sane to draw them at, so stay hidden rather than show
+        // them frozen at a stale pre-enlistment position
         g.setCullHint(Spatial.CullHint.Always);
         humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
         humanArmLPool[i].setCullHint(Spatial.CullHint.Always);
         humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
         continue;
       }
-      double x = h.prevX + (h.x - h.prevX) * alpha;
-      double z = h.prevZ + (h.z - h.prevZ) * alpha;
+
+      double x, z, dx, dz;
+      if (isSoldier) {
+        x = sp.prevX + (sp.x - sp.prevX) * alpha;
+        z = sp.prevZ + (sp.z - sp.prevZ) * alpha;
+        // a whole roster shares one army position - without some spread
+        // every soldier in the same army would stack on the exact same
+        // point. Scattered per real person (their own id), not a reused
+        // render slot, so it stays stable frame to frame.
+        x += jitterAxis(h.id, sp.army.id, 101) * 2.4;
+        z += jitterAxis(h.id, sp.army.id, 103) * 2.4;
+        dx = sp.x - sp.prevX; dz = sp.z - sp.prevZ;
+      } else {
+        x = h.prevX + (h.x - h.prevX) * alpha;
+        z = h.prevZ + (h.z - h.prevZ) * alpha;
+        dx = h.x - h.prevX; dz = h.z - h.prevZ;
+      }
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float hgt = grid.height[grid.idx(gx, gz)];
-      double dx = h.x - h.prevX, dz = h.z - h.prevZ;
       boolean moving = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
       // a small continuous up/down bounce while actually walking - real
       // real-time animation (animTime, same continuous clock as fire/
@@ -1494,11 +1366,17 @@ public class EntityRenderer {
         g.setLocalRotation(scratchYaw.fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }
       // g's mesh is bound to humanTemplate once at pool creation and never
-      // needs to change again - job-appropriate gear now lives on the arm
-      // (see below), so this used to re-set the exact same mesh reference
-      // on every single active human, every single frame, for nothing.
+      // needs to change again - job/weapon gear now lives on the arm (see
+      // below), so this used to re-set the exact same mesh reference on
+      // every single active human, every single frame, for nothing.
       boolean zombie = h.nationId == Config.UNDEAD_NATION_ID;
       ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, HUMAN_FALLBACK_COLOR);
+      if (isSoldier && sp.army.combatFlashTimer > 0) {
+        // a soldier actually fighting right now flashes red - the same
+        // hard, unmissable "this is happening right here" cue the old
+        // abstract army visual used, now on the real person themselves
+        c = c.clone().interpolateLocal(COMBAT_FLASH_COLOR, sp.army.combatFlashTimer / 18f);
+      }
       setSoloColor(g.getMaterial(), c);
       g.setUserData("humanId", h.id);
       g.setCullHint(Spatial.CullHint.Inherit);
@@ -1525,16 +1403,29 @@ public class EntityRenderer {
       armR.setLocalTranslation((float) x, armY, (float) z);
       armL.setLocalRotation(bodyRot.mult(scratchSwing.fromAngleAxis(swing, Vector3f.UNIT_X), scratchArmRot));
       armR.setLocalRotation(bodyRot.mult(scratchSwing.fromAngleAxis(-swing, Vector3f.UNIT_X), scratchArmRot));
-      // job-appropriate gear: a lumberjack's axe or a miner's pickaxe
-      // (stone/iron/gold all read as "digging") now moves with the right
-      // arm itself instead of being fixed to the torso; everyone else is
-      // bare-handed.
-      Mesh armRMesh = "wood".equals(h.job) ? humanArmRAxeTemplate
-          : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanArmRPickaxeTemplate
-          : humanArmRTemplate;
-      // most people keep the same job tick to tick, so most frames this
-      // slot's mesh hasn't actually changed - skip the rebind unless it
-      // has, same idea as the tail-cull tracking above.
+
+      Mesh armRMesh;
+      if (isSoldier) {
+        // whatever unit type this person currently represents in their
+        // army's makeup (see pickUnitForHuman) decides which weapon
+        // silhouette they carry - same "one prop on the arm" idea as a
+        // civilian's job tool, just a sword/spear/rifle instead of an axe.
+        String unitType = pickUnitForHuman(sp.army, sp.totalUnits, humanUnitSeed(sp.army.id, h.id));
+        Config.UnitSpec spec = Config.UNIT_TYPES.get(unitType);
+        Mesh gearMesh = spec != null ? humanArmRWeaponTemplates.get(spec.weapon) : null;
+        armRMesh = gearMesh != null ? gearMesh : humanArmRTemplate;
+      } else {
+        // job-appropriate gear: a lumberjack's axe or a miner's pickaxe
+        // (stone/iron/gold all read as "digging") moves with the right
+        // arm itself instead of being fixed to the torso; everyone else
+        // is bare-handed.
+        armRMesh = "wood".equals(h.job) ? humanArmRAxeTemplate
+            : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanArmRPickaxeTemplate
+            : humanArmRTemplate;
+      }
+      // most people keep the same job/unit tick to tick, so most frames
+      // this slot's mesh hasn't actually changed - skip the rebind unless
+      // it has, same idea as the tail-cull tracking above.
       if (lastArmRMesh[i] != armRMesh) { armR.setMesh(armRMesh); lastArmRMesh[i] = armRMesh; }
       setSoloColor(armL.getMaterial(), c);
       setSoloColor(armR.getMaterial(), c);
@@ -1691,7 +1582,6 @@ public class EntityRenderer {
   }
 
   public Node getSettlementsNode() { return settlementsNode; }
-  public Node getArmiesNode() { return armiesNode; }
   public Node getHumansNode() { return humansNode; }
 
   private static int clampIdx(int v, int max) { return Math.max(0, Math.min(max - 1, v)); }
