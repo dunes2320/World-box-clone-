@@ -199,7 +199,15 @@ public class Military {
         }
       }
       if (atWar) continue;
-      if (Math.random() >= 0.02) continue; // gradual, not an instant mass discharge
+      // was 0.02 - fast enough that a 6-person militia (Config.RAISE_BATCH)
+      // fully dissolved back to civilian life in well under a year of
+      // peace, roughly as fast as raiseArmy's own peacetime raise cadence
+      // (Military.update's 35%-chance-every-12-ticks check) could refill
+      // it. Net effect: standing armies never actually accumulated no
+      // matter how rich or populous a nation got - "no one builds a
+      // military." A real standing army should take years of sustained
+      // peace to fully stand down, not months.
+      if (Math.random() >= 0.003) continue;
 
       int idx = (int) (Math.random() * army.memberHumanIds.size());
       int humanId = army.memberHumanIds.remove(idx);

@@ -160,11 +160,11 @@ public class Settlement implements java.io.Serializable {
    * cell-by-cell into a visibly speckled, "static-y" frontier instead of
    * a single wavy line. */
   private static float borderNoise(int x, int y, int salt) {
-    int cx = Math.floorDiv(x, 3), cy = Math.floorDiv(y, 3);
+    int cx = Math.floorDiv(x, 5), cy = Math.floorDiv(y, 5);
     int h = cx * 374761393 + cy * 668265263 + salt * 2147483647;
     h = (h ^ (h >>> 13)) * 1274126177;
     h = h ^ (h >>> 16);
-    return ((h & 0xFFFF) / 65535f - 0.5f) * 5f;
+    return ((h & 0xFFFF) / 65535f - 0.5f) * 3.5f;
   }
 
   private static void claimTerritory(GameState state, Settlement settlement, boolean force) {

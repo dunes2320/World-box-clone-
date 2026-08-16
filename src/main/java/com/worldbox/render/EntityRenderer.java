@@ -172,6 +172,10 @@ public class EntityRenderer {
   private final Geometry[] humanSkinPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanArmLPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanArmRPool = new Geometry[Config.MAX_HUMANS];
+  // last mesh actually bound to each right-arm slot, so a person whose
+  // job hasn't changed since last frame doesn't cost a Mesh rebind - see
+  // updateHumans.
+  private final Mesh[] lastArmRMesh = new Mesh[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
   private final Geometry[] statuePool = new Geometry[BANK_CAP];
@@ -1455,8 +1459,10 @@ public class EntityRenderer {
         float yaw = (float) Math.atan2(dx, dz);
         g.setLocalRotation(new Quaternion().fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }
-      Mesh jobMesh = humanTemplate;
-      g.setMesh(jobMesh);
+      // g's mesh is bound to humanTemplate once at pool creation and never
+      // needs to change again - job-appropriate gear now lives on the arm
+      // (see below), so this used to re-set the exact same mesh reference
+      // on every single active human, every single frame, for nothing.
       boolean zombie = h.nationId == Config.UNDEAD_NATION_ID;
       ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
       setSoloColor(g.getMaterial(), c);
@@ -1464,13 +1470,20 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Inherit);
 
       // arms swing from the shoulder, opposite each other, only while
-      // actually walking (real.time animTime-driven walkPhase, not a
-      // per-tick snap - see moveToward, which advances walkPhase every
-      // tick spent moving) - standing still, they just hang at rest,
-      // following whatever direction the body is already facing (bodyRot
-      // is only updated above when moving, same as the body itself).
+      // actually walking - driven off animTime (the same continuous
+      // real-time clock the bob above uses), not h.walkPhase, which only
+      // advances once per SIM TICK (~220ms - see Population.moveToward)
+      // and held the swing angle frozen for many render frames at a time
+      // before jumping to the next value, reading as slow and robotic
+      // instead of a smooth swing. Same per-person phase offset (h.id) as
+      // the bob so a crowd doesn't swing in lockstep, and locked to the
+      // same frequency so arms and the step-bounce move together.
+      // Standing still, arms just hang at rest, following whatever
+      // direction the body is already facing (bodyRot is only updated
+      // above when moving, same as the body itself).
       Quaternion bodyRot = g.getLocalRotation();
-      float swing = moving ? (float) Math.sin(h.walkPhase) * ARM_SWING_AMPLITUDE : 0f;
+      float swingPhase = (float) (animTime * 9.0 + h.id * 0.9);
+      float swing = moving ? (float) Math.sin(swingPhase) * ARM_SWING_AMPLITUDE : 0f;
       Geometry armL = humanArmLPool[i];
       Geometry armR = humanArmRPool[i];
       float armY = hgt + 0.5f + bob + SHOULDER_Y;
@@ -1485,7 +1498,10 @@ public class EntityRenderer {
       Mesh armRMesh = "wood".equals(h.job) ? humanArmRAxeTemplate
           : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanArmRPickaxeTemplate
           : humanArmRTemplate;
-      armR.setMesh(armRMesh);
+      // most people keep the same job tick to tick, so most frames this
+      // slot's mesh hasn't actually changed - skip the rebind unless it
+      // has, same idea as the tail-cull tracking above.
+      if (lastArmRMesh[i] != armRMesh) { armR.setMesh(armRMesh); lastArmRMesh[i] = armRMesh; }
       setSoloColor(armL.getMaterial(), c);
       setSoloColor(armR.getMaterial(), c);
       armL.setCullHint(Spatial.CullHint.Inherit);

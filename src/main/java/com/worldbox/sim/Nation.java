@@ -454,15 +454,24 @@ public class Nation implements java.io.Serializable {
     }
   }
 
-  /** A once-in-a-while cleanup pass that mops up single-cell "salt and
-   * pepper" ownership noise where two rival settlements' claim wobbles
-   * interleave near a shared frontier (see Settlement.borderNoise) - a
-   * cell surrounded by a strong majority of one neighbor owner flips to
-   * match it. Deliberately narrow (needs 6 of the 8 surrounding land
-   * cells to agree) so it only ever mops up actual speckling, never eats
-   * into a real, contiguous chunk of someone's territory. Reads from a
-   * snapshot so flips within this pass don't cascade into each other. */
+  /** A once-in-a-while cleanup pass that mops up "salt and pepper"
+   * ownership noise where two rival settlements' claim wobbles interleave
+   * near a shared frontier (see Settlement.borderNoise) - a cell
+   * surrounded by a majority of one neighbor owner flips to match it.
+   * Two rounds back to back (each against its own fresh snapshot, so
+   * flips within a round never cascade into each other) rather than one -
+   * a single pass can leave a cell that only became a minority after ITS
+   * neighbors flipped still standing out on its own; running it twice
+   * catches that without needing to wait for the next 150-tick cycle.
+   * Still deliberately narrow (needs 5 of the 8 surrounding land cells to
+   * agree) so it only ever mops up actual speckling, never eats into a
+   * real, contiguous chunk of someone's territory. */
   private static void smoothBorders(GameState state) {
+    smoothBordersPass(state);
+    smoothBordersPass(state);
+  }
+
+  private static void smoothBordersPass(GameState state) {
     WorldGrid grid = state.grid;
     int[] before = grid.ownerNation.clone();
     byte[] terrain = grid.terrain;
@@ -494,7 +503,7 @@ public class Nation implements java.io.Serializable {
         for (int k = 0; k < distinct; k++) {
           if (seenCount[k] > bestCount) { bestCount = seenCount[k]; bestOwner = seenOwner[k]; }
         }
-        if (bestOwner != owner && bestCount >= 6) {
+        if (bestOwner != owner && bestCount >= 5) {
           grid.ownerNation[i] = bestOwner;
           grid.claimStrength[i] = bestOwner >= 0 ? 1f : 0f;
           grid.markDirtyIdx(i);

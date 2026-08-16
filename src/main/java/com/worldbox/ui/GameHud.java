@@ -140,6 +140,8 @@ public class GameHud {
   // baseline.
   private final Node chartNode = new Node("economyChart");
   private final java.util.List<Geometry> chartBars = new java.util.ArrayList<>();
+  private final java.util.List<com.jme3.font.BitmapText> chartLabels = new java.util.ArrayList<>();
+  private final com.jme3.font.BitmapFont chartFont;
   private String graphView; // null | "nation" | "world"
   private int graphNationId = -1;
   private String graphMetric = "marketcap"; // marketcap | unemployment | gdp | currency
@@ -148,6 +150,7 @@ public class GameHud {
   private final float SIDEPANEL_WIDTH;
   private final float CHART_WIDTH;
   private final float CHART_HEIGHT;
+  private final float LEGEND_ROW_HEIGHT;
 
   // Measured after topBar's children are built rather than hardcoded - the
   // bar's real height depends on its tallest child (the icon buttons), and
@@ -193,6 +196,7 @@ public class GameHud {
     this.SIDEPANEL_WIDTH = 330f * uiScale;
     this.CHART_WIDTH = 290f * uiScale;
     this.CHART_HEIGHT = 150f * uiScale;
+    this.LEGEND_ROW_HEIGHT = 16f * uiScale;
     this.DOCK_ICON_MARGIN = 6f * uiScale;
     this.DOCK_WIDTH_ESTIMATE = 620f * uiScale;
 
@@ -276,6 +280,7 @@ public class GameHud {
     chartNode.setQueueBucket(RenderQueue.Bucket.Gui);
     chartNode.setCullHint(Spatial.CullHint.Always);
     guiNode.attachChild(chartNode);
+    chartFont = assetManager.loadFont("Interface/Fonts/Default.fnt");
 
     toastLabel = new Label(" ");
     toastLabel.setFontSize(fs(15));
@@ -1083,12 +1088,26 @@ public class GameHud {
       }
     }
     sidePanel.addChild(new Label(" "));
-    Button viewWorldChart = sidePanel.addChild(new Button("View World Chart"));
+    Container chartButtons = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+    Button viewWorldChart = chartButtons.addChild(new Button("World Total"));
     viewWorldChart.addClickCommands(src -> showGraph("world", -1));
+    Button viewAllNations = chartButtons.addChild(new Button("By Nation"));
+    viewAllNations.addClickCommands(src -> showGraph("allNations", -1));
   }
 
   private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability"};
   private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability"};
+  // "By Nation" reuses the same metrics as the world-total view - every
+  // one of them (market cap, GDP, stability) already has a per-nation
+  // history deque (see metricHistory) as well as a world-total one, so
+  // the same three tabs apply to either view.
+  private static final String[] GRAPH_METRICS_ALL_NATIONS = GRAPH_METRICS_WORLD;
+  // more than this many living nations would make the legend a wall of
+  // text instead of something a player can actually read at a glance -
+  // shown ranked by whoever's currently highest on the metric, with a
+  // "+N more" note for the rest so the chart itself still plots every
+  // living nation's line even when the legend is trimmed.
+  private static final int LEGEND_MAX_ENTRIES = 14;
 
   private String metricTabLabel(String metric) {
     switch (metric) {
@@ -1159,15 +1178,17 @@ public class GameHud {
 
   private void renderGraph(GameState state) {
     boolean isWorld = "world".equals(graphView);
-    Nation n = isWorld ? null : state.nations.get(graphNationId);
-    if (!isWorld && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
+    boolean isAllNations = "allNations".equals(graphView);
+    Nation n = (isWorld || isAllNations) ? null : state.nations.get(graphNationId);
+    if (!isWorld && !isAllNations && n == null) { sidePanelMode = "nationsList"; refreshSidePanel(); return; }
 
-    Label title = sidePanel.addChild(new Label((isWorld ? "World Economy" : n.displayName()) + " - " + metricPanelTitle(graphMetric)));
+    String titleText = isAllNations ? "All Nations" : isWorld ? "World Economy" : n.displayName();
+    Label title = sidePanel.addChild(new Label(titleText + " - " + metricPanelTitle(graphMetric)));
     title.setFontSize(fs(17));
     Container navRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
     Button back = navRow.addChild(new Button("Back"));
     back.addClickCommands(src -> {
-      if (isWorld) {
+      if (isWorld || isAllNations) {
         sidePanelMode = "market";
       } else {
         ctx.setSelection(new GameState.Selection("nation", graphNationId));
@@ -1184,47 +1205,79 @@ public class GameHud {
     });
 
     Container tabs = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-    for (String metric : isWorld ? GRAPH_METRICS_WORLD : GRAPH_METRICS_NATION) {
+    String[] metricSet = isAllNations ? GRAPH_METRICS_ALL_NATIONS : isWorld ? GRAPH_METRICS_WORLD : GRAPH_METRICS_NATION;
+    for (String metric : metricSet) {
       Button tab = tabs.addChild(new Button(metricTabLabel(metric)));
       if (metric.equals(graphMetric)) tab.setColor(ACTIVE);
       tab.addClickCommands(src -> { graphMetric = metric; refreshSidePanel(); });
     }
 
-    java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
-    if (hist == null || hist.size() < 2) {
-      Label l = sidePanel.addChild(new Label("Collecting data..."));
-      l.setColor(MUTED);
+    int legendRows = 0;
+    if (isAllNations) {
+      // no single "latest/change/range" block here - there are many series
+      // at once, each with its own value; the color-coded legend drawn
+      // under the chart (see layoutAllNationsChart) is what identifies them.
+      java.util.List<Nation> living = livingNationsSorted(state, graphMetric);
+      statRow("Nations shown", Math.min(living.size(), LEGEND_MAX_ENTRIES) + " of " + living.size());
+      legendRows = allNationsLegendRows(state);
     } else {
-      Double[] arr = hist.toArray(new Double[0]);
-      double latest = arr[arr.length - 1];
-      double prev = arr[arr.length - 2];
-      double change = latest - prev;
-      double changePct = Math.abs(prev) > 0.001 ? (change / prev) * 100 : 0;
-      double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
-      for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
-      if ("inflation".equals(graphMetric) && !isWorld) {
-        statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
+      java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
+      if (hist == null || hist.size() < 2) {
+        Label l = sidePanel.addChild(new Label("Collecting data..."));
+        l.setColor(MUTED);
       } else {
-        statRow(metricTabLabel(graphMetric), formatMetric(graphMetric, latest));
+        Double[] arr = hist.toArray(new Double[0]);
+        double latest = arr[arr.length - 1];
+        double prev = arr[arr.length - 2];
+        double change = latest - prev;
+        double changePct = Math.abs(prev) > 0.001 ? (change / prev) * 100 : 0;
+        double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
+        for (double v : hist) { min = Math.min(min, v); max = Math.max(max, v); }
+        if ("inflation".equals(graphMetric) && !isWorld) {
+          statRow("Inflation (last year)", String.format("%+.1f%%", annualInflation(n) * 100));
+        } else {
+          statRow(metricTabLabel(graphMetric), formatMetric(graphMetric, latest));
+        }
+        Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+        Label changeLbl = changeRow.addChild(new Label("Change"));
+        changeLbl.setColor(MUTED);
+        changeLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
+        Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%s)",
+            change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", formatMetric(graphMetric, Math.abs(change)))));
+        changeVal.setColor(change >= 0 ? GOOD : DANGER);
+        statRow("Range", formatMetric(graphMetric, min) + " - " + formatMetric(graphMetric, max));
       }
-      Container changeRow = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-      Label changeLbl = changeRow.addChild(new Label("Change"));
-      changeLbl.setColor(MUTED);
-      changeLbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
-      Label changeVal = changeRow.addChild(new Label(String.format("%s%.1f%%  (%s%s)",
-          change >= 0 ? "+" : "", changePct, change >= 0 ? "+" : "", formatMetric(graphMetric, Math.abs(change)))));
-      changeVal.setColor(change >= 0 ? GOOD : DANGER);
-      statRow("Range", formatMetric(graphMetric, min) + " - " + formatMetric(graphMetric, max));
-    }
-    if (!isWorld) {
-      statRow("Treasury", (int) Math.floor(n.treasury) + "g");
-      statRow("Currency", n.currencyName);
-    } else {
-      statRow("Treasury", (int) Math.floor(sumLivingTreasury(state)) + "g");
+      if (!isWorld) {
+        statRow("Treasury", (int) Math.floor(n.treasury) + "g");
+        statRow("Currency", n.currencyName);
+      } else {
+        statRow("Treasury", (int) Math.floor(sumLivingTreasury(state)) + "g");
+      }
     }
 
     Label chartSpacer = sidePanel.addChild(new Label(" "));
-    chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + 16, 0));
+    chartSpacer.setPreferredSize(new Vector3f(SIDEPANEL_WIDTH - 20, CHART_HEIGHT + legendRows * LEGEND_ROW_HEIGHT + 16, 0));
+  }
+
+  /** Every currently-living nation, ranked highest-to-lowest by its most
+   * recent sample of the given metric - used both to decide which nations
+   * make the (space-limited) legend and in what order, and to draw the
+   * chart lines themselves. */
+  private java.util.List<Nation> livingNationsSorted(GameState state, String metric) {
+    java.util.List<Nation> living = new java.util.ArrayList<>();
+    for (Nation nation : state.nations.values()) if (nation.alive) living.add(nation);
+    living.sort((a, b) -> Double.compare(latestValue(b, metric), latestValue(a, metric)));
+    return living;
+  }
+
+  private double latestValue(Nation n, String metric) {
+    java.util.ArrayDeque<Double> hist = metricHistory(null, metric, false, n);
+    return hist == null || hist.isEmpty() ? 0 : hist.peekLast();
+  }
+
+  private int allNationsLegendRows(GameState state) {
+    int shown = Math.min(livingNationsSorted(state, graphMetric).size(), LEGEND_MAX_ENTRIES);
+    return shown == 0 ? 0 : (int) Math.ceil(shown / 3.0);
   }
 
   /** inflationRate is a smoothed per-sample-window figure (samples every
@@ -1271,9 +1324,13 @@ public class GameHud {
   private void layoutChart() {
     for (Geometry g : chartBars) g.removeFromParent();
     chartBars.clear();
+    for (com.jme3.font.BitmapText t : chartLabels) t.removeFromParent();
+    chartLabels.clear();
 
     GameState state = ctx.getState();
     boolean isWorld = "world".equals(graphView);
+    boolean isAllNations = "allNations".equals(graphView);
+    if (isAllNations) { layoutAllNationsChart(state); return; }
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) return;
     java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
@@ -1325,5 +1382,122 @@ public class GameHud {
     baselineBar.setLocalTranslation(originX, baselineY - 2f, 2);
     chartNode.attachChild(baselineBar);
     chartBars.add(baselineBar);
+  }
+
+  /** The "By Nation" overlay: every living nation's own history line, in
+   * its own map color, sharing one y-axis so relative size reads
+   * honestly, plus a ranked, color-swatched legend underneath (see
+   * livingNationsSorted/LEGEND_MAX_ENTRIES) - the thing a plain per-
+   * nation or world-total chart can't show: who's actually ahead. */
+  private void layoutAllNationsChart(GameState state) {
+    java.util.List<Nation> living = livingNationsSorted(state, graphMetric);
+    java.util.Map<Integer, java.util.List<Double>> series = new java.util.LinkedHashMap<>();
+    double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
+    int maxLen = 0;
+    for (Nation nation : living) {
+      java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, false, nation);
+      if (hist == null || hist.size() < 2) continue;
+      java.util.List<Double> values = new java.util.ArrayList<>(hist);
+      series.put(nation.id, values);
+      maxLen = Math.max(maxLen, values.size());
+      for (double v : values) { min = Math.min(min, v); max = Math.max(max, v); }
+    }
+    if (series.isEmpty() || maxLen < 2) return;
+    double span = Math.max(1.0, max - min);
+
+    float originX = sidePanel.getLocalTranslation().x + 16;
+    int legendRows = allNationsLegendRows(state);
+    float legendHeight = legendRows * LEGEND_ROW_HEIGHT;
+    float contentAboveChart = sidePanel.getPreferredSize().y - (CHART_HEIGHT + legendHeight + 16f);
+    float baselineY = sidePanel.getLocalTranslation().y - contentAboveChart - CHART_HEIGHT;
+    float lineThickness = 2f;
+
+    for (Nation nation : living) {
+      java.util.List<Double> values = series.get(nation.id);
+      if (values == null) continue;
+      // a nation founded partway through the game has a shorter history
+      // than an older one - align every series to the right (their most
+      // recent samples share the same x) instead of stretching a short
+      // history across the whole chart width, which would silently
+      // distort its time axis relative to everyone else's.
+      int offset = maxLen - values.size();
+      float stepX = CHART_WIDTH / (maxLen - 1);
+      ColorRGBA color = new ColorRGBA(((nation.color >> 16) & 0xFF) / 255f, ((nation.color >> 8) & 0xFF) / 255f, (nation.color & 0xFF) / 255f, 1f);
+      for (int i = 1; i < values.size(); i++) {
+        double v0 = values.get(i - 1), v1 = values.get(i);
+        float x0 = originX + (offset + i - 1) * stepX, y0 = baselineY + (float) ((v0 - min) / span) * CHART_HEIGHT;
+        float x1 = originX + (offset + i) * stepX, y1 = baselineY + (float) ((v1 - min) / span) * CHART_HEIGHT;
+        float dx = x1 - x0, dy = y1 - y0;
+        float len = Math.max(0.01f, (float) Math.sqrt(dx * dx + dy * dy));
+        Quad quad = new Quad(len, lineThickness);
+        Geometry segment = new Geometry("allNationsLine", quad);
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setColor("Color", color);
+        segment.setMaterial(mat);
+        segment.setQueueBucket(RenderQueue.Bucket.Gui);
+        segment.setLocalTranslation(x0, y0 - lineThickness / 2f, 2);
+        segment.rotate(0, 0, FastMath.atan2(dy, dx));
+        chartNode.attachChild(segment);
+        chartBars.add(segment);
+      }
+    }
+
+    Quad baseline = new Quad(CHART_WIDTH, 2f);
+    Geometry baselineBar = new Geometry("allNationsBaseline", baseline);
+    Material baseMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+    baseMat.setColor("Color", MUTED);
+    baselineBar.setMaterial(baseMat);
+    baselineBar.setQueueBucket(RenderQueue.Bucket.Gui);
+    baselineBar.setLocalTranslation(originX, baselineY - 2f, 2);
+    chartNode.attachChild(baselineBar);
+    chartBars.add(baselineBar);
+
+    // legend: a color swatch + nation name per row, wrapped into 3
+    // columns beneath the chart, in the same rank order as the lines
+    // themselves so the top of the legend matches whoever's winning.
+    int shown = Math.min(living.size(), LEGEND_MAX_ENTRIES);
+    float colWidth = CHART_WIDTH / 3f;
+    float swatchSize = 9f * uiScale;
+    float legendTop = baselineY - 14f * uiScale;
+    float fontSize = chartFont.getCharSet().getRenderedSize() * 0.62f * uiScale;
+    for (int i = 0; i < shown; i++) {
+      Nation nation = living.get(i);
+      int col = i % 3, row = i / 3;
+      float lx = originX + col * colWidth;
+      float ly = legendTop - row * LEGEND_ROW_HEIGHT;
+      ColorRGBA color = new ColorRGBA(((nation.color >> 16) & 0xFF) / 255f, ((nation.color >> 8) & 0xFF) / 255f, (nation.color & 0xFF) / 255f, 1f);
+      Quad swatchQuad = new Quad(swatchSize, swatchSize);
+      Geometry swatch = new Geometry("legendSwatch", swatchQuad);
+      Material swatchMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+      swatchMat.setColor("Color", color);
+      swatch.setMaterial(swatchMat);
+      swatch.setQueueBucket(RenderQueue.Bucket.Gui);
+      swatch.setLocalTranslation(lx, ly - swatchSize, 2);
+      chartNode.attachChild(swatch);
+      chartBars.add(swatch);
+
+      // keep each legend entry inside its own column - an untruncated
+      // long nation name would otherwise overlap the next column over
+      String label = nation.name.length() > 11 ? nation.name.substring(0, 10) + "…" : nation.name;
+      com.jme3.font.BitmapText text = new com.jme3.font.BitmapText(chartFont);
+      text.setSize(fontSize);
+      text.setColor(TEXT);
+      text.setText(label);
+      text.setQueueBucket(RenderQueue.Bucket.Gui);
+      text.setLocalTranslation(lx + swatchSize + 4f * uiScale, ly, 2);
+      chartNode.attachChild(text);
+      chartLabels.add(text);
+    }
+    if (living.size() > shown) {
+      com.jme3.font.BitmapText more = new com.jme3.font.BitmapText(chartFont);
+      more.setSize(fontSize);
+      more.setColor(MUTED);
+      more.setText("+" + (living.size() - shown) + " more");
+      more.setQueueBucket(RenderQueue.Bucket.Gui);
+      int row = (int) Math.ceil(shown / 3.0);
+      more.setLocalTranslation(originX, legendTop - row * LEGEND_ROW_HEIGHT, 2);
+      chartNode.attachChild(more);
+      chartLabels.add(more);
+    }
   }
 }
