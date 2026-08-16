@@ -792,9 +792,25 @@ public class GameHud {
     statRow("Home", settlement != null ? settlement.name : "-");
     statRow("Age", com.worldbox.util.Calendar.ageYears(h.age) + " years");
     if (!undead) {
-      statRow("Job", h.job != null ? h.job : "unemployed");
-      statRow("Activity", h.state);
-      if (h.nationId >= 0) statRow("Routine", h.routine);
+      if ("soldier".equals(h.role)) {
+        // a soldier is this settlement's own person, not a separate kind
+        // of unit - show who they're serving under and what that army is
+        // currently doing instead of the ordinary job/routine rows, which
+        // don't apply while they're away.
+        com.worldbox.sim.Army servingArmy = null;
+        for (com.worldbox.sim.Army a : state.armies.values()) {
+          if (!a.dead && a.memberHumanIds.contains(h.id)) { servingArmy = a; break; }
+        }
+        statRow("Status", "Serving in the military");
+        if (servingArmy != null) {
+          statRow("Deployment", servingArmy.targetSettlementId != null ? "Marching to war"
+              : servingArmy.combatFlashTimer > 0 ? "In combat" : "Garrisoned, awaiting orders");
+        }
+      } else {
+        statRow("Job", h.job != null ? h.job : "unemployed");
+        statRow("Activity", h.state);
+        if (h.nationId >= 0) statRow("Routine", h.routine);
+      }
       String cur = currencyAbbrev(nation);
       statRow("Wealth", String.format("%.1f %s", h.wealth, cur));
       if (h.debt > 0.5) statRow("Debt", String.format("%.1f %s", h.debt, cur));

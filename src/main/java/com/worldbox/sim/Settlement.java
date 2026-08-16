@@ -42,7 +42,13 @@ public class Settlement implements java.io.Serializable {
   public final Map<String, Double> stock = new HashMap<>();
   public int populationCount = 0;
   public int farmCells = 6;
-  public double radius = 4;
+  // must stay at least as big as the widest a settlement's own houses/
+  // businesses ever spiral out to (EntityRenderer.updateHouses/
+  // updateBusinesses place them up to ~8.6 units out - see
+  // housePosition/business placement) - a settlement whose own buildings
+  // sit outside its own claimed land is exactly what let two nations'
+  // territories interleave with each other's buildings and look broken.
+  public double radius = 10;
   public double growthAccum = 0;
   public int starveTicks = 0;
   public double siegeProgress = 0;
@@ -105,6 +111,28 @@ public class Settlement implements java.io.Serializable {
     float angle = i * 2.4f + s.id * 0.7f;
     float radius = 2.4f + (i % 6) * 0.75f + (i / 6) * 1.0f;
     return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
+  }
+
+  /** Whether a candidate founding spot is actually free of any OTHER
+   * living nation's already-claimed land, out to the same radius a brand
+   * new settlement immediately gets (see radius's default) - without
+   * this, a new settlement could be founded a cell or two from a rival's
+   * border and, since territory is locked against peaceful takeover (see
+   * Nation.claimTerritory), permanently end up with its own buildings
+   * sitting inside the rival's territory. */
+  public static boolean spotClearOfRivals(GameState state, int x, int y, int excludeNationId) {
+    WorldGrid grid = state.grid;
+    int r = 10;
+    for (int dy = -r; dy <= r; dy++) {
+      for (int dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        int nx = x + dx, ny = y + dy;
+        if (!grid.inBounds(nx, ny)) continue;
+        int owner = grid.ownerNation[grid.idx(nx, ny)];
+        if (owner >= 0 && owner != excludeNationId && state.nations.containsKey(owner)) return false;
+      }
+    }
+    return true;
   }
 
   /** How many houses a settlement this size actually gets placed - kept
@@ -263,7 +291,10 @@ public class Settlement implements java.io.Serializable {
         // border.
         Nation homeNation = state.nations.get(settlement.nationId);
         double wealthBonus = homeNation != null ? Math.sqrt(Math.max(0, homeNation.treasury)) * 0.16 : 0;
-        settlement.radius = Math.min(44, 4.5 + Math.sqrt(settlement.populationCount) * 1.1 + wealthBonus);
+        // floor of 10 (not the old 4.5) for the same reason as the field
+        // default above - never lets the claim radius shrink back below
+        // where this settlement's own buildings actually sit
+        settlement.radius = Math.min(44, 10 + Math.sqrt(settlement.populationCount) * 1.1 + wealthBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
 

@@ -1363,7 +1363,12 @@ public class EntityRenderer {
       boolean marching = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
       float marchYaw = marching ? (float) Math.atan2(dx, dz) : 0f;
 
-      int visible = Math.min(SOLDIERS_PER_ARMY, Math.max(1, (int) Math.ceil(totalUnits / 4.0)));
+      // never show more soldier avatars than there are real people on the
+      // roster to represent - a "visible slot" with no actual person
+      // behind it is exactly the "random dude" abstraction this was
+      // built to get rid of.
+      int visible = Math.min(Math.min(SOLDIERS_PER_ARMY, Math.max(1, (int) Math.ceil(totalUnits / 4.0))), a.memberHumanIds.size());
+      if (visible <= 0) continue;
       // sample which unit type each visible slot represents, weighted by
       // the army's actual composition, so a mixed army shows a mix of
       // spearmen/archers/knights/etc rather than only its first unit type
@@ -1398,6 +1403,12 @@ public class EntityRenderer {
         g.setLocalRotation(scratchSoldierYaw.fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
         setSoloColor(g.getMaterial(), color);
         g.setUserData("armyId", a.id);
+        // a visible slot is a specific real person, not a faceless unit -
+        // tag it with whichever actual roster member (Army.memberHumanIds,
+        // populated by Military.raiseArmy) occupies this slot so clicking
+        // a soldier opens THEIR own info panel, same as clicking any
+        // civilian, instead of falling back to the nation's panel.
+        g.setUserData("humanId", a.memberHumanIds.get(slotIdx));
         g.setCullHint(Spatial.CullHint.Inherit);
 
         // a vehicle's mesh replaces the whole body - there's no separate

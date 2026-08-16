@@ -381,8 +381,7 @@ public class Nation implements java.io.Serializable {
     Settlement from = anchors.isEmpty() ? capital : anchors.get((int) (Math.random() * anchors.size()));
     WorldGen.Spot spot = WorldGen.findLandSpot(state.grid, from.x, from.z, 16, state.rng);
     if (spot == null) return;
-    int i = state.grid.idx(spot.x, spot.y);
-    if (state.grid.ownerNation[i] >= 0 && state.grid.ownerNation[i] != nation.id) return;
+    if (!Settlement.spotClearOfRivals(state, spot.x, spot.y, nation.id)) return;
     nation.treasury -= 200;
     Settlement settlement = Settlement.create(state, spot.x, spot.y, nation.id, Settlement.randomSettlementName(state.rng));
     nation.settlementIds.add(settlement.id);
@@ -499,6 +498,13 @@ public class Nation implements java.io.Serializable {
           }
         }
         if (total < 6) continue; // too close to the map edge to judge a real majority
+        // a cell already held by a currently-living nation is off limits
+        // here no matter how it votes - this pass is gap-filling/noise
+        // cleanup, not a backdoor way for territory to change hands
+        // between two living nations without a war. Only an unclaimed
+        // cell, or one still painted in a nation that's since fallen, is
+        // ever up for grabs.
+        if (owner >= 0 && state.nations.containsKey(owner)) continue;
         int bestOwner = owner, bestCount = -1;
         for (int k = 0; k < distinct; k++) {
           if (seenCount[k] > bestCount) { bestCount = seenCount[k]; bestOwner = seenOwner[k]; }

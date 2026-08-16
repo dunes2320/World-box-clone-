@@ -615,6 +615,11 @@ public class Population {
         if (spot == null) return;
         gx = spot.x; gz = spot.y;
       }
+      // a founding nation has no id yet to exclude - reject the spot
+      // outright if it's inside anyone else's already-claimed land, same
+      // as Nation.tryExpand, so a brand new nation never starts out with
+      // its own capital sitting inside a rival's territory
+      if (!Settlement.spotClearOfRivals(state, gx, gz, -1)) return;
       h.dead = true; // folded into the new settlement's founding population
       pendingFoundings.add(new int[]{gx, gz});
     }

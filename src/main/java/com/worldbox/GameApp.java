@@ -332,6 +332,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       if (sid != null) { setSelection(new GameState.Selection("settlement", sid)); return; }
       Integer hid = Picking.pickPoolId(cam, entityRenderer.getHumansNode(), cursor, "humanId");
       if (hid != null) { setSelection(new GameState.Selection("human", hid)); return; }
+      // a soldier is a real, specific person (see Military.raiseArmy) -
+      // clicking one opens their own info panel, same as any civilian,
+      // not the nation's. Only fall back to the nation panel for a
+      // vehicle slot or the rare case a slot has no roster member (see
+      // EntityRenderer.updateArmies).
+      Integer soldierHid = Picking.pickPoolId(cam, entityRenderer.getArmiesNode(), cursor, "humanId");
+      if (soldierHid != null && soldierHid >= 0) { setSelection(new GameState.Selection("human", soldierHid)); return; }
       Integer aid = Picking.pickPoolId(cam, entityRenderer.getArmiesNode(), cursor, "armyId");
       if (aid != null) {
         Army army = state.armies.get(aid);

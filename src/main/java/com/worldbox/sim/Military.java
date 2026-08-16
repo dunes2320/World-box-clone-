@@ -383,29 +383,41 @@ public class Military {
 
       if (settlement.garrisonHp > 0) {
         double defense = settlement.garrisonHp;
-        if (attackTotal > defense) {
-          settlement.garrisonHp = Math.max(0, defense - (defense * 0.25 + (attackTotal - defense) * 0.15));
-          for (Army a : attackers) applyDamage(state, a, defense * 0.08 * (armyStrength(a) / attackTotal));
+        double ratio = attackTotal / Math.max(1, defense);
+        if (ratio >= 2.0) {
+          // a nation too weak to actually contest this doesn't get a slow
+          // grind - the defense just breaks. "If a nation is too weak to
+          // fight, it falls, end of story."
+          settlement.garrisonHp = 0;
+          for (Army a : attackers) applyDamage(state, a, defense * 0.04 * (armyStrength(a) / attackTotal));
+          inflictWarDamage(state, settlement, 0.15);
+          EventLog.log(state, "war", "The defenders of " + settlement.name + " were completely overwhelmed and broke");
+        } else if (attackTotal > defense) {
+          settlement.garrisonHp = Math.max(0, defense - (defense * 0.4 + (attackTotal - defense) * 0.25));
+          for (Army a : attackers) applyDamage(state, a, defense * 0.1 * (armyStrength(a) / attackTotal));
           // an overwhelmed defense means the fighting is spilling into the
           // streets - real, visible cost, not just an abstract number
-          inflictWarDamage(state, settlement, 0.05);
+          inflictWarDamage(state, settlement, 0.08);
         } else {
-          settlement.garrisonHp = Math.max(0, defense - attackTotal * 0.06);
-          for (Army a : attackers) applyDamage(state, a, defense * 0.12 / attackers.size());
-          inflictWarDamage(state, settlement, 0.015);
+          settlement.garrisonHp = Math.max(0, defense - attackTotal * 0.1);
+          for (Army a : attackers) applyDamage(state, a, defense * 0.16 / attackers.size());
+          inflictWarDamage(state, settlement, 0.03);
         }
         // a badly mauled garrison can break outright rather than fight to
         // its literal last defender - covers the "or ran away" half of
         // "all the soldiers in the city are dead, or ran away"
-        if (settlement.garrisonHp < maxGarrison * 0.18 && Math.random() < 0.07) {
+        if (settlement.garrisonHp > 0 && settlement.garrisonHp < maxGarrison * 0.25 && Math.random() < 0.15) {
           settlement.garrisonHp = 0;
           EventLog.log(state, "war", "The defenders of " + settlement.name + " broke and fled");
         }
       }
 
       if (settlement.garrisonHp <= 0) {
-        settlement.siegeProgress += 9;
-        inflictWarDamage(state, settlement, 0.08);
+        // once the defense is actually gone the city falls fast - no
+        // reason for a defenseless settlement to hold out another dozen
+        // ticks once nobody's left to stop the attackers walking in
+        settlement.siegeProgress += 30;
+        inflictWarDamage(state, settlement, 0.15);
       }
 
       if (settlement.siegeProgress >= 100) {
@@ -430,8 +442,10 @@ public class Military {
 
   /** Real, visible cost of a siege while it's under way - not just a
    * number quietly ticking - a chance each tick (scaled by how hard the
-   * fighting is right now) of a civilian casualty and some of the
-   * settlement's stock/housing actually being wrecked. */
+   * fighting is right now) of a civilian casualty, some of the
+   * settlement's stock/housing actually being wrecked, buildings actually
+   * catching fire, and the ground itself getting torn up - a siege has to
+   * look like a siege, not a number silently draining. */
   private static void inflictWarDamage(GameState state, Settlement settlement, double severity) {
     if (Math.random() < severity) {
       List<Human> residents = new ArrayList<>();
@@ -447,6 +461,23 @@ public class Military {
     for (String key : new String[]{"food", "wood", "stone"}) {
       double have = settlement.stock.getOrDefault(key, 0.0);
       if (have > 0) settlement.stock.put(key, have - have * severity * 0.5);
+    }
+    // an actual burning city, not an abstract number: a fire catching
+    // somewhere in the settlement, real terrain damage where a building
+    // just went down
+    if (Math.random() < severity * 0.5) {
+      int fx = settlement.x + (int) (Math.random() * 7 - 3);
+      int fz = settlement.z + (int) (Math.random() * 7 - 3);
+      Events.igniteCell(state.grid, fx, fz, (int) (15 + Math.random() * 20));
+    }
+    if (Math.random() < severity * 0.35) {
+      int dx = settlement.x + (int) (Math.random() * 5 - 2);
+      int dz = settlement.z + (int) (Math.random() * 5 - 2);
+      if (state.grid.inBounds(dx, dz)) {
+        state.voxels.digColumn(dx, dz);
+        state.voxels.resyncHeight(state.grid, dx, dz);
+        state.grid.markDirtyIdx(state.grid.idx(dx, dz));
+      }
     }
   }
 
@@ -485,6 +516,26 @@ public class Military {
         double sa = armyStrength(a), sb = armyStrength(b);
         applyDamage(state, a, sb * 0.22 * (0.75 + Math.random() * 0.5));
         applyDamage(state, b, sa * 0.22 * (0.75 + Math.random() * 0.5));
+        // a field battle used to have zero effect on the world around it -
+        // real soldiers dying somewhere the map never showed. The
+        // battlefield itself (the ground between the two armies) now
+        // actually burns and scars, real and visible, not just two
+        // strength numbers quietly shrinking.
+        double midX = (a.x + b.x) / 2, midZ = (a.z + b.z) / 2;
+        if (Math.random() < 0.4) {
+          int fx = (int) Math.round(midX + (Math.random() * 5 - 2.5));
+          int fz = (int) Math.round(midZ + (Math.random() * 5 - 2.5));
+          Events.igniteCell(state.grid, fx, fz, (int) (10 + Math.random() * 15));
+        }
+        if (Math.random() < 0.25) {
+          int dx = (int) Math.round(midX + (Math.random() * 3 - 1.5));
+          int dz = (int) Math.round(midZ + (Math.random() * 3 - 1.5));
+          if (state.grid.inBounds(dx, dz)) {
+            state.voxels.digColumn(dx, dz);
+            state.voxels.resyncHeight(state.grid, dx, dz);
+            state.grid.markDirtyIdx(state.grid.idx(dx, dz));
+          }
+        }
       }
     }
   }
