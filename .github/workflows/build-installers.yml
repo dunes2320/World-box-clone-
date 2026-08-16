@@ -37,13 +37,35 @@ jobs:
           mkdir -p dist-input
           cp target/worldbox-3d.jar dist-input/
 
-      # A self-contained app-image (bundled JRE, no installer toolchain
-      # required) so this works identically on every runner without extra
-      # dependencies like WiX or rpmbuild.
-      - name: Package app image
+      # A real installer per platform (double-click, Next-Next-Finish, get
+      # a Start Menu/Applications entry and an uninstaller) rather than a
+      # raw app-image folder the player has to unzip and run by hand.
+      # Windows msi needs WiX (preinstalled on windows-latest); macOS dmg
+      # needs only the Xcode CLI tools (preinstalled on macos-latest);
+      # Linux uses deb (dpkg-deb is preinstalled on ubuntu-latest) rather
+      # than rpm, which would need an extra rpmbuild install.
+      - name: Package installer (Windows)
+        if: matrix.platform == 'windows'
         shell: bash
         run: |
-          jpackage --type app-image \
+          jpackage --type msi \
+            --name WorldBox3D \
+            --input dist-input \
+            --main-jar worldbox-3d.jar \
+            --main-class com.worldbox.Main \
+            --dest dist \
+            --app-version 1.0.0 \
+            --vendor WorldBox3D \
+            --java-options "-Xmx2g" \
+            --win-menu \
+            --win-shortcut \
+            --win-dir-chooser
+
+      - name: Package installer (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          jpackage --type dmg \
             --name WorldBox3D \
             --input dist-input \
             --main-jar worldbox-3d.jar \
@@ -53,30 +75,39 @@ jobs:
             --vendor WorldBox3D \
             --java-options "-Xmx2g"
 
-      - name: Zip app image (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: Compress-Archive -Path dist/WorldBox3D -DestinationPath WorldBox3D-windows.zip
-
-      - name: Zip app image (macOS)
-        if: matrix.platform == 'macos'
-        shell: bash
-        run: cd dist && zip -r ../WorldBox3D-macos.zip WorldBox3D.app
-
-      - name: Zip app image (Linux)
+      - name: Package installer (Linux)
         if: matrix.platform == 'linux'
         shell: bash
-        run: cd dist && zip -r ../WorldBox3D-linux.zip WorldBox3D
+        run: |
+          jpackage --type deb \
+            --name WorldBox3D \
+            --input dist-input \
+            --main-jar worldbox-3d.jar \
+            --main-class com.worldbox.Main \
+            --dest dist \
+            --app-version 1.0.0 \
+            --vendor WorldBox3D \
+            --java-options "-Xmx2g" \
+            --linux-shortcut \
+            --linux-menu-group Games
+
+      - name: Locate installer file
+        id: installer
+        shell: bash
+        run: |
+          file=$(find dist -maxdepth 1 -type f \( -name "*.msi" -o -name "*.dmg" -o -name "*.deb" \))
+          echo "path=$file" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$file")" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: WorldBox3D-${{ matrix.platform }}
-          path: WorldBox3D-${{ matrix.platform }}.zip
+          path: ${{ steps.installer.outputs.path }}
           retention-days: 90
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: WorldBox3D-${{ matrix.platform }}.zip
+          files: ${{ steps.installer.outputs.path }}
