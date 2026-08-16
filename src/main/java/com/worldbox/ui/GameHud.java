@@ -594,6 +594,13 @@ public class GameHud {
     sidePanel.clearChildren();
     if (mode == null) {
       sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
+      // this early return used to skip the chart-hiding block below
+      // entirely, so closing the graph (via Close, Escape, or toggling a
+      // top-bar icon off - anything that lands on mode==null rather than
+      // switching straight to a different non-graph panel) left its raw
+      // jME quads rendered on screen forever, until some other panel open
+      // happened to reach that code and finally hide them.
+      chartNode.setCullHint(com.jme3.scene.Spatial.CullHint.Always);
       return;
     }
     sidePanel.setCullHint(com.jme3.scene.Spatial.CullHint.Inherit);

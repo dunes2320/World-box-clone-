@@ -39,6 +39,7 @@ public class VoxelChunkRenderer {
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.62f, 0.48f, 0.26f, 1f);
   private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.68f, 0.63f, 0.53f, 1f);
+  private static final ColorRGBA WAR_FLASH_COLOR = new ColorRGBA(0.95f, 0.1f, 0.08f, 1f);
   // purely a rendering-layer touch so the mountain spine reads as a real
   // peak instead of the same flat grey stone all the way up - no new block
   // type or terrain byte involved, just a height-based tint on stone tops.
@@ -60,6 +61,13 @@ public class VoxelChunkRenderer {
   private final NationColorLookup nationColor;
   public final Node solidNode = new Node("voxelSolid");
   public final Node waterNode = new Node("voxelWater");
+  /** Which nation(s) to flash red on the map right now (the nations the
+   * currently-hovered one is at war with - see GameApp's hover pick) and
+   * whether this blink cycle is currently "on". Empty set = no flash. */
+  private java.util.Set<Integer> warFlashNations = java.util.Collections.emptySet();
+  private boolean warFlashOn = false;
+  private float warFlashTimer = 0f;
+  private static final float WAR_FLASH_INTERVAL = 0.35f;
   private final Geometry[] solidChunks;
   private final Geometry[] waterChunks;
   /** Pre-wave vertex positions per water chunk, captured at mesh-build
@@ -137,6 +145,42 @@ public class VoxelChunkRenderer {
   public void rebuildAll() {
     for (int ci = 0; ci < solidChunks.length; ci++) rebuildChunk(ci);
     world.dirtyChunks.clear();
+  }
+
+  /** Sets which nation(s) should flash red on the map (called whenever
+   * the cursor moves onto a different nation's territory) - only touches
+   * the map at all, via a targeted remesh, when the actual target set
+   * changes, not every frame the mouse merely moves within it. */
+  public void setWarFlashTargets(java.util.Set<Integer> nationIds) {
+    if (nationIds.equals(warFlashNations)) return;
+    java.util.Set<Integer> affected = new java.util.HashSet<>(warFlashNations);
+    affected.addAll(nationIds);
+    warFlashNations = nationIds;
+    markNationsDirty(affected);
+  }
+
+  /** Advances the blink timer - only actually touches the map (a targeted
+   * remesh of the flashing nations' cells) on the rare tick the blink
+   * state flips, not continuously. */
+  public void updateWarFlash(float tpf) {
+    // clearing the flash entirely is already handled by setWarFlashTargets
+    // (it remeshes whatever was flashing back to normal the moment the
+    // target set goes empty) - this only needs to manage the actual blink
+    // cadence while there's something to flash
+    if (warFlashNations.isEmpty()) { warFlashOn = false; warFlashTimer = 0f; return; }
+    warFlashTimer += tpf;
+    if (warFlashTimer >= WAR_FLASH_INTERVAL) {
+      warFlashTimer -= WAR_FLASH_INTERVAL;
+      warFlashOn = !warFlashOn;
+      markNationsDirty(warFlashNations);
+    }
+  }
+
+  private void markNationsDirty(java.util.Set<Integer> nationIds) {
+    if (nationIds.isEmpty()) return;
+    for (int i = 0; i < grid.ownerNation.length; i++) {
+      if (nationIds.contains(grid.ownerNation[i])) grid.markDirtyIdx(i);
+    }
   }
 
   private void rebuildChunk(int ci) {
@@ -281,15 +325,33 @@ public class VoxelChunkRenderer {
     if (grid.isRoad[i]) c.interpolateLocal(ROAD_TINT, 0.75f);
     if (grid.burning[i]) c.interpolateLocal(FIRE_TINT, 0.55f);
     int owner = grid.ownerNation[i];
+    if (owner >= 0 && warFlashOn && warFlashNations.contains(owner)) {
+      // hovering over a nation that's at war highlights whoever it's
+      // fighting - a hard, unmissable red pulse that overrides the
+      // normal interior/border coloring entirely while it's "on"
+      c.interpolateLocal(WAR_FLASH_COLOR, 0.75f);
+      return c;
+    }
     if (owner >= 0 && nationColor != null) {
-      ColorRGBA nc = nationColor.colorFor(owner);
-      if (nc != null) {
-        if (isBorderCell(x, z, owner)) {
+      if (isBorderCell(x, z, owner)) {
+        // the border is its own complementary color now (see
+        // Nation.borderColor), not just a brightened version of the
+        // interior - a strong accent so it's actually visible from a
+        // normal play camera distance
+        ColorRGBA bc = nationColor.borderColorFor(owner);
+        if (bc != null) {
           ColorRGBA accent = new ColorRGBA(
-              Math.min(1f, nc.r * 1.6f + 0.12f), Math.min(1f, nc.g * 1.6f + 0.12f), Math.min(1f, nc.b * 1.6f + 0.12f), 1f);
+              Math.min(1f, bc.r * 1.3f + 0.1f), Math.min(1f, bc.g * 1.3f + 0.1f), Math.min(1f, bc.b * 1.3f + 0.1f), 1f);
           c.interpolateLocal(accent, 0.88f);
-        } else {
-          c.interpolateLocal(nc, 0.16f);
+        }
+      } else {
+        ColorRGBA nc = nationColor.colorFor(owner);
+        if (nc != null) {
+          // a genuinely darker interior, not just a faint wash of the
+          // full-brightness color - reads as "this ground belongs to
+          // someone" without competing with the border for attention
+          ColorRGBA darker = new ColorRGBA(nc.r * 0.5f, nc.g * 0.5f, nc.b * 0.5f, 1f);
+          c.interpolateLocal(darker, 0.3f);
         }
       }
     }

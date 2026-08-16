@@ -728,8 +728,17 @@ public class EntityRenderer {
    * bigger, brighter, gold-colored label and sits a little higher so it
    * reads as genuinely highlighted rather than just another label in the
    * crowd. */
-  public void updateNationLabels(GameState state, int selectedNationId) {
+  public void updateNationLabels(GameState state, int selectedNationId, float camDistance) {
     int i = 0;
+    // Billboarded text is sized in world units, so left alone it shrinks
+    // with distance exactly like any other 3D object - fine for most
+    // things, but a nation's name is how a player reads the map at a
+    // zoomed-out, whole-world view, so it should read MORE clearly out
+    // there, not less. Scaling the world-space size up with camera
+    // distance overpowers the normal perspective shrink instead of just
+    // canceling it out, so the label actually grows on screen as the
+    // camera pulls back.
+    float zoomFactor = clamp(camDistance / 45f, 0.65f, 2.6f);
     for (Nation n : state.nations.values()) {
       if (i >= NATION_LABEL_CAP) break;
       Settlement capital = state.settlements.get(n.capitalSettlementId);
@@ -739,7 +748,7 @@ public class EntityRenderer {
       boolean selected = n.id == selectedNationId;
       String text = n.displayName();
       if (!t.getText().equals(text)) t.setText(text);
-      float size = selected ? 0.48f : 0.3f;
+      float size = (selected ? 0.62f : 0.42f) * zoomFactor;
       if (Math.abs(t.getSize() - size) > 0.001f) t.setSize(size);
       t.setColor(selected ? NATION_LABEL_SELECTED_COLOR : NATION_LABEL_COLOR);
       float width = t.getLineWidth();
@@ -814,6 +823,8 @@ public class EntityRenderer {
    * per-cell yes/no decisions (does this grass cell get a foliage tuft,
    * is it a flower) that need to be stable across rebuilds, not another
    * position offset. */
+  private static float clamp(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }
+
   private static float hash01(int x, int y, int salt) {
     int h = x * 374761393 + y * 668265263 + salt * 2147483647;
     h = (h ^ (h >>> 13)) * 1274126177;

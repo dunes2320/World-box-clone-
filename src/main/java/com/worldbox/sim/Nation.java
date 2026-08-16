@@ -64,6 +64,14 @@ public class Nation implements java.io.Serializable {
   public String name;
   public final int colorIndex;
   public final int color;
+  /** The territory border's own color - a complementary hue rotated off
+   * the interior's (see pickBorderColor), not just a brighter version of
+   * the same color, so a nation's outline reads as a distinct accent
+   * rather than an intensified fill. Guaranteed distinct from every
+   * other currently-alive nation's (color, borderColor) pair - a shared
+   * exact combo would make two unrelated nations' territories genuinely
+   * indistinguishable from each other. */
+  public final int borderColor;
   public int capitalSettlementId;
   public final Set<Integer> settlementIds = new LinkedHashSet<>();
   public double treasury = 180;
@@ -164,10 +172,11 @@ public class Nation implements java.io.Serializable {
     this.currencyCollapsed = false;
   }
 
-  private Nation(int founded, String name, Rng rng) {
+  private Nation(int founded, String name, Rng rng, java.util.Collection<Nation> livingNations) {
     this.id = nextId++;
     this.colorIndex = colorCursor++ % Config.NATION_COLORS.length;
     this.color = Config.NATION_COLORS[this.colorIndex];
+    this.borderColor = pickBorderColor(this.color, livingNations);
     this.name = name != null ? name : randomNationName(rng != null ? rng : new Rng((long) (Math.random() * Long.MAX_VALUE)));
     this.founded = founded;
     this.government = Government.random();
@@ -175,8 +184,37 @@ public class Nation implements java.io.Serializable {
     this.leader = new Leader(this.government);
   }
 
+  /** A complementary hue (opposite side of the color wheel from the
+   * interior) rather than just a brighter tint of the same one, tried at
+   * increasing offsets from that starting point until the resulting
+   * (color, borderColor) pair doesn't match any other currently-living
+   * nation's - so two nations never read as visually identical borders,
+   * even if they happen to share the same interior (the palette is
+   * finite and does eventually repeat). */
+  private static int pickBorderColor(int interior, java.util.Collection<Nation> livingNations) {
+    float[] hsb = java.awt.Color.RGBtoHSB((interior >> 16) & 0xFF, (interior >> 8) & 0xFF, interior & 0xFF, null);
+    for (int attempt = 0; attempt < 40; attempt++) {
+      float hue = hsb[0] + 0.5f + attempt * 0.083f; // 0.5 = complementary; each retry nudges further around the wheel
+      hue -= (float) Math.floor(hue);
+      int candidate = java.awt.Color.HSBtoRGB(hue, Math.max(0.6f, hsb[1]), Math.min(1f, hsb[2] * 1.1f + 0.15f)) & 0xFFFFFF;
+      boolean collides = false;
+      if (livingNations != null) {
+        for (Nation other : livingNations) {
+          if (other.alive && other.color == interior && other.borderColor == candidate) { collides = true; break; }
+        }
+      }
+      if (!collides) return candidate;
+    }
+    // practically unreachable (40 distinct hue offsets against a handful
+    // of concurrently-alive nations), but fall back to the plain
+    // complementary rather than leave borderColor uninitialized
+    float hue = hsb[0] + 0.5f;
+    hue -= (float) Math.floor(hue);
+    return java.awt.Color.HSBtoRGB(hue, Math.max(0.6f, hsb[1]), Math.min(1f, hsb[2] * 1.1f + 0.15f)) & 0xFFFFFF;
+  }
+
   public static Nation create(GameState state, Settlement capitalSettlement, String name) {
-    Nation nation = new Nation(state.tick, name, state.rng);
+    Nation nation = new Nation(state.tick, name, state.rng, state.nations.values());
     nation.capitalSettlementId = capitalSettlement.id;
     nation.settlementIds.add(capitalSettlement.id);
     state.nations.put(nation.id, nation);

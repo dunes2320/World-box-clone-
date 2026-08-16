@@ -129,7 +129,11 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     fpp.addFilter(bloom);
     viewPort.addProcessor(fpp);
 
-    voxelRenderer = new VoxelChunkRenderer(state.voxels, state.grid, assetManager, this::nationColorFor);
+    NationColorLookup nationColors = new NationColorLookup() {
+      @Override public ColorRGBA colorFor(int nationId) { return nationColorFor(nationId); }
+      @Override public ColorRGBA borderColorFor(int nationId) { return nationBorderColorFor(nationId); }
+    };
+    voxelRenderer = new VoxelChunkRenderer(state.voxels, state.grid, assetManager, nationColors);
     voxelRenderer.rebuildAll();
     rootNode.attachChild(voxelRenderer.solidNode);
     rootNode.attachChild(voxelRenderer.waterNode);
@@ -137,7 +141,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // often than it looks good - keep water shadow-free
     voxelRenderer.waterNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
 
-    entityRenderer = new EntityRenderer(rootNode, assetManager, state.grid, this::nationColorFor);
+    entityRenderer = new EntityRenderer(rootNode, assetManager, state.grid, nationColors);
     entityRenderer.rebuildStatics(state);
 
     GuiGlobals.initialize(this);
@@ -157,6 +161,12 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     Nation n = state.nations.get(nationId);
     if (n == null) return null;
     return intToColor(n.color);
+  }
+
+  private ColorRGBA nationBorderColorFor(int nationId) {
+    Nation n = state.nations.get(nationId);
+    if (n == null) return null;
+    return intToColor(n.borderColor);
   }
 
   private static ColorRGBA intToColor(int rgb) {
@@ -353,6 +363,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       }
     }
 
+    updateWarHoverFlash(tpf);
     voxelRenderer.flushDirty();
     voxelRenderer.updateWaterAnimation((float) simTime);
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
@@ -473,6 +484,12 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       // close this one out or the rest of the script would run against a
       // frozen simulation for the remainder of the test
       testScript.put(midway + 4.4, () -> hud.debugSetPanelMode(null));
+      // a screenshot right after closing, with nothing else changed, so a
+      // chart that's still stuck on screen (previously: refreshSidePanel's
+      // mode==null branch returned early and skipped hiding it) actually
+      // shows up in the test output instead of being masked by whatever
+      // panel gets opened next
+      testScript.put(midway + 4.6, () -> screenshotState.takeScreenshot());
       testScript.put(duration - 4.0, () -> {
         if (!state.settlements.isEmpty()) {
           var s = state.settlements.values().iterator().next();
@@ -719,6 +736,29 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     entityRenderer.setBrushIndicator(cell.x + 0.5f, cell.z + 0.5f, h, radius, true);
   }
 
+  /** Hovering the cursor over a nation's territory flashes red on whoever
+   * it's currently at war with, so a war reads on the map itself instead
+   * of only in the log/panel. Only recomputes the (usually empty) target
+   * set when the hovered nation actually changes - the flash blink
+   * cadence itself is handled every frame by VoxelChunkRenderer. */
+  private void updateWarHoverFlash(float tpf) {
+    Vector2f cursor = inputManager.getCursorPosition();
+    int hoveredNation = -1;
+    if (!hud.isOverUi(cursor.x, cursor.y)) {
+      Picking.CellHit cell = Picking.pickTerrainCell(cam, voxelRenderer.solidNode, state.grid, cursor);
+      if (cell != null) hoveredNation = state.grid.ownerNation[state.grid.idx(cell.x, cell.z)];
+    }
+    java.util.Set<Integer> warTargets = java.util.Collections.emptySet();
+    if (hoveredNation >= 0) {
+      warTargets = new java.util.HashSet<>();
+      for (com.worldbox.sim.DiplomacyManager.PairInfo p : state.diplomacy.pairsInvolving(hoveredNation)) {
+        if (p.relation.status.equals(Config.WAR)) warTargets.add(p.other);
+      }
+    }
+    voxelRenderer.setWarFlashTargets(warTargets);
+    voxelRenderer.updateWarFlash(tpf);
+  }
+
   private void updateSelectionRing() {
     if (selection != null && selection.type.equals("settlement")) {
       var s = state.settlements.get(selection.id);
@@ -745,7 +785,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
 
   private void updateNationLabel() {
     int selectedNationId = (selection != null && selection.type.equals("nation")) ? selection.id : -1;
-    entityRenderer.updateNationLabels(state, selectedNationId);
+    entityRenderer.updateNationLabels(state, selectedNationId, camDistance);
   }
 
   // ---- HudContext ----
