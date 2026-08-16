@@ -9,8 +9,9 @@ import java.util.List;
 /** Individual villagers. Food is handled abstractly at the settlement level
  * (territory + population -> auto food production/consumption), so a
  * human's only job is to gather wood/stone/iron and haul it home, or flee
- * danger. When drafted, a human is removed from the list and folded into an
- * Army's unit counts (see Military). */
+ * danger. When drafted, a human keeps their id and personality but switches
+ * to role="soldier" and is skipped entirely by this update loop while
+ * serving - see Military.raiseArmy/demobilize. */
 public class Population {
   private static final double SPEED = 0.34;
   private static final int GATHER_TICKS = 5;
@@ -415,6 +416,17 @@ public class Population {
 
       if (diesOfOldAge(h)) { DeathStats.oldAge++; continue; }
 
+      // a serving soldier is still a real person (still ages, can still
+      // die of old age above) but Military owns everything about where
+      // they are and what happens to them while serving - they don't
+      // work, gather, wander, pay living costs, or flee like a civilian.
+      // See Military.raiseArmy (enlists them) and Military.demobilize
+      // (releases them back to ordinary civilian life).
+      if ("soldier".equals(h.role)) {
+        next.add(h);
+        continue;
+      }
+
       // no nation means no money and no debt - a wanderer has nothing to
       // spend and nothing to owe until they actually join or found one
       if (h.nationId >= 0) applyLivingCost(state, h);
@@ -434,9 +446,9 @@ public class Population {
       // actually at war doesn't get to just wander around undisturbed -
       // the locals run them off, and if they don't get out fast enough
       // they get caught. This is ordinary-citizen-on-citizen hostility
-      // only: soldiers are Army entities, not Human ones (see Military,
-      // which pulls a recruit out of state.humans entirely), so this loop
-      // never touches or is touched by military combat either direction.
+      // only: anyone actively serving (role=="soldier") already bailed out
+      // of this loop above, so this never touches or is touched by
+      // military combat either direction.
       if (h.nationId >= 0) {
         int occupier = grid.ownerNation[ci];
         if (occupier >= 0 && occupier != h.nationId && state.diplomacy.getStatus(h.nationId, occupier).equals(Config.WAR)) {

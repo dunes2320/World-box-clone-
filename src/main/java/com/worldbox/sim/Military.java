@@ -37,8 +37,25 @@ public class Military {
     double total = armyStrength(army);
     if (total <= 0 || dmg <= 0) return;
     double ratio = Math.min(1, dmg / total);
+    int before = armyUnitCount(army);
     for (String key : army.units.keySet()) {
       army.units.put(key, Math.max(0, (int) Math.floor(army.units.get(key) * (1 - ratio))));
+    }
+    int lost = before - armyUnitCount(army);
+    // every unit this battle actually cost is a specific real person, not
+    // just a number - kill that many of this army's own roster (real
+    // combat casualties, counted the same way a siege/sack death is)
+    // rather than letting the roster silently drift out of sync with the
+    // unit-count math above.
+    if (lost > 0 && !army.memberHumanIds.isEmpty()) {
+      java.util.Set<Integer> toKill = new java.util.HashSet<>();
+      for (int i = 0; i < lost && !army.memberHumanIds.isEmpty(); i++) {
+        int idx = (int) (Math.random() * army.memberHumanIds.size());
+        toKill.add(army.memberHumanIds.remove(idx));
+      }
+      for (Human h : state.humans) {
+        if (toKill.contains(h.id)) { h.dead = true; DeathStats.war++; }
+      }
     }
     army.strength = armyStrength(army);
     army.combatFlashTimer = 18;
@@ -47,10 +64,25 @@ public class Military {
 
   public static void damageArmy(GameState state, Army army, double dmg) { applyDamage(state, army, dmg); }
 
-  private static void killArmy(GameState state, Army army) {
+  /** Disbanding an army for any reason (wiped out, or a nation that fielded
+   * it collapsing entirely) must never just leave real people stuck with
+   * role=="soldier" forever with no army left to belong to - anyone still
+   * on the roster at this point survived and goes back to being an
+   * ordinary civilian. Actual combat deaths already happened in
+   * applyDamage above; this is only ever a safety net for the (normally
+   * empty) remainder. */
+  public static void killArmy(GameState state, Army army) {
+    if (army.dead) return;
     army.dead = true;
     Nation nation = state.nations.get(army.nationId);
     if (nation != null) nation.armyIds.remove(army.id);
+    if (!army.memberHumanIds.isEmpty()) {
+      java.util.Set<Integer> remaining = new java.util.HashSet<>(army.memberHumanIds);
+      for (Human h : state.humans) {
+        if (remaining.contains(h.id)) h.role = null;
+      }
+      army.memberHumanIds.clear();
+    }
   }
 
   public static class RaiseResult {
@@ -60,9 +92,42 @@ public class Military {
     RaiseResult(boolean ok, String reason, int count) { this.ok = ok; this.reason = reason; this.count = count; }
   }
 
-  /** Pulls villagers out of a settlement's workforce and turns them into a
-   * unit batch, funded by the settlement's raw stock + the nation's gold
-   * treasury. */
+  /** Picks who actually gets recruited out of a settlement's eligible
+   * civilians, per the nation's recruitmentPolicy: a "volunteer" nation's
+   * army fills up with the most ambitious/least settled people (higher
+   * ambition, lower wisdom - the ones likeliest to actually choose this),
+   * weighted-random rather than a hard cutoff so it's a strong lean, not
+   * an absolute rule. A "conscription" nation just presses whoever's
+   * available, unweighted - nobody gets a personality-driven say in it. */
+  private static List<Human> pickRecruits(List<Human> eligible, String policy, int count) {
+    List<Human> pool = new ArrayList<>(eligible);
+    List<Human> picked = new ArrayList<>();
+    boolean volunteer = "volunteer".equals(policy);
+    for (int i = 0; i < count && !pool.isEmpty(); i++) {
+      int idx;
+      if (volunteer) {
+        idx = 0;
+        double bestScore = -1;
+        for (int j = 0; j < pool.size(); j++) {
+          Human h = pool.get(j);
+          double score = (h.personality.ambition * 0.7 + (1 - h.personality.wisdom) * 0.3) * (0.5 + Math.random());
+          if (score > bestScore) { bestScore = score; idx = j; }
+        }
+      } else {
+        idx = (int) (Math.random() * pool.size());
+      }
+      picked.add(pool.remove(idx));
+    }
+    return picked;
+  }
+
+  /** Pulls real, named villagers out of a settlement's own population and
+   * enlists them - chosen (volunteer) or pressed (conscription) per the
+   * nation's recruitmentPolicy - funded by the settlement's raw stock +
+   * the nation's gold treasury. They keep their identity (Human.role
+   * flips to "soldier" instead of being deleted) and are tracked by id on
+   * the army's roster; see applyDamage for what happens to them in
+   * combat and demobilize for how they come home. */
   public static RaiseResult raiseArmy(GameState state, int settlementId, String unitType) {
     Settlement settlement = state.settlements.get(settlementId);
     if (settlement == null) return new RaiseResult(false, "no settlement", 0);
@@ -72,7 +137,7 @@ public class Military {
     if (spec == null) return new RaiseResult(false, "bad unit", 0);
 
     List<Human> civilians = new ArrayList<>();
-    for (Human h : state.humans) if (h.settlementId == settlementId) civilians.add(h);
+    for (Human h : state.humans) if (h.settlementId == settlementId && h.role == null) civilians.add(h);
     int count = Math.min(Config.RAISE_BATCH, civilians.size() - 3); // keep a few workers behind
     if (count <= 0) return new RaiseResult(false, "not enough population", 0);
 
@@ -90,10 +155,6 @@ public class Military {
       settlement.stock.merge(e.getKey(), -(e.getValue() * count), Double::sum);
     }
 
-    for (int i = 0; i < count; i++) {
-      state.humans.remove(civilians.get(i));
-    }
-
     Army army = null;
     for (Army a : state.armies.values()) {
       if (a.nationId == settlement.nationId && a.homeSettlementId == settlementId
@@ -104,9 +165,55 @@ public class Military {
       state.armies.put(army.id, army);
       nation.armyIds.add(army.id);
     }
-    army.units.merge(unitType, count, Integer::sum);
+
+    List<Human> recruits = pickRecruits(civilians, nation.recruitmentPolicy, count);
+    for (Human h : recruits) {
+      h.role = "soldier";
+      army.memberHumanIds.add(h.id);
+    }
+    army.units.merge(unitType, recruits.size(), Integer::sum);
     army.strength = armyStrength(army);
-    return new RaiseResult(true, null, count);
+    return new RaiseResult(true, null, recruits.size());
+  }
+
+  /** Idle armies (not marching, not fighting, not besieging anything)
+   * slowly release their people back to civilian life instead of serving
+   * forever - a real standing army only makes sense while there's an
+   * actual reason for one. Released soldiers just resume ordinary life
+   * (role=null); Population.update picks their routine back up on its
+   * own the next tick, same as any other civilian. */
+  public static void demobilize(GameState state) {
+    for (Army army : state.armies.values()) {
+      if (army.dead || army.memberHumanIds.isEmpty()) continue;
+      // not "state==idle": state only ever flips forward to "marching" and
+      // never back (see update() below), so an army that ever marched
+      // once would otherwise never be eligible again. Having no live
+      // target and not being at war is what "nothing to do right now"
+      // actually means.
+      if (army.targetSettlementId != null || army.targetArmyId != null) continue;
+      Nation nation = state.nations.get(army.nationId);
+      boolean atWar = false;
+      if (nation != null) {
+        for (DiplomacyManager.PairInfo p : state.diplomacy.pairsInvolving(nation.id)) {
+          if (p.relation.status.equals(Config.WAR)) { atWar = true; break; }
+        }
+      }
+      if (atWar) continue;
+      if (Math.random() >= 0.02) continue; // gradual, not an instant mass discharge
+
+      int idx = (int) (Math.random() * army.memberHumanIds.size());
+      int humanId = army.memberHumanIds.remove(idx);
+      for (Human h : state.humans) {
+        if (h.id == humanId) { h.role = null; break; }
+      }
+      // shrink whichever unit type still has a count to shrink, to keep
+      // the abstract unit map in sync with the real roster size
+      for (Map.Entry<String, Integer> e : army.units.entrySet()) {
+        if (e.getValue() > 0) { e.setValue(e.getValue() - 1); break; }
+      }
+      army.strength = armyStrength(army);
+      if (armyUnitCount(army) <= 0) killArmy(state, army);
+    }
   }
 
   /** The strongest unit type this nation's era unlocks that it can
@@ -154,6 +261,7 @@ public class Military {
   }
 
   public static void update(GameState state) {
+    demobilize(state);
     for (Nation nation : state.nations.values()) {
       double upkeep = 0;
       for (int aid : nation.armyIds) {

@@ -41,6 +41,13 @@ public class EntityRenderer {
   // some real variety instead of every person sharing one identical tone
   private static final ColorRGBA SKIN_TONE_A = new ColorRGBA(0.89f, 0.70f, 0.55f, 1f);
   private static final ColorRGBA SKIN_TONE_B = new ColorRGBA(0.45f, 0.30f, 0.20f, 1f);
+  // a civilian's shoulder joint, in the clothes/skin geometry's own
+  // hip-anchored local frame (mesh-local y=0 = hip - see the leg mesh
+  // comments above); an arm Geometry's own local origin sits here so
+  // rotating it swings from the shoulder, not some arbitrary point.
+  private static final float SHOULDER_X = 0.19f;
+  private static final float SHOULDER_Y = 0.40f;
+  private static final float ARM_SWING_AMPLITUDE = 0.55f; // radians
   private static final Map<Byte, ColorRGBA> DEPOSIT_COLORS = new HashMap<>();
   static {
     DEPOSIT_COLORS.put(Config.RES_STONE, new ColorRGBA(0.604f, 0.627f, 0.659f, 1f));
@@ -116,7 +123,13 @@ public class EntityRenderer {
   private WorldGrid grid;
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate, armyTemplate;
-  private final Mesh humanAxeTemplate, humanPickaxeTemplate;
+  /** A civilian's arms are their own separate meshes/geometries, pivoted
+   * at the shoulder (mesh-local y=0) so they can actually swing with the
+   * walk cycle instead of being rigidly baked into the torso - see
+   * updateHumans. The right arm carries whatever job tool (axe/pickaxe)
+   * this person is using, merged onto the arm itself so the tool swings
+   * with the hand instead of floating fixed on the body. */
+  private final Mesh humanArmLTemplate, humanArmRTemplate, humanArmRAxeTemplate, humanArmRPickaxeTemplate;
   /** Skin (head/face) is a separate mesh+geometry from clothing/gear, each
    * with its own material - skin stays a neutral, individually-varied
    * flesh tone while clothing/hair/tools/uniform take the nation's accent
@@ -157,6 +170,8 @@ public class EntityRenderer {
   private final Geometry[] soldierSkinPool = new Geometry[SOLDIER_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanSkinPool = new Geometry[Config.MAX_HUMANS];
+  private final Geometry[] humanArmLPool = new Geometry[Config.MAX_HUMANS];
+  private final Geometry[] humanArmRPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] businessPool = new Geometry[BUSINESS_CAP];
   private final Geometry[] bankPool = new Geometry[BANK_CAP];
   private final Geometry[] statuePool = new Geometry[BANK_CAP];
@@ -247,13 +262,27 @@ public class EntityRenderer {
     humanTemplate = MeshUtil.mergeMeshes(
         MeshUtil.mergeMeshes(legL, legR),
         MeshUtil.mergeMeshes(torso, MeshUtil.mergeMeshes(collar, MeshUtil.mergeMeshes(belt, hair))));
-    // job-appropriate gear, the same "silhouette carries the meaning, not
-    // color" trick already used for soldiers' carried weapons (clothing
-    // is still one flat nation-accented solo material, so an axe vs a
-    // pickaxe vs bare hands is what actually reads as "this one's a
-    // lumberjack, this one's a miner")
-    humanAxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), axeMesh());
-    humanPickaxeTemplate = MeshUtil.mergeMeshes(humanTemplate.deepClone(), pickaxeMesh());
+
+    // arms: separate meshes/geometries from the clothes/skin above, each
+    // pivoted at its own mesh-local origin (y=0) sitting at the shoulder -
+    // roughly SHOULDER_Y above the hip, which is the clothes geometry's
+    // own translation anchor (see updateHumans) - so rotating the arm
+    // Geometry actually swings it from the shoulder instead of the whole
+    // limb orbiting some arbitrary point. Job-appropriate gear (the same
+    // "silhouette carries the meaning, not color" trick already used for
+    // soldiers' carried weapons) now merges onto the right arm itself
+    // instead of the torso, so an axe or pickaxe actually moves with the
+    // swinging hand instead of floating fixed on the body.
+    Mesh armLBase = MeshUtil.translatedCopy(new Box(0.045f, 0.2f, 0.055f), -SHOULDER_X, -0.2f, 0);
+    Mesh armRBase = MeshUtil.translatedCopy(new Box(0.045f, 0.2f, 0.055f), SHOULDER_X, -0.2f, 0);
+    humanArmLTemplate = armLBase;
+    humanArmRTemplate = armRBase;
+    // axeMesh()/pickaxeMesh() were built hip-relative (y=0 at the hip,
+    // matching the clothes mesh); shift down by SHOULDER_Y to land in the
+    // arm mesh's own shoulder-relative frame at roughly the same hand
+    // height as before.
+    humanArmRAxeTemplate = MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(axeMesh(), 0, -SHOULDER_Y, 0));
+    humanArmRPickaxeTemplate = MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(pickaxeMesh(), 0, -SHOULDER_Y, 0));
 
     // a soldier is a villager who was called up or volunteered, not a
     // different kind of creature - same leg/torso/head body plan, but
@@ -430,6 +459,18 @@ public class EntityRenderer {
       skin.setCullHint(Spatial.CullHint.Always);
       humansNode.attachChild(skin);
       humanSkinPool[i] = skin;
+
+      Geometry armL = new Geometry("HumanArmL" + i, humanArmLTemplate);
+      armL.setMaterial(soloColorMaterial(ColorRGBA.White));
+      armL.setCullHint(Spatial.CullHint.Always);
+      humansNode.attachChild(armL);
+      humanArmLPool[i] = armL;
+
+      Geometry armR = new Geometry("HumanArmR" + i, humanArmRTemplate);
+      armR.setMaterial(soloColorMaterial(ColorRGBA.White));
+      armR.setCullHint(Spatial.CullHint.Always);
+      humansNode.attachChild(armR);
+      humanArmRPool[i] = armR;
     }
     root.attachChild(humansNode);
 
@@ -1369,6 +1410,17 @@ public class EntityRenderer {
     for (int i = 0; i < n; i++) {
       Human h = humans.get(i);
       Geometry g = humanPool[i];
+      // a serving soldier isn't standing around as a civilian anymore -
+      // they're drawn (abstractly, for now) as part of their army's own
+      // marching/garrison visuals instead; see pickUnitForSlot. Rendering
+      // them here too would double them up.
+      if ("soldier".equals(h.role)) {
+        g.setCullHint(Spatial.CullHint.Always);
+        humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
+        humanArmLPool[i].setCullHint(Spatial.CullHint.Always);
+        humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
+        continue;
+      }
       double x = h.prevX + (h.x - h.prevX) * alpha;
       double z = h.prevZ + (h.z - h.prevZ) * alpha;
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
@@ -1385,18 +1437,41 @@ public class EntityRenderer {
         float yaw = (float) Math.atan2(dx, dz);
         g.setLocalRotation(new Quaternion().fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }
-      // job-appropriate gear: a lumberjack carries an axe, a miner (of
-      // any of the three dug resources) carries a pickaxe, everyone else
-      // (unemployed, gathering nothing) is bare-handed
-      Mesh jobMesh = "wood".equals(h.job) ? humanAxeTemplate
-          : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanPickaxeTemplate
-          : humanTemplate;
+      Mesh jobMesh = humanTemplate;
       g.setMesh(jobMesh);
       boolean zombie = h.nationId == Config.UNDEAD_NATION_ID;
       ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
       setSoloColor(g.getMaterial(), c);
       g.setUserData("humanId", h.id);
       g.setCullHint(Spatial.CullHint.Inherit);
+
+      // arms swing from the shoulder, opposite each other, only while
+      // actually walking (real.time animTime-driven walkPhase, not a
+      // per-tick snap - see moveToward, which advances walkPhase every
+      // tick spent moving) - standing still, they just hang at rest,
+      // following whatever direction the body is already facing (bodyRot
+      // is only updated above when moving, same as the body itself).
+      Quaternion bodyRot = g.getLocalRotation();
+      float swing = moving ? (float) Math.sin(h.walkPhase) * ARM_SWING_AMPLITUDE : 0f;
+      Geometry armL = humanArmLPool[i];
+      Geometry armR = humanArmRPool[i];
+      float armY = hgt + 0.5f + bob + SHOULDER_Y;
+      armL.setLocalTranslation((float) x, armY, (float) z);
+      armR.setLocalTranslation((float) x, armY, (float) z);
+      armL.setLocalRotation(bodyRot.mult(new Quaternion().fromAngleAxis(swing, Vector3f.UNIT_X)));
+      armR.setLocalRotation(bodyRot.mult(new Quaternion().fromAngleAxis(-swing, Vector3f.UNIT_X)));
+      // job-appropriate gear: a lumberjack's axe or a miner's pickaxe
+      // (stone/iron/gold all read as "digging") now moves with the right
+      // arm itself instead of being fixed to the torso; everyone else is
+      // bare-handed.
+      Mesh armRMesh = "wood".equals(h.job) ? humanArmRAxeTemplate
+          : ("stone".equals(h.job) || "iron".equals(h.job) || "gold".equals(h.job)) ? humanArmRPickaxeTemplate
+          : humanArmRTemplate;
+      armR.setMesh(armRMesh);
+      setSoloColor(armL.getMaterial(), c);
+      setSoloColor(armR.getMaterial(), c);
+      armL.setCullHint(Spatial.CullHint.Inherit);
+      armR.setCullHint(Spatial.CullHint.Inherit);
 
       // skin geometry rides along with the clothing one - same position,
       // rotation and bob, just its own neutral (or, for the undead, still
@@ -1410,6 +1485,8 @@ public class EntityRenderer {
     for (int i = n; i < Config.MAX_HUMANS; i++) {
       humanPool[i].setCullHint(Spatial.CullHint.Always);
       humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
+      humanArmLPool[i].setCullHint(Spatial.CullHint.Always);
+      humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
     }
   }
 

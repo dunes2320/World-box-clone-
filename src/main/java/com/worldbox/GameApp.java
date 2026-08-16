@@ -345,8 +345,36 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     GodTools.apply(state, tool, cell.x, cell.z, brushSize);
   }
 
+  // Real wall-clock frame time (this call to the next one) - distinct
+  // from PROF's avgTickMs/avgRebuildMs, which only measure sim-tick and
+  // statics-rebuild CPU cost and say nothing about actual render cost
+  // (draw calls, geometry count). This is what "will doubling the
+  // per-person geometry count tank the frame rate" actually has to be
+  // measured against, not guessed at.
+  private long lastFrameNanos = 0;
+  private double frameTimeAccumMs = 0;
+  private int frameCount = 0;
+  private double lastFpsLogAt = 0;
+
+  private void profFrame() {
+    long now = System.nanoTime();
+    if (lastFrameNanos != 0) {
+      frameTimeAccumMs += (now - lastFrameNanos) / 1e6;
+      frameCount++;
+    }
+    lastFrameNanos = now;
+    if (testMode && simTime - lastFpsLogAt >= 5.0 && frameCount > 0) {
+      lastFpsLogAt = simTime;
+      double avgMs = frameTimeAccumMs / frameCount;
+      System.out.println(String.format("PROF_FPS avgFrameMs=%.3f fps=%.1f frames=%d humans=%d",
+          avgMs, 1000.0 / avgMs, frameCount, state.humans.size()));
+      frameTimeAccumMs = 0; frameCount = 0;
+    }
+  }
+
   @Override
   public void simpleUpdate(float tpf) {
+    profFrame();
     simTime += tpf;
     maybeTick();
     applyKeyboardMovement(tpf);

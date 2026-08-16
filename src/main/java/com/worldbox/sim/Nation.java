@@ -156,6 +156,13 @@ public class Nation implements java.io.Serializable {
   /** the person actually running the country - their personality is a
    * real input into how the nation behaves, not flavor text. */
   public Leader leader;
+  /** "volunteer" | "conscription" - how this nation fills its army from
+   * its own citizens (see Military.raiseArmy). Leans out of government
+   * type (autocracy/monarchy toward conscription, democracy/oligarchy
+   * toward volunteers) with some randomness, set once at founding, same
+   * as any other real policy stance rather than a hidden implementation
+   * detail. */
+  public String recruitmentPolicy;
 
   private static final String[] CURRENCY_SUFFIX = {"Crown", "Mark", "Pound", "Dinar", "Franc", "Ducat", "Guilder", "Real", "Krona", "Talent"};
 
@@ -182,6 +189,9 @@ public class Nation implements java.io.Serializable {
     this.government = Government.random();
     this.currencyName = this.name + " " + CURRENCY_SUFFIX[(int) (Math.random() * CURRENCY_SUFFIX.length)];
     this.leader = new Leader(this.government);
+    boolean conscriptionLeaning = Government.AUTOCRACY.equals(this.government) || Government.MONARCHY.equals(this.government);
+    double conscriptionChance = conscriptionLeaning ? 0.7 : 0.25;
+    this.recruitmentPolicy = Math.random() < conscriptionChance ? "conscription" : "volunteer";
   }
 
   /** A complementary hue (opposite side of the color wheel from the
@@ -448,7 +458,7 @@ public class Nation implements java.io.Serializable {
     nation.alive = false;
     for (int aid : new ArrayList<>(nation.armyIds)) {
       Army a = state.armies.get(aid);
-      if (a != null) a.dead = true;
+      if (a != null) Military.killArmy(state, a);
     }
     state.nations.remove(nation.id);
     state.diplomacy.removeNation(nation.id);

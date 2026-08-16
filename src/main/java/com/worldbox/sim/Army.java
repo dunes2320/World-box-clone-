@@ -1,6 +1,8 @@
 package com.worldbox.sim;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class Army implements java.io.Serializable {
@@ -17,6 +19,11 @@ public class Army implements java.io.Serializable {
   public double x, z, prevX, prevZ;
   public double targetX, targetZ;
   public final Map<String, Integer> units = new LinkedHashMap<>();
+  /** The actual Human.id of every person currently serving in this army -
+   * kept in sync with the units count map so combat losses and
+   * demobilization affect real, specific people instead of an abstract
+   * pool. See Military.raiseArmy/applyDamage/demobilize. */
+  public final List<Integer> memberHumanIds = new ArrayList<>();
   public Integer targetSettlementId;
   public Integer targetArmyId;
   public String state = "idle";

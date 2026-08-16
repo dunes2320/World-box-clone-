@@ -54,6 +54,14 @@ public class Human implements java.io.Serializable {
    * involved. Population now only grows from an actual mature
    * male/female pair; see Settlement.update(). */
   public final boolean female = Math.random() < 0.5;
+  /** null (civilian) or "soldier" - a real person from this settlement's
+   * own population who was chosen or conscripted into an Army (see
+   * Military.raiseArmy), not a unit conjured from nowhere. A soldier
+   * keeps their identity, personality and age the whole time they're
+   * serving; they stop working/gathering/wandering while away and
+   * either come home when their army stands down (Military.demobilize)
+   * or, same as any other war casualty, don't come home at all. */
+  public String role;
 
   public Human(double x, double z, int nationId, int settlementId) {
     this.id = nextId++;
