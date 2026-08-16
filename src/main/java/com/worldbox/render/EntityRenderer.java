@@ -48,6 +48,25 @@ public class EntityRenderer {
   private static final float SHOULDER_X = 0.19f;
   private static final float SHOULDER_Y = 0.40f;
   private static final float ARM_SWING_AMPLITUDE = 0.55f; // radians
+  // a civilian with no living nation (a wanderer, or one whose nation
+  // just fell) reads as this neutral gray - was allocated fresh as a
+  // `new ColorRGBA(...)` argument on every single active human, every
+  // single frame, regardless of whether it was ever actually used.
+  private static final ColorRGBA HUMAN_FALLBACK_COLOR = new ColorRGBA(0.6f, 0.6f, 0.65f, 1f);
+  // Scratch Quaternions reused across iterations of the per-frame human
+  // update loop instead of `new Quaternion()`-ing 2-3 of them per active
+  // person (setLocalRotation always copies the values it's given into the
+  // Geometry's own internal Quaternion - see Transform.setRotation - so
+  // it's always safe to immediately reuse the scratch instance for the
+  // next person right after). At a population in the thousands this was
+  // several thousand small heap allocations every single frame, real GC
+  // pressure that reads as periodic stutter on real hardware even where
+  // it doesn't show up as a raw frame-time average.
+  private final Quaternion scratchYaw = new Quaternion();
+  private final Quaternion scratchSwing = new Quaternion();
+  private final Quaternion scratchArmRot = new Quaternion();
+  private final Quaternion scratchSoldierYaw = new Quaternion();
+  private static final ColorRGBA COMBAT_FLASH_COLOR = new ColorRGBA(1f, 0.15f, 0.05f, 1f);
   private static final Map<Byte, ColorRGBA> DEPOSIT_COLORS = new HashMap<>();
   static {
     DEPOSIT_COLORS.put(Config.RES_STONE, new ColorRGBA(0.604f, 0.627f, 0.659f, 1f));
@@ -72,6 +91,10 @@ public class EntityRenderer {
     BUSINESS_COLORS.put("food", new ColorRGBA(0.85f, 0.72f, 0.22f, 1f));
     BUSINESS_COLORS.put("market", new ColorRGBA(0.62f, 0.32f, 0.72f, 1f));
   }
+  // a market's own accent color - used directly rather than through
+  // BUSINESS_COLORS since a market is looked up by b.type, not the
+  // resourceKey the rest of that map is keyed on.
+  private static final ColorRGBA MARKET_COLOR = new ColorRGBA(0.82f, 0.66f, 0.35f, 1f);
 
   private static final int TREE_CAP_SAMPLE = 2600;
   private static final int DEPOSIT_CAP_SAMPLE = 900;
@@ -1198,7 +1221,7 @@ public class EntityRenderer {
       g.setLocalTranslation(s.x + 0.5f + ox, h + groundOffset * scale, s.z + 0.5f + oz);
       g.setLocalScale(scale);
       g.setMesh(b.type.equals("farm") ? farmTemplate : b.type.equals("market") ? marketTemplate : businessTemplate);
-      ColorRGBA color = b.type.equals("market") ? new ColorRGBA(0.82f, 0.66f, 0.35f, 1f)
+      ColorRGBA color = b.type.equals("market") ? MARKET_COLOR
           : BUSINESS_COLORS.getOrDefault(b.resourceKey, ColorRGBA.White);
       setSoloColor(g.getMaterial(), color);
       g.setCullHint(Spatial.CullHint.Inherit);
@@ -1331,7 +1354,7 @@ public class EntityRenderer {
       float flash = fighting ? a.combatFlashTimer / 18f : 0f;
       Nation nation = state.nations.get(a.nationId);
       ColorRGBA baseColor = nation != null ? nationOrFallback(nation.id, ColorRGBA.White) : ColorRGBA.White;
-      ColorRGBA color = fighting ? baseColor.clone().interpolateLocal(new ColorRGBA(1f, 0.15f, 0.05f, 1f), flash) : baseColor;
+      ColorRGBA color = fighting ? baseColor.clone().interpolateLocal(COMBAT_FLASH_COLOR, flash) : baseColor;
 
       // face the army's actual heading; a fighting army instead squares up
       // toward whatever it's engaged with so combat reads as two sides
@@ -1372,7 +1395,7 @@ public class EntityRenderer {
         float bob = (marching && !vehicle) ? (float) Math.abs(Math.sin(animTime * 10.0 + slotIdx * 1.1)) * 0.06f * scale : 0f;
         g.setLocalTranslation(px, h + groundOffset * scale + bob, pz);
         g.setLocalScale(scale);
-        g.setLocalRotation(new Quaternion().fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
+        g.setLocalRotation(scratchSoldierYaw.fromAngleAxis(marchYaw + jitterAxis(a.id, slotIdx, 59), Vector3f.UNIT_Y));
         setSoloColor(g.getMaterial(), color);
         g.setUserData("armyId", a.id);
         g.setCullHint(Spatial.CullHint.Inherit);
@@ -1457,14 +1480,14 @@ public class EntityRenderer {
       g.setLocalTranslation((float) x, hgt + 0.5f + bob, (float) z);
       if (moving) {
         float yaw = (float) Math.atan2(dx, dz);
-        g.setLocalRotation(new Quaternion().fromAngleAxis(yaw, Vector3f.UNIT_Y));
+        g.setLocalRotation(scratchYaw.fromAngleAxis(yaw, Vector3f.UNIT_Y));
       }
       // g's mesh is bound to humanTemplate once at pool creation and never
       // needs to change again - job-appropriate gear now lives on the arm
       // (see below), so this used to re-set the exact same mesh reference
       // on every single active human, every single frame, for nothing.
       boolean zombie = h.nationId == Config.UNDEAD_NATION_ID;
-      ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, new ColorRGBA(0.6f, 0.6f, 0.65f, 1f));
+      ColorRGBA c = zombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, HUMAN_FALLBACK_COLOR);
       setSoloColor(g.getMaterial(), c);
       g.setUserData("humanId", h.id);
       g.setCullHint(Spatial.CullHint.Inherit);
@@ -1489,8 +1512,8 @@ public class EntityRenderer {
       float armY = hgt + 0.5f + bob + SHOULDER_Y;
       armL.setLocalTranslation((float) x, armY, (float) z);
       armR.setLocalTranslation((float) x, armY, (float) z);
-      armL.setLocalRotation(bodyRot.mult(new Quaternion().fromAngleAxis(swing, Vector3f.UNIT_X)));
-      armR.setLocalRotation(bodyRot.mult(new Quaternion().fromAngleAxis(-swing, Vector3f.UNIT_X)));
+      armL.setLocalRotation(bodyRot.mult(scratchSwing.fromAngleAxis(swing, Vector3f.UNIT_X), scratchArmRot));
+      armR.setLocalRotation(bodyRot.mult(scratchSwing.fromAngleAxis(-swing, Vector3f.UNIT_X), scratchArmRot));
       // job-appropriate gear: a lumberjack's axe or a miner's pickaxe
       // (stone/iron/gold all read as "digging") now moves with the right
       // arm itself instead of being fixed to the torso; everyone else is

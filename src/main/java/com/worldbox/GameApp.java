@@ -48,6 +48,15 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private int speed = 1;
 
   private double simTime;
+  /** A separate clock from simTime, driving every purely cosmetic,
+   * continuous-real-time animation (water shimmer, fire flicker, smoke,
+   * rain, clouds, sparkles, and a walking villager's step-bounce/arm-
+   * swing) - simTime itself can't be paused (it also paces the sim-tick
+   * schedule, see maybeTick/alpha below), but this only ever advances
+   * while speed > 0, so pausing the game (speed=0) now actually freezes
+   * every ambient animation instead of only stopping the simulation
+   * while the world visibly keeps flickering/rippling/swinging around it. */
+  private double animClock;
   private double lastTickTime;
   private boolean leftDown, rotating, panning;
   private boolean moveFwd, moveBack, moveLeft, moveRight;
@@ -376,6 +385,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   public void simpleUpdate(float tpf) {
     profFrame();
     simTime += tpf;
+    if (speed > 0) animClock += tpf;
     maybeTick();
     applyKeyboardMovement(tpf);
     updateCamera(tpf);
@@ -393,9 +403,9 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
 
     updateWarHoverFlash(tpf);
     voxelRenderer.flushDirty();
-    voxelRenderer.updateWaterAnimation((float) simTime);
+    voxelRenderer.updateWaterAnimation((float) animClock);
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
-    entityRenderer.update(state, alpha, (float) simTime);
+    entityRenderer.update(state, alpha, (float) animClock);
     updateSelectionRing();
     updateBrushIndicator();
     updateNationLabel();
