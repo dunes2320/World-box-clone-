@@ -186,6 +186,17 @@ public class EntityRenderer {
   private final Node[] siegeLabelNodes = new Node[SIEGE_LABEL_CAP];
   private final com.jme3.font.BitmapText[] siegeLabels = new com.jme3.font.BitmapText[SIEGE_LABEL_CAP];
 
+  // Every update*() below runs once per rendered frame (not once per sim
+  // tick - see GameApp.simpleUpdate), and each used to re-cull its ENTIRE
+  // unused pool tail every single frame regardless of how much of that
+  // pool was actually ever in use - e.g. re-issuing setCullHint(Always)
+  // on up to ~2,900 already-culled human slots x4 pools, 60+ times a
+  // second, just to keep a population of a few dozen hidden. Tracking how
+  // far each pool reached last frame means only the newly-vacated slots
+  // (last frame's count down to this frame's) ever need re-culling - zero
+  // work once a pool's occupancy stops shrinking.
+  private int lastHumanCount = 0, lastSoldierSlotCount = 0, lastSettlementCount = 0, lastBusinessCount = 0;
+
   /** Slow-cadence caches of burning/gold cell indices, refreshed alongside
    * trees/deposits in rebuildStatics() and consumed every frame by the
    * (cheap) per-instance fire flicker / sparkle animation. */
@@ -1080,10 +1091,13 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
-    for (; i < SETTLEMENT_CAP; i++) {
+    int activeSettlements = i;
+    for (; i < Math.max(activeSettlements, lastSettlementCount); i++) {
       settlementPool[i].setCullHint(Spatial.CullHint.Always);
       flagPool[i].setCullHint(Spatial.CullHint.Always);
     }
+    lastSettlementCount = activeSettlements;
+    lastSettlementCount = i;
   }
 
   private void updateFires(GameState state, float animTime) {
@@ -1186,7 +1200,9 @@ public class EntityRenderer {
       g.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
-    for (; i < BUSINESS_CAP; i++) businessPool[i].setCullHint(Spatial.CullHint.Always);
+    int activeBusinesses = i;
+    for (; i < Math.max(activeBusinesses, lastBusinessCount); i++) businessPool[i].setCullHint(Spatial.CullHint.Always);
+    lastBusinessCount = activeBusinesses;
   }
 
   private void updateBanks(GameState state) {
@@ -1373,10 +1389,12 @@ public class EntityRenderer {
         }
       }
     }
-    for (; slot < SOLDIER_CAP; slot++) {
+    int activeSlots = slot;
+    for (; slot < Math.max(activeSlots, lastSoldierSlotCount); slot++) {
       soldierPool[slot].setCullHint(Spatial.CullHint.Always);
       soldierSkinPool[slot].setCullHint(Spatial.CullHint.Always);
     }
+    lastSoldierSlotCount = activeSlots;
   }
 
   /** Deterministic pseudo-random 0..1 for picking which unit type a given
@@ -1482,12 +1500,17 @@ public class EntityRenderer {
       setSoloColor(skin.getMaterial(), zombie ? ZOMBIE_COLOR : skinTone(h.id));
       skin.setCullHint(Spatial.CullHint.Inherit);
     }
-    for (int i = n; i < Config.MAX_HUMANS; i++) {
+    // only the slots that were active last frame and aren't anymore need
+    // re-culling - re-issuing setCullHint(Always) on the same already-
+    // culled slot every frame, all the way out to MAX_HUMANS, was pure
+    // per-frame overhead completely decoupled from the real population.
+    for (int i = n; i < Math.max(n, lastHumanCount); i++) {
       humanPool[i].setCullHint(Spatial.CullHint.Always);
       humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
       humanArmLPool[i].setCullHint(Spatial.CullHint.Always);
       humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
     }
+    lastHumanCount = n;
   }
 
   private void updateMonster(GameState state) {

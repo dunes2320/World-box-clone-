@@ -390,7 +390,7 @@ public class Nation implements java.io.Serializable {
 
   public static void update(GameState state) {
     if (state.tick % 30 == 0) updateRoads(state);
-    if (state.tick % 150 == 0) fillTerritoryGaps(state);
+    if (state.tick % 150 == 0) { fillTerritoryGaps(state); smoothBorders(state); }
 
     for (Nation nation : new ArrayList<>(state.nations.values())) {
       if (!nation.alive) continue;
@@ -448,6 +448,55 @@ public class Nation implements java.io.Serializable {
         if (unanimous && neighbors == 4 && owner >= 0) {
           grid.ownerNation[i] = owner;
           grid.claimStrength[i] = 1f;
+          grid.markDirtyIdx(i);
+        }
+      }
+    }
+  }
+
+  /** A once-in-a-while cleanup pass that mops up single-cell "salt and
+   * pepper" ownership noise where two rival settlements' claim wobbles
+   * interleave near a shared frontier (see Settlement.borderNoise) - a
+   * cell surrounded by a strong majority of one neighbor owner flips to
+   * match it. Deliberately narrow (needs 6 of the 8 surrounding land
+   * cells to agree) so it only ever mops up actual speckling, never eats
+   * into a real, contiguous chunk of someone's territory. Reads from a
+   * snapshot so flips within this pass don't cascade into each other. */
+  private static void smoothBorders(GameState state) {
+    WorldGrid grid = state.grid;
+    int[] before = grid.ownerNation.clone();
+    byte[] terrain = grid.terrain;
+    int[] seenOwner = new int[8];
+    int[] seenCount = new int[8];
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        int i = grid.idx(x, y);
+        if (terrain[i] == Config.WATER) continue;
+        int owner = before[i];
+        int distinct = 0, total = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+          for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = x + dx, ny = y + dy;
+            if (!grid.inBounds(nx, ny)) continue;
+            int ni = grid.idx(nx, ny);
+            if (terrain[ni] == Config.WATER) continue;
+            int no = before[ni];
+            total++;
+            int slot = -1;
+            for (int k = 0; k < distinct; k++) if (seenOwner[k] == no) { slot = k; break; }
+            if (slot < 0) { slot = distinct++; seenOwner[slot] = no; seenCount[slot] = 0; }
+            seenCount[slot]++;
+          }
+        }
+        if (total < 6) continue; // too close to the map edge to judge a real majority
+        int bestOwner = owner, bestCount = -1;
+        for (int k = 0; k < distinct; k++) {
+          if (seenCount[k] > bestCount) { bestCount = seenCount[k]; bestOwner = seenOwner[k]; }
+        }
+        if (bestOwner != owner && bestCount >= 6) {
+          grid.ownerNation[i] = bestOwner;
+          grid.claimStrength[i] = bestOwner >= 0 ? 1f : 0f;
           grid.markDirtyIdx(i);
         }
       }

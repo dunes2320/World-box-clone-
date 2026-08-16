@@ -148,17 +148,23 @@ public class Settlement implements java.io.Serializable {
     claimTerritory(state, settlement, true);
   }
 
-  /** Deterministic per-cell wobble on the claim falloff so a settlement's
-   * border reads as an organic, hand-drawn coastline instead of a
-   * mathematically perfect circle - stable across rebuilds (same trick
-   * used for foliage/tree jitter in EntityRenderer) since it's keyed off
-   * fixed cell coordinates and the settlement's own id, not anything that
-   * changes tick to tick. */
+  /** Deterministic wobble on the claim falloff so a settlement's border
+   * reads as an organic, hand-drawn coastline instead of a mathematically
+   * perfect circle - stable across rebuilds (same trick used for foliage/
+   * tree jitter in EntityRenderer) since it's keyed off fixed cell
+   * coordinates and the settlement's own id, not anything that changes
+   * tick to tick. Hashed on a coarsened (~3-cell) grid rather than the
+   * raw cell coordinates so the wobble is spatially smooth - neighboring
+   * cells drift together instead of each rolling independent noise, which
+   * used to let two rival settlements' unrelated noise fields interleave
+   * cell-by-cell into a visibly speckled, "static-y" frontier instead of
+   * a single wavy line. */
   private static float borderNoise(int x, int y, int salt) {
-    int h = x * 374761393 + y * 668265263 + salt * 2147483647;
+    int cx = Math.floorDiv(x, 3), cy = Math.floorDiv(y, 3);
+    int h = cx * 374761393 + cy * 668265263 + salt * 2147483647;
     h = (h ^ (h >>> 13)) * 1274126177;
     h = h ^ (h >>> 16);
-    return ((h & 0xFFFF) / 65535f - 0.5f) * 7f;
+    return ((h & 0xFFFF) / 65535f - 0.5f) * 5f;
   }
 
   private static void claimTerritory(GameState state, Settlement settlement, boolean force) {

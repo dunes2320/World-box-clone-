@@ -9,6 +9,14 @@ import java.util.Map;
 
 public class Economy {
   private static final double LEVERAGE_LIMIT = 3.0;
+  /** A brand new nation hasn't had time to build real reserves yet, so it
+   * crosses the leverage line almost immediately just from ordinary
+   * founding-era lending - that read as bank runs happening "a lot at the
+   * beginning" rather than as a real consequence of reckless policy. A
+   * nation younger than this quietly gets propped up instead (see
+   * updateBanks); only once a nation's had a real chance to build up
+   * reserves does over-leverage carry actual crash risk. */
+  private static final int BANK_RUN_IMMUNITY_AGE = 3 * com.worldbox.util.Calendar.DAYS_PER_YEAR;
   private static final int MAX_BUSINESSES_PER_SETTLEMENT = 4; // farm + market + up to 2 extraction
   private static final String[] BUSINESS_RESOURCES = {"wood", "stone", "iron"};
   /** Founding capital comes from a bank loan, not free money - "one person
@@ -330,17 +338,32 @@ public class Economy {
       bank.reserves = Math.min(bank.reserves, n.moneySupply);
 
       if (bank.reserves > 0.01 && bank.loans > bank.reserves * LEVERAGE_LIMIT) {
-        double crashChance = 0.01 * Math.min(4.0, bank.loans / (bank.reserves * LEVERAGE_LIMIT));
-        if (Math.random() < crashChance) {
-          bank.reserves = 0;
-          bank.loans *= 0.4;
-          n.treasury -= n.treasury * 0.35 + 40;
-          for (Business b : state.businesses.values()) {
-            if (b.nationId == n.id) b.capital -= 30;
+        int age = state.tick - n.founded;
+        if (age < BANK_RUN_IMMUNITY_AGE) {
+          // too young to survive a real run - the central bank quietly
+          // prints to close the gap instead (same hidden "print through
+          // it" trick updateCurrency uses for a treasury deficit, just
+          // triggered by over-leverage instead), gradually rather than an
+          // instant top-up so it still shows up as real inflation, not a
+          // free pass
+          double shortfall = bank.loans / LEVERAGE_LIMIT - bank.reserves;
+          double printed = shortfall * 0.12;
+          bank.reserves += printed;
+          n.moneySupply += printed;
+          n.printedThisWindow += printed;
+        } else {
+          double crashChance = 0.01 * Math.min(4.0, bank.loans / (bank.reserves * LEVERAGE_LIMIT));
+          if (Math.random() < crashChance) {
+            bank.reserves = 0;
+            bank.loans *= 0.4;
+            n.treasury -= n.treasury * 0.35 + 40;
+            for (Business b : state.businesses.values()) {
+              if (b.nationId == n.id) b.capital -= 30;
+            }
+            bank.justCrashed = true;
+            EventLog.log(state, "economy", "The " + n.currencyName + " bank of " + n.name
+                + " suffered a run - over-leveraged on loans it couldn't cover, its reserves were wiped out");
           }
-          bank.justCrashed = true;
-          EventLog.log(state, "economy", "The " + n.currencyName + " bank of " + n.name
-              + " suffered a run - over-leveraged on loans it couldn't cover, its reserves were wiped out");
         }
       }
     }
