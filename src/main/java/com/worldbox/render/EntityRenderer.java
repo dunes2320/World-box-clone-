@@ -105,6 +105,21 @@ public class EntityRenderer {
   // it" instead of a village
   private static final int HOUSE_CAP_SAMPLE = 6000;
   private static final int FOLIAGE_CAP_SAMPLE = 5500;
+  // Full per-person detail (separate skin/arm geometries, swing animation,
+  // individual click targets) only gets rendered for whoever's within this
+  // radius of the camera's focus point, capped at NEAR_HUMAN_CAP - see
+  // updateHumans. Everyone else is folded into one shared batched mesh, the
+  // same trick already used for trees/houses, so total draw-call cost stops
+  // scaling with total population and instead tracks how many people are
+  // actually near the camera at once.
+  private static final float NEAR_HUMAN_RADIUS = 46f;
+  private static final float NEAR_HUMAN_RADIUS2 = NEAR_HUMAN_RADIUS * NEAR_HUMAN_RADIUS;
+  private static final int NEAR_HUMAN_CAP = 600;
+  // the crowd batch is rebaked only every this-many frames, not every
+  // single one - a small, distant figure a few pixels tall doesn't need
+  // buttery-smooth per-frame repositioning, and skipping the rebake most
+  // frames is what keeps the far-population cost off the per-frame budget
+  private static final int CROWD_REBUILD_INTERVAL = 6;
   private static final ColorRGBA HOUSE_FALLBACK = new ColorRGBA(0.8f, 0.75f, 0.62f, 1f);
   private static final ColorRGBA RUIN_COLOR = new ColorRGBA(0.32f, 0.3f, 0.28f, 1f);
   // these used to be tuned for a small 128x128 map with a handful of
@@ -165,6 +180,13 @@ public class EntityRenderer {
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
   private final Geometry foliageGeom, flowersGeom;
+  // the far-population LOD batch (see NEAR_HUMAN_RADIUS) - one merged mesh
+  // of humanTemplate placements, rebuilt on its own throttled cadence
+  // inside updateHumans rather than rebuildStatics' tick-based one, since
+  // it needs to react to camera movement, not just simulation state
+  private Geometry crowdGeom;
+  private final List<PropBatcher.Placement> crowdCandidates = new ArrayList<>();
+  private int crowdFrameCounter = 0;
 
   private final Node settlementsNode = new Node("settlements");
   private final Node humansNode = new Node("humans");
@@ -471,6 +493,10 @@ public class EntityRenderer {
       humansNode.attachChild(armR);
       humanArmRPool[i] = armR;
     }
+    crowdGeom = new Geometry("HumanCrowd", humanTemplate.deepClone());
+    crowdGeom.setMaterial(vertexColorMaterial());
+    crowdGeom.setCullHint(Spatial.CullHint.Always);
+    humansNode.attachChild(crowdGeom);
     root.attachChild(humansNode);
 
     for (int i = 0; i < BUSINESS_CAP; i++) {
@@ -856,11 +882,42 @@ public class EntityRenderer {
     List<PropBatcher.Placement> flowers = new ArrayList<>();
     burningCache.clear();
     goldCache.clear();
+
+    // Each of these categories has a hard per-category cap well below how
+    // many eligible cells a map this size regularly holds (e.g. a few
+    // thousand forest tiles against a 2600-tree cap). Taking the first N
+    // found in top-left-to-bottom-right scan order used to mean every
+    // rebuild only ever placed props in whatever portion of the map the
+    // scan reached before the cap filled - trees only ever grew on one
+    // side of the map, and burning one down elsewhere freed a slot that
+    // the next never-yet-scanned cell in order grabbed, reading as trees
+    // visibly crawling across the map as fires happened. Counting eligible
+    // cells first and keeping each one via a per-cell hash roll (same
+    // family as jitterAxis - a fixed function of that cell's own x/y, not
+    // of scan order or how many neighbors already got picked) samples
+    // evenly across the whole map and is stable regardless of what burns
+    // down or regrows anywhere else.
+    int forestCount = 0, stoneResCount = 0, mineralCount = 0, foliageEligibleCount = 0;
     for (int y = 0; y < grid.rows; y++) {
       for (int x = 0; x < grid.cols; x++) {
         int i = grid.idx(x, y);
         byte res = grid.resource[i];
-        if (res == Config.RES_FOREST && canopies.size() < TREE_CAP_SAMPLE) {
+        if (res == Config.RES_FOREST) forestCount++;
+        else if (res == Config.RES_STONE) stoneResCount++;
+        else if (res != Config.RES_NONE) mineralCount++;
+        else if (grid.terrain[i] == Config.GRASS && hash01(x, y, 6) < 0.19f) foliageEligibleCount++;
+      }
+    }
+    float forestKeep = forestCount > TREE_CAP_SAMPLE ? TREE_CAP_SAMPLE / (float) forestCount : 1f;
+    float stoneKeep = stoneResCount > DEPOSIT_CAP_SAMPLE ? DEPOSIT_CAP_SAMPLE / (float) stoneResCount : 1f;
+    float mineralKeep = mineralCount > DEPOSIT_CAP_SAMPLE ? DEPOSIT_CAP_SAMPLE / (float) mineralCount : 1f;
+    float foliageKeep = foliageEligibleCount > FOLIAGE_CAP_SAMPLE ? FOLIAGE_CAP_SAMPLE / (float) foliageEligibleCount : 1f;
+
+    for (int y = 0; y < grid.rows; y++) {
+      for (int x = 0; x < grid.cols; x++) {
+        int i = grid.idx(x, y);
+        byte res = grid.resource[i];
+        if (res == Config.RES_FOREST && hash01(x, y, 21) < forestKeep) {
           float scale = 0.6f + Math.min(1f, grid.resourceAmount[i] / 48f) * 0.6f;
           float rotY = (float) ((x * 7 + y * 13) % 6.28);
           float jx = x + 0.5f + jitterAxis(x, y, 1);
@@ -872,7 +929,7 @@ public class EntityRenderer {
           float trunkTop = grid.height[i] + trunkHalf * 2;
           trunks.add(new PropBatcher.Placement(jx, grid.height[i] + trunkHalf, jz, rotY, scale, TRUNK_COLOR));
           canopies.add(new PropBatcher.Placement(jx, trunkTop, jz, rotY, scale, TREE_COLOR));
-        } else if (res == Config.RES_STONE && stoneDeposits.size() < DEPOSIT_CAP_SAMPLE) {
+        } else if (res == Config.RES_STONE && hash01(x, y, 22) < stoneKeep) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
           float jx = x + 0.5f + jitterAxis(x, y, 3);
@@ -882,14 +939,14 @@ public class EntityRenderer {
           // both clusters sit flush at local y=0 - no extra ground offset
           // needed, unlike the old origin-centered gem template
           stoneDeposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
-        } else if (res != Config.RES_NONE && res != Config.RES_FOREST && deposits.size() < DEPOSIT_CAP_SAMPLE) {
+        } else if (res != Config.RES_NONE && res != Config.RES_FOREST && hash01(x, y, 23) < mineralKeep) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
           float jx = x + 0.5f + jitterAxis(x, y, 3);
           float jz = y + 0.5f + jitterAxis(x, y, 4);
           deposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (grid.terrain[i] == Config.GRASS && res == Config.RES_NONE
-            && foliage.size() < FOLIAGE_CAP_SAMPLE && hash01(x, y, 6) < 0.19f) {
+            && hash01(x, y, 6) < 0.19f && hash01(x, y, 24) < foliageKeep) {
           // patchy coverage rather than every single grass block - real
           // ground cover grows in clumps, not a uniform carpet, and a
           // literal every-cell carpet would blow well past a sane vertex
@@ -973,10 +1030,10 @@ public class EntityRenderer {
     housesGeom.setCullHint(houses.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
 
-  public void update(GameState state, float alpha, float animTime) {
+  public void update(GameState state, float alpha, float animTime, Vector3f camFocus) {
     updateSettlements(state);
     buildSoldierPositions(state);
-    updateHumans(state, alpha, animTime);
+    updateHumans(state, alpha, animTime, camFocus);
     updateBusinesses(state);
     updateBanks(state);
     updateStatues(state);
@@ -1310,9 +1367,21 @@ public class EntityRenderer {
     return last;
   }
 
-  private void updateHumans(GameState state, float alpha, float animTime) {
+  private void updateHumans(GameState state, float alpha, float animTime, Vector3f camFocus) {
     List<Human> humans = state.humans;
     int n = Math.min(humans.size(), Config.MAX_HUMANS);
+    // Full per-person detail (separate skin/arm geometries, swing
+    // animation, individual click targets) only gets rendered for whoever
+    // is within NEAR_HUMAN_RADIUS of the camera's focus point, capped at
+    // NEAR_HUMAN_CAP - at a population in the thousands, doing that for
+    // every single person regardless of where they are on the map is what
+    // tanked frame rate as population grew. Everyone else instead gets
+    // folded into one shared "crowd" mesh (crowdGeom), rebuilt only every
+    // CROWD_REBUILD_INTERVAL frames since a distant figure a few pixels
+    // tall doesn't need buttery-smooth per-frame repositioning.
+    boolean rebuildCrowd = (crowdFrameCounter++ % CROWD_REBUILD_INTERVAL) == 0;
+    if (rebuildCrowd) crowdCandidates.clear();
+    int nearCount = 0;
     for (int i = 0; i < n; i++) {
       Human h = humans.get(i);
       Geometry g = humanPool[i];
@@ -1352,6 +1421,31 @@ public class EntityRenderer {
         z = h.prevZ + (h.z - h.prevZ) * alpha;
         dx = h.x - h.prevX; dz = h.z - h.prevZ;
       }
+
+      double camdx = x - camFocus.x, camdz = z - camFocus.z;
+      boolean near = nearCount < NEAR_HUMAN_CAP && camdx * camdx + camdz * camdz < NEAR_HUMAN_RADIUS2;
+      if (!near) {
+        // far from the camera (or already past this frame's near budget) -
+        // no per-frame Geometry updates or draw calls for this person at
+        // all; on a crowd-rebuild frame they instead get folded into the
+        // single batched crowd mesh below.
+        g.setCullHint(Spatial.CullHint.Always);
+        humanSkinPool[i].setCullHint(Spatial.CullHint.Always);
+        humanArmLPool[i].setCullHint(Spatial.CullHint.Always);
+        humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
+        if (rebuildCrowd) {
+          int cgx = clampIdx((int) Math.floor(x), grid.cols), cgz = clampIdx((int) Math.floor(z), grid.rows);
+          float chgt = grid.height[grid.idx(cgx, cgz)];
+          boolean crowdZombie = h.nationId == Config.UNDEAD_NATION_ID;
+          ColorRGBA cc = crowdZombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, HUMAN_FALLBACK_COLOR);
+          float cyaw = (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5)
+              ? (float) Math.atan2(dx, dz) : hash01(h.id, 444, 5) * 6.28f;
+          crowdCandidates.add(new PropBatcher.Placement((float) x, chgt + 0.5f, (float) z, cyaw, 1f, cc));
+        }
+        continue;
+      }
+      nearCount++;
+
       int gx = clampIdx((int) Math.floor(x), grid.cols), gz = clampIdx((int) Math.floor(z), grid.rows);
       float hgt = grid.height[grid.idx(gx, gz)];
       boolean moving = Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5;
@@ -1440,6 +1534,10 @@ public class EntityRenderer {
       skin.setLocalRotation(g.getLocalRotation());
       setSoloColor(skin.getMaterial(), zombie ? ZOMBIE_COLOR : skinTone(h.id));
       skin.setCullHint(Spatial.CullHint.Inherit);
+    }
+    if (rebuildCrowd) {
+      crowdGeom.setMesh(PropBatcher.bake(humanTemplate, crowdCandidates));
+      crowdGeom.setCullHint(crowdCandidates.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     }
     // only the slots that were active last frame and aren't anymore need
     // re-culling - re-issuing setCullHint(Always) on the same already-

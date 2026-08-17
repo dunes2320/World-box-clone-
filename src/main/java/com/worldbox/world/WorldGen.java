@@ -28,9 +28,15 @@ public class WorldGen {
       for (int x = 0; x < cols; x++) {
         int i = grid.idx(x, y);
         double continents = fbm.fbm(x * 0.01 + 1000, y * 0.01 + 1000, 4, 2, 0.5);
+        // a mid-frequency term between the broad "continents" shape and the
+        // fine "base" bumps - without it the map only ever reads as one
+        // smooth landmass with a bit of surface noise on top; this is what
+        // actually breaks it into distinct rolling hill regions at a scale
+        // you notice while walking the camera across it, not just from orbit
+        double hills = fbm.fbm(x * 0.025 + 2000, y * 0.025 + 2000, 4, 2, 0.5);
         double base = fbm.fbm(x * 0.06, y * 0.06, 5, 2, 0.5);
         double warp = fbm.fbm(x * 0.02 + 50, y * 0.02 + 50, 3, 2, 0.5);
-        double e = continents * 1.3 + base * 0.55 + warp * 0.3;
+        double e = continents * 1.3 + hills * 0.7 + base * 0.45 + warp * 0.25;
         rawElevation[i] = e;
         sum += e;
       }
@@ -56,7 +62,31 @@ public class WorldGen {
         double elevation = (rawElevation[i] - mean) + 0.28;
         elevation = elevation * edgeFade - (1 - edgeFade) * 1.2;
 
+        // Ridged noise (folding fbm's usual rolling peaks into sharp
+        // valleys-turned-ridges via |2v-1|) sharpens whatever's already
+        // trending uphill into a real jagged mountain spine instead of the
+        // one smooth blob "elevation" alone produces - masked by how high
+        // elevation already is here so ridges crown existing highlands
+        // rather than poking up at random across the plains.
+        if (elevation > 0.15) {
+          double ridgeN = fbm.fbm(x * 0.045 + 3000, y * 0.045 + 3000, 4, 2.1, 0.5);
+          double ridge = 1.0 - Math.abs(ridgeN * 2 - 1);
+          double mountainMask = Math.min(1.0, (elevation - 0.15) / 0.5);
+          elevation += ridge * ridge * mountainMask * 0.5;
+        }
+
         double h = elevation * 14;
+
+        // A separate, much lower-frequency field than every other term here
+        // picks out a handful of broad interior basins - landing on open,
+        // low-to-mid ground away from both the mountains and the coastline,
+        // it carves a real inland lake instead of the map only ever having
+        // water at its ocean-fringed border.
+        double basin = fbm.fbm(x * 0.018 + 7000, y * 0.018 + 7000, 3, 2, 0.5);
+        if (basin > 0.7 && edgeFade > 0.35 && h > -0.5 && h < 5) {
+          h = -1.2;
+        }
+
         grid.height[i] = (float) h;
 
         // a separate moisture field breaks up what would otherwise be one
