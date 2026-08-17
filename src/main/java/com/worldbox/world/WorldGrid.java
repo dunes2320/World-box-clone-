@@ -17,6 +17,13 @@ public class WorldGrid implements java.io.Serializable {
   public final byte[] terrain = new byte[n];
   public final byte[] resource = new byte[n];
   public final int[] resourceAmount = new int[n];
+  /** 0..1, set once at worldgen (see WorldGen.generate) - how good this
+   * cell's land is for farming. A broad, low-frequency field so real
+   * fertile regions and poor ones each span a meaningful stretch of map,
+   * not a cell-by-cell speckle - see Settlement/Economy's farm food
+   * production, which scales by whatever this reads at a settlement's
+   * own location. */
+  public final float[] fertility = new float[n];
   public final boolean[] burning = new boolean[n];
   public final int[] burnTimer = new int[n];
   /** Where this cell's fire originally started, and how far from that

@@ -117,6 +117,9 @@ public class Nation implements java.io.Serializable {
    * country right now" line, folding in treasury, war, unemployment and
    * leadership all at once instead of reading five separate numbers. */
   public final java.util.ArrayDeque<Double> stabilityHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of this nation's total military power (see
+   * Nation.totalMilitaryPower) - the "Military" graph line. */
+  public final java.util.ArrayDeque<Double> militaryHistory = new java.util.ArrayDeque<>();
   /** true once this nation only prints to cover deficits with no reserve
    * backing - once dominant enough, a currency can leave the gold standard
    * and never goes back, same as real reserve currencies. */

@@ -333,7 +333,16 @@ public class Settlement implements java.io.Serializable {
       // settlement just sat inert) but now genuinely deletes the whole
       // nation if it was that settlement's only one - this buys a real
       // settlement enough time to trade, expand, or be reinforced instead
-      double production = farmWorkers * FOOD_PER_WORKER + Math.min(settlement.farmCells, 3) * 0.08 + 1.2;
+      // real farming (the per-worker term) depends on how good this
+      // settlement's own land actually is - see WorldGrid.fertility, its
+      // own broad low-frequency field independent of terrain/moisture, so
+      // a nation founded on genuinely fertile ground grows real food
+      // faster than one boxed into poor land, same idea already applied
+      // to mineral deposits (WorldGen's regional favorability). The
+      // unconditional trickle right after it is foraging, not real
+      // farming, so it isn't gated by land quality.
+      float fertility = state.grid.fertility[state.grid.idx(settlement.x, settlement.z)];
+      double production = farmWorkers * FOOD_PER_WORKER * (0.5 + fertility) + Math.min(settlement.farmCells, 3) * 0.08 + 1.2;
       double consumption = settlement.populationCount * FOOD_PER_POP;
       settlement.stock.merge("food", production - consumption, Double::sum);
 

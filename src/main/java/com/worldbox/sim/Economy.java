@@ -59,6 +59,33 @@ public class Economy {
     return best;
   }
 
+  /** A workshop's raw-material consumption is a real domestic sale, not a
+   * free draw - it pays whichever extraction business in this settlement
+   * actually mines that resource (crediting their capital, and this
+   * nation's extraction sector), or the treasury directly if there isn't
+   * one (gold_ore has no dedicated extraction business - it's a
+   * government job, see Population.assignJob). Without this, the
+   * extraction sector read as permanently dead the moment a settlement
+   * built real manufacturing: extraction only ever monetized surplus
+   * ABOVE the settlement buffer, while a workshop draws material down
+   * toward zero first and left nothing left to count as "surplus". This
+   * is the real supply chain instead: miners sell ore to the workshop. */
+  private static void payDomesticSupplier(GameState state, Settlement s, Nation n, String key, double amount) {
+    if (amount <= 0) return;
+    double value = amount * nationPrice(state, n, key);
+    Business supplier = null;
+    for (Business b : state.businesses.values()) {
+      if (b.settlementId == s.id && b.type.equals("extraction") && key.equals(b.resourceKey)) { supplier = b; break; }
+    }
+    if (supplier != null) {
+      supplier.capital += value;
+      n.sectorRevenue.merge(supplier.sector(), value, Double::sum);
+    } else {
+      n.treasury += value;
+    }
+    n.gdpAccum += value;
+  }
+
   private static boolean hasMarketBusiness(GameState state, int settlementId) {
     for (Business b : state.businesses.values()) {
       if (b.settlementId == settlementId && b.type.equals("market")) return true;
@@ -390,12 +417,17 @@ public class Economy {
 
       if (b.type.equals("farm")) {
         // a farm turns wood and stone into food - real production, not
-        // just a resale - on top of whatever food surplus it also sells
+        // just a resale - on top of whatever food surplus it also sells.
+        // Scaled by this settlement's own land fertility (see WorldGrid.
+        // fertility), same as the settlement-level trickle production in
+        // Settlement.update - a farm on genuinely good land just makes
+        // more food out of the same raw materials.
+        float fertility = state.grid.fertility[state.grid.idx(s.x, s.z)];
         double wood = Math.min(2.0, s.stock.getOrDefault("wood", 0.0));
         double stone = Math.min(1.0, s.stock.getOrDefault("stone", 0.0));
         s.stock.merge("wood", -wood, Double::sum);
         s.stock.merge("stone", -stone, Double::sum);
-        s.stock.merge("food", (wood + stone) * b.productivity * 1.5, Double::sum);
+        s.stock.merge("food", (wood + stone) * b.productivity * 1.5 * (0.5 + fertility), Double::sum);
       } else if (b.type.equals("workshop")) {
         // tools: real manufacturing, iron worked with wood into a finished
         // good worth several times the raw iron it started as
@@ -404,6 +436,8 @@ public class Economy {
         s.stock.merge("iron", -iron, Double::sum);
         s.stock.merge("wood", -wood, Double::sum);
         s.stock.merge("tools", (iron + wood) * b.productivity * 1.1, Double::sum);
+        payDomesticSupplier(state, s, n, "iron", iron);
+        payDomesticSupplier(state, s, n, "wood", wood);
       } else if (b.type.equals("luxury_workshop")) {
         // luxury goods: gold_ore and stone crafted into jewelry/fine
         // goods - low volume, high value per unit
@@ -412,6 +446,8 @@ public class Economy {
         s.stock.merge("gold_ore", -gold, Double::sum);
         s.stock.merge("stone", -stone, Double::sum);
         s.stock.merge("luxury", (gold * 2.5 + stone * 0.3) * b.productivity, Double::sum);
+        payDomesticSupplier(state, s, n, "gold_ore", gold);
+        payDomesticSupplier(state, s, n, "stone", stone);
       }
 
       if (!b.type.equals("market")) {

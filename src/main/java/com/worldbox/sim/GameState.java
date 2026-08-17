@@ -30,6 +30,8 @@ public class GameState implements java.io.Serializable {
   /** last ~120 samples of population-weighted average stability across
    * every living nation - "how stable is the world overall right now". */
   public final java.util.ArrayDeque<Double> worldStabilityHistory = new java.util.ArrayDeque<>();
+  /** last ~120 samples of every living nation's combined military power. */
+  public final java.util.ArrayDeque<Double> worldMilitaryHistory = new java.util.ArrayDeque<>();
   /** world-wide counterpart to Nation.sectorHistory - every living
    * nation's sector revenue summed together, same monthly cadence. */
   public final Map<String, java.util.ArrayDeque<Double>> worldSectorHistory = new LinkedHashMap<>();

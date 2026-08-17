@@ -1070,6 +1070,7 @@ public class GameHud {
       case "war": return DANGER;
       case "disaster": return DISASTER_COLOR;
       case "economy": return DANGER;
+      case "discovery": return GOOD;
       default: return TEXT;
     }
   }
@@ -1134,13 +1135,15 @@ public class GameHud {
     viewAllNations.addClickCommands(src -> showGraph("allNations", -1));
   }
 
-  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability", "sectors"};
-  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability", "sectors"};
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability", "military", "sectors"};
+  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability", "military", "sectors"};
   // "By Nation" only ever compares ONE metric across every living nation
   // at once - "sectors" is already a multi-series breakdown for a single
   // nation/world, so it doesn't have a sensible "by nation" overlay of its
-  // own and is deliberately left out of this shorter list.
-  private static final String[] GRAPH_METRICS_ALL_NATIONS = {"marketcap", "gdp", "stability"};
+  // own and is deliberately left out of this shorter list. "military" DOES
+  // belong here - a single number per nation, and comparing every living
+  // nation's military power side by side is exactly what was asked for.
+  private static final String[] GRAPH_METRICS_ALL_NATIONS = {"marketcap", "gdp", "stability", "military"};
   // fixed per-sector display identity (label + line color), in the same
   // order as Config.SECTORS - shared by the summary rows, the legend and
   // the chart lines themselves so a sector always reads as the same color
@@ -1168,6 +1171,7 @@ public class GameHud {
       case "inflation": return "Inflation";
       case "wealth": return "Wealth";
       case "stability": return "Stability";
+      case "military": return "Military";
       case "sectors": return "Sectors";
       default: return "Cap";
     }
@@ -1181,6 +1185,7 @@ public class GameHud {
       case "inflation": return "Inflation";
       case "wealth": return "Average Citizen Wealth";
       case "stability": return "Stability";
+      case "military": return "Military Power";
       case "sectors": return "Market Sectors";
       default: return "Market Cap";
     }
@@ -1193,15 +1198,17 @@ public class GameHud {
       case "inflation": return String.format("%+.1f%%", v * 100);
       case "wealth": return String.format("%.1f", v) + "g";
       case "stability": return String.format("%.0f%%", v);
+      case "military": return String.format("%.0f", v);
       default: return (int) Math.floor(v) + "g";
     }
   }
 
-  /** Every metric but market cap/GDP/stability needs a specific nation
-   * (unemployment, exchange rate, inflation and average wealth aren't
-   * tracked world-wide - there's no single meaningful "world inflation
-   * rate" the way a nation's is). Stability IS tracked world-wide too -
-   * see Government.update's population-weighted worldStabilityHistory. */
+  /** Every metric but market cap/GDP/stability/military needs a specific
+   * nation (unemployment, exchange rate, inflation and average wealth
+   * aren't tracked world-wide - there's no single meaningful "world
+   * inflation rate" the way a nation's is). Stability and military ARE
+   * tracked world-wide too - see Government.update's population-weighted
+   * worldStabilityHistory and summed worldMilitaryHistory. */
   private java.util.ArrayDeque<Double> metricHistory(GameState state, String metric, boolean isWorld, Nation n) {
     switch (metric) {
       case "unemployment": return isWorld ? null : n.unemploymentHistory;
@@ -1210,6 +1217,7 @@ public class GameHud {
       case "inflation": return isWorld ? null : negated(n.inflationHistory);
       case "wealth": return isWorld ? null : n.wealthHistory;
       case "stability": return isWorld ? state.worldStabilityHistory : n.stabilityHistory;
+      case "military": return isWorld ? state.worldMilitaryHistory : n.militaryHistory;
       default: return isWorld ? state.worldMarketCapHistory : n.marketCapHistory;
     }
   }

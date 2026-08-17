@@ -390,6 +390,7 @@ public class Events {
     updateTornadoes(state);
     updateMonster(state);
     updateAutoDisasters(state);
+    maybeDiscoverResources(state);
   }
 
   /** A world with god tools but nothing happening on its own doesn't feel
@@ -430,6 +431,62 @@ public class Events {
           break;
         }
       }
+    }
+  }
+
+  /** Long-run economic churn: mineral deposits never respawn once mined
+   * out (see Config.RESOURCE_INFO), and without something to replace them
+   * the map's economic geography would only ever shrink toward nothing.
+   * Every so often a fresh vein - or a newly fertile stretch of land -
+   * turns up somewhere in the unclaimed wilderness, real enough (same
+   * yield/fertility as anything worldgen placed) to let a new nation rise
+   * where an old resource-dependent one already declined, instead of
+   * opportunity only ever draining away as the game goes on. Deliberately
+   * only ever lands on genuinely unclaimed ground - this replaces what's
+   * been mined out and moved on from, it doesn't hand an existing nation
+   * a windfall inside its own borders. */
+  private static final byte[] DISCOVERY_MINERALS = {Config.RES_GOLD, Config.RES_IRON, Config.RES_STONE};
+
+  private static void maybeDiscoverResources(GameState state) {
+    if (Math.random() > 0.0007) return;
+    WorldGrid grid = state.grid;
+    boolean mineral = Math.random() < 0.6;
+    byte wantTerrain = mineral ? Config.STONE : Config.GRASS;
+    for (int attempt = 0; attempt < 25; attempt++) {
+      int x = (int) (Math.random() * grid.cols), y = (int) (Math.random() * grid.rows);
+      if (!grid.inBounds(x, y)) continue;
+      int i = grid.idx(x, y);
+      if (grid.ownerNation[i] >= 0 || grid.terrain[i] != wantTerrain) continue;
+
+      String where = nearbyPlaceDescription(state, x + 0.5, y + 0.5);
+      int[] painted = {0};
+      if (mineral) {
+        byte type = DISCOVERY_MINERALS[(int) (Math.random() * DISCOVERY_MINERALS.length)];
+        int amount = Config.RESOURCE_INFO.get(type).yieldAmt * (25 + (int) (Math.random() * 20));
+        grid.forEachInRadius(x, y, 4 + Math.random() * 2, (px, py, d) -> {
+          int pi = grid.idx(px, py);
+          if (grid.terrain[pi] != Config.STONE || grid.resource[pi] != Config.RES_NONE || grid.ownerNation[pi] >= 0) return;
+          grid.resource[pi] = type;
+          grid.resourceAmount[pi] = amount;
+          grid.markDirtyIdx(pi);
+          painted[0]++;
+        });
+        if (painted[0] > 0) {
+          String name = type == Config.RES_GOLD ? "gold" : type == Config.RES_IRON ? "iron" : "stone";
+          EventLog.log(state, "discovery", "A rich new " + name + " vein was discovered " + where);
+        }
+      } else {
+        grid.forEachInRadius(x, y, 5 + Math.random() * 3, (px, py, d) -> {
+          int pi = grid.idx(px, py);
+          if (grid.terrain[pi] != Config.GRASS || grid.ownerNation[pi] >= 0) return;
+          grid.fertility[pi] = Math.max(grid.fertility[pi], (float) (0.75 + Math.random() * 0.25));
+          painted[0]++;
+        });
+        if (painted[0] > 0) {
+          EventLog.log(state, "discovery", "A stretch of unusually fertile land was discovered " + where);
+        }
+      }
+      return;
     }
   }
 }

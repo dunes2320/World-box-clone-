@@ -741,11 +741,17 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
       if (com.worldbox.config.Config.WAR.equals(r.status)) atWar++;
       else if (com.worldbox.config.Config.ALLIANCE.equals(r.status)) allied++;
     }
+    int discoveries = 0;
+    String lastDiscovery = null;
+    for (var e : state.eventLog) {
+      if ("discovery".equals(e.category)) { discoveries++; lastDiscovery = e.message; }
+    }
     System.out.println(String.format(
-        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f atWar=%d allied=%d armies=%d deaths[%s]",
+        "SOAK year=%.1f tick=%d pop=%d nationsAlive=%d nationsFounded=%d settlements=%d homeless=%d avgWealth=%.1f avgDebt=%.1f atWar=%d allied=%d armies=%d discoveries=%d deaths[%s]",
         years, state.tick, state.humans.size(), state.nations.size(), Nation.totalFounded(),
         state.settlements.size(), homeless, totalWealth / n, totalDebt / n, atWar, allied, state.armies.size(),
-        com.worldbox.sim.DeathStats.summary()));
+        discoveries, com.worldbox.sim.DeathStats.summary()));
+    if (lastDiscovery != null) System.out.println("  latest discovery: " + lastDiscovery);
     com.worldbox.sim.DeathStats.reset();
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;

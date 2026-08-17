@@ -98,6 +98,14 @@ public class WorldGen {
         // up despite this field existing.
         double moisture = fbm.fbm(x * 0.045 + 400, y * 0.045 + 400, 4, 2, 0.5);
 
+        // fertility: its own independent, broad low-frequency field (not
+        // derived from moisture/elevation) so real fertile stretches and
+        // poor ones each span a real region of the map instead of
+        // following the same pattern grass/dirt already does - see
+        // Settlement/Economy's farm food production, which reads this at
+        // a settlement's own location.
+        grid.fertility[i] = (float) fbm.fbm(x * 0.016 + 9000, y * 0.016 + 9000, 4, 2, 0.5);
+
         // VoxelWorld voxelizes a land column's height as
         // round(grid.height[i]) + Y_OFFSET, and water is a *fixed* plane
         // at WATER_LEVEL = Y_OFFSET - 1. A land cell only comes out flush
@@ -138,14 +146,30 @@ public class WorldGen {
             grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 8;
           }
         } else if (t == Config.STONE) {
+          // regional favorability: three independent broad noise fields
+          // (not tied to elevation or each other) bias which mineral is
+          // actually likely here, so the map ends up with a real "gold
+          // country" and a real "iron country" instead of every mountain
+          // range offering the same uniform blend of everything. Each
+          // multiplier averages out to roughly 1x over the whole map (so
+          // total world-wide deposit counts land close to the old flat
+          // rates) but swings from 0.2x in an unfavorable region up to
+          // 1.8x in a rich one - real scarcity depending on where a
+          // nation actually is, never literally zero anywhere.
+          double goldFavor = fbm.fbm(x * 0.012 + 5000, y * 0.012 + 5000, 3, 2, 0.5);
+          double ironFavor = fbm.fbm(x * 0.012 + 6000, y * 0.012 + 6000, 3, 2, 0.5);
+          double stoneFavor = fbm.fbm(x * 0.012 + 7500, y * 0.012 + 7500, 3, 2, 0.5);
+          double goldP = 0.05 * (0.2 + goldFavor * 1.6);
+          double ironP = 0.11 * (0.2 + ironFavor * 1.6);
+          double stoneP = 0.24 * (0.2 + stoneFavor * 1.6);
           double roll = rng.next();
-          if (roll < 0.05) {
+          if (roll < goldP) {
             grid.resource[i] = Config.RES_GOLD;
             grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_GOLD).yieldAmt * 30;
-          } else if (roll < 0.16) {
+          } else if (roll < goldP + ironP) {
             grid.resource[i] = Config.RES_IRON;
             grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_IRON).yieldAmt * 30;
-          } else if (roll < 0.4) {
+          } else if (roll < goldP + ironP + stoneP) {
             grid.resource[i] = Config.RES_STONE;
             grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_STONE).yieldAmt * 40;
           }
