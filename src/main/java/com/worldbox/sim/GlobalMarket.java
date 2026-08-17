@@ -12,7 +12,7 @@ import java.util.Map;
  * nation-to-nation ledger: everyone trades against the same floating
  * prices. */
 public class GlobalMarket implements java.io.Serializable {
-  private static final String[] KEYS = {"food", "wood", "stone", "iron", "gold_ore"};
+  private static final String[] KEYS = {"food", "wood", "stone", "iron", "gold_ore", "tools", "luxury"};
   private static final int HISTORY_LEN = 90;
 
   public final Map<String, Double> prices = new LinkedHashMap<>(Config.BASE_PRICES);

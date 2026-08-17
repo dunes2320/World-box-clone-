@@ -8,11 +8,16 @@ import com.worldbox.world.WorldGrid;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class Nation implements java.io.Serializable {
   private static int nextId = 1;
   private static int colorCursor = 0;
+  /** Share of ordinary domestic taxation kept as a physical goods reserve
+   * (Nation.stockpile) instead of being sold for cash on the spot - see
+   * Nation.update's tax loop. */
+  private static final double IN_KIND_TAX_SHARE = 0.35;
 
   /** Total nations ever founded this game, alive or extinct - lets debug
    * tooling report an extinction rate (founded vs. currently alive)
@@ -153,6 +158,37 @@ public class Nation implements java.io.Serializable {
   /** the nation's currency name, e.g. "Valendorian Crown" - cosmetic, but
    * ties the currency-vs-gold graph to something with a name. */
   public String currencyName;
+
+  /** A real government-held goods reserve, distinct from any one
+   * settlement's own stock or a business's own capital - filled by taking
+   * a slice of ordinary taxation in-kind (see Economy.collectTax) instead
+   * of always immediately monetizing it, and drawn down by cross-border
+   * export trade (see Economy.updateForeignTrade). What "the government
+   * keeps a stockpile" actually means in practice: a visible, spendable
+   * reserve of real goods the state can draw on, not just a treasury
+   * number. */
+  public final Map<String, Double> stockpile = new java.util.HashMap<>();
+  /** Government levy on this nation's own exporters, taken out of a sale's
+   * proceeds before the business ever sees the money - real income for
+   * the state, same idea as taxRate but specific to cross-border trade. */
+  public double exportTaxRate = 0.08;
+  /** Government levy this nation charges on top of the price when one of
+   * its own businesses imports (draws down) a foreign stockpile - the
+   * buyer-side counterpart to exportTaxRate. */
+  public double importTaxRate = 0.08;
+  /** A slow-moving index of how expensive land/property is here - rises
+   * with a strong currency and a prosperous treasury, falls with a weak
+   * one (see Economy.updateLandValue). 1.0 = the same as it was at
+   * founding. Scales real costs: a house, or founding a new business. */
+  public double landValueIndex = 1.0;
+  /** Revenue earned this sampling window, broken down by which sector of
+   * the economy actually earned it (see Config.SECTORS / Business.sector)
+   * - rolled into sectorHistory and reset every time Government.update
+   * takes its monthly sample, same cadence/pattern as gdpAccum. */
+  public final Map<String, Double> sectorRevenue = new java.util.HashMap<>();
+  /** last ~120 monthly samples of sectorRevenue, per sector - the series
+   * the HUD's per-nation "Sectors" graph tab plots. */
+  public final Map<String, java.util.ArrayDeque<Double>> sectorHistory = new java.util.LinkedHashMap<>();
   /** the person actually running the country - their personality is a
    * real input into how the nation behaves, not flavor text. */
   public Leader leader;
@@ -192,6 +228,11 @@ public class Nation implements java.io.Serializable {
     boolean conscriptionLeaning = Government.AUTOCRACY.equals(this.government) || Government.MONARCHY.equals(this.government);
     double conscriptionChance = conscriptionLeaning ? 0.7 : 0.25;
     this.recruitmentPolicy = Math.random() < conscriptionChance ? "conscription" : "volunteer";
+    for (String sector : Config.SECTORS) {
+      sectorRevenue.put(sector, 0.0);
+      sectorHistory.put(sector, new java.util.ArrayDeque<>());
+    }
+    for (String key : GlobalMarket.keys()) stockpile.put(key, 0.0);
   }
 
   /** A complementary hue (opposite side of the color wheel from the
@@ -398,12 +439,19 @@ public class Nation implements java.io.Serializable {
       for (int sid : nation.settlementIds) {
         Settlement settlement = state.settlements.get(sid);
         if (settlement == null) continue;
-        for (String key : new String[]{"wood", "stone", "iron", "gold_ore"}) {
-          double surplus = Math.max(0, settlement.stock.get(key) - Config.SETTLEMENT_BUFFER);
+        for (String key : new String[]{"wood", "stone", "iron", "gold_ore", "tools", "luxury"}) {
+          double surplus = Math.max(0, settlement.stock.getOrDefault(key, 0.0) - Config.SETTLEMENT_BUFFER);
           if (surplus <= 0) continue;
           double taxed = surplus * nation.taxRate * 0.25;
           settlement.stock.merge(key, -taxed, Double::sum);
-          treasuryGain += taxed * state.market.prices.get(key);
+          // a real government keeps a stockpile, not just a treasury
+          // number - a slice of what it taxes stays as physical goods
+          // (see Nation.stockpile) instead of always being immediately
+          // monetized, and that reserve is what actually funds this
+          // nation's own exports (see Economy.updateForeignTrade)
+          double inKind = taxed * IN_KIND_TAX_SHARE;
+          nation.stockpile.merge(key, inKind, Double::sum);
+          treasuryGain += (taxed - inKind) * Economy.nationPrice(state, nation, key);
         }
       }
       nation.treasury += treasuryGain;

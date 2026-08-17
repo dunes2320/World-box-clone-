@@ -135,12 +135,37 @@ public class Population {
   private static final double HOUSE_PRICE = 40;
 
   private static void applyLivingCost(GameState state, Human h) {
-    h.wealth -= 0.05;
+    buyFood(state, h);
     resolveFinances(state, h);
     if (!h.hasHouse) {
       maybeBuyHouse(state.nations.get(h.nationId), h);
       if (!h.hasHouse) applyHomelessness(h);
     }
+  }
+
+  // roughly one unit of food a day at the base price (2.0) and a
+  // currency sitting right at par (localPriceMultiplier == 1.0) works out
+  // to the same ~0.05/tick this used to cost as a flat, no-strings
+  // deduction - except now it's an actual purchase, tracks the real local
+  // price (currency strength included), and pays a real seller.
+  private static final double FOOD_UNIT_PER_TICK = 0.025;
+
+  /** Every citizen actually buys their food every day - a real transaction
+   * at the settlement's own local price (see Economy.nationPrice), not a
+   * flat unconditional drain. Whoever's growing it locally (the
+   * settlement's farm business) gets paid; if there isn't one yet, the
+   * treasury covers it, same "employer or public sector" pattern payWage
+   * already uses. This is the ONLY place a citizen's wealth goes down
+   * just for existing - every other loss here (loans, shopping) is a
+   * real, specific transaction. */
+  private static void buyFood(GameState state, Human h) {
+    Nation nation = state.nations.get(h.nationId);
+    double cost = FOOD_UNIT_PER_TICK * Economy.nationPrice(state, nation, "food");
+    h.wealth -= cost;
+    Settlement settlement = state.settlements.get(h.settlementId);
+    Business farm = settlement == null ? null : findBusiness(state, settlement.id, "farm");
+    if (farm != null) farm.capital += cost;
+    else if (nation != null) nation.treasury += cost;
   }
 
   /** Being homeless has to actually cost something beyond an ugly color
@@ -171,10 +196,14 @@ public class Population {
     // (see the "housed < capacity" check there) now handles the "no
     // savings at all" case gradually; this path just needs to still be
     // reachable for anyone actually saving toward it.
-    if (h.hasHouse || h.debt > 0 || h.wealth < HOUSE_PRICE * 0.6) return;
-    h.wealth -= HOUSE_PRICE;
+    // a prosperous nation with a strong currency has genuinely more
+    // expensive property - see Nation.landValueIndex (1.0 = same as at
+    // founding)
+    double price = HOUSE_PRICE * (nation != null ? nation.landValueIndex : 1.0);
+    if (h.hasHouse || h.debt > 0 || h.wealth < price * 0.6) return;
+    h.wealth -= price;
     h.hasHouse = true;
-    if (nation != null) nation.bank.reserves += HOUSE_PRICE;
+    if (nation != null) nation.bank.reserves += price;
   }
 
   /** A citizen's wealth can't just sit arbitrarily negative forever - if
@@ -365,8 +394,12 @@ public class Population {
    * so a shopper's route ends where the stall is actually drawn instead of
    * just at the settlement's center tile. */
   private static Business findMarket(GameState state, int settlementId) {
+    return findBusiness(state, settlementId, "market");
+  }
+
+  private static Business findBusiness(GameState state, int settlementId, String type) {
     for (Business b : state.businesses.values()) {
-      if (b.settlementId == settlementId && b.type.equals("market")) return b;
+      if (b.settlementId == settlementId && b.type.equals(type)) return b;
     }
     return null;
   }
@@ -381,20 +414,57 @@ public class Population {
     return s.z + 0.5 + Math.sin(angle) * 1.4;
   }
 
-  private static final double SHOP_PRICE = 2.5;
+  private static final double LUXURY_SHOP_UNIT = 0.6;
 
-  /** A trip to market is a real errand: walk there, spend a bit, walk
-   * back to whatever leisure was doing before. Nothing to buy without a
-   * market, or without a little spare wealth to spend. */
+  /** A trip to market is a real errand: walk there, actually buy real
+   * luxury goods at the going local price, walk back to whatever leisure
+   * was doing before. Nothing to buy without a market to walk to, and
+   * nothing to buy there without real luxury goods actually existing
+   * somewhere - either made locally (a settlement's own luxury_workshop
+   * surplus) or drawn from the nation's own stockpile (see Nation.
+   * stockpile, filled by Nation.update's in-kind tax collection and by
+   * Economy.updateForeignTrade's imports). */
   private static void maybeGoShopping(GameState state, Human h) {
-    if (h.wealth < SHOP_PRICE * 2 || Math.random() >= 0.006) return;
+    if (h.wealth < LUXURY_SHOP_UNIT * Config.BASE_PRICES.get("luxury") * 2 || Math.random() >= 0.006) return;
     Settlement s = state.settlements.get(h.settlementId);
     if (s == null) return;
     Business market = findMarket(state, h.settlementId);
     if (market == null) return;
+    Nation nation = state.nations.get(h.nationId);
+    double localLuxury = s.stock.getOrDefault("luxury", 0.0);
+    double nationalLuxury = nation != null ? nation.stockpile.getOrDefault("luxury", 0.0) : 0;
+    if (localLuxury < LUXURY_SHOP_UNIT && nationalLuxury < LUXURY_SHOP_UNIT) return;
     h.state = "shopping";
     h.targetX = marketX(s, market);
     h.targetZ = marketZ(s, market);
+  }
+
+  /** Arrival at the market: an actual unit of luxury goods actually
+   * changes hands, drawn first from the settlement's own local stock (the
+   * real crafted output of a luxury_workshop, if this settlement has one)
+   * and only from the nation's stockpile if there's none locally - paid
+   * for at the real local price, crediting whoever's actually stocking
+   * it. A citizen who arrives to find the goods already gone (someone
+   * else bought the last of it first) just walks home with their money
+   * still in their pocket - no purchase, no cost. */
+  private static void buyLuxury(GameState state, Human h) {
+    Settlement s = state.settlements.get(h.settlementId);
+    Nation nation = state.nations.get(h.nationId);
+    double cost = LUXURY_SHOP_UNIT * Economy.nationPrice(state, nation, "luxury");
+    if (s != null && s.stock.getOrDefault("luxury", 0.0) >= LUXURY_SHOP_UNIT) {
+      s.stock.merge("luxury", -LUXURY_SHOP_UNIT, Double::sum);
+      h.wealth -= cost;
+      Business luxuryWorkshop = findBusiness(state, s.id, "luxury_workshop");
+      if (luxuryWorkshop != null) luxuryWorkshop.capital += cost;
+      else {
+        Business market = findMarket(state, s.id);
+        if (market != null) market.capital += cost * 0.7;
+      }
+    } else if (nation != null && nation.stockpile.getOrDefault("luxury", 0.0) >= LUXURY_SHOP_UNIT) {
+      nation.stockpile.merge("luxury", -LUXURY_SHOP_UNIT, Double::sum);
+      h.wealth -= cost;
+      nation.treasury += cost;
+    }
   }
 
   public static void update(GameState state) {
@@ -483,9 +553,7 @@ public class Population {
       if (h.state.equals("shopping")) {
         double dist = moveToward(grid, h, SPEED * 0.8);
         if (dist < 0.3) {
-          h.wealth -= SHOP_PRICE;
-          Business market = findMarket(state, h.settlementId);
-          if (market != null) market.capital += SHOP_PRICE * 0.7;
+          buyLuxury(state, h);
           h.state = "wander";
         }
       } else if (h.state.equals("gather")) {

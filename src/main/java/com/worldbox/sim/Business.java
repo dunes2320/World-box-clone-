@@ -1,5 +1,7 @@
 package com.worldbox.sim;
 
+import com.worldbox.config.Config;
+
 /** A privately owned, nation-taxed economic actor that specializes in one
  * resource, skimming surplus into its own capital and boosting local
  * output. Businesses can go bankrupt in a market crash. */
@@ -14,11 +16,28 @@ public class Business implements java.io.Serializable {
   public final int id;
   public int settlementId;
   public int nationId;
-  /** "farm" | "market" | "extraction" - a settlement's economy has to be
-   * built in that order: a farm first, then a market, only then can
-   * resource-extraction businesses (wood/stone/iron) form. */
+  /** "farm" | "market" | "extraction" | "workshop" | "luxury_workshop" - a
+   * settlement's economy has to be built in that order: a farm first, then
+   * a market, then resource-extraction (wood/stone/iron), then a workshop
+   * (needs an iron extraction business already running) and finally a
+   * luxury workshop (needs a real gold_ore stockpile to draw on). */
   public final String type;
-  public final String resourceKey; // "food" for a farm, "wood"/"stone"/"iron" for extraction, "market" (unused) for a market
+  // "food" for a farm, "wood"/"stone"/"iron" for extraction, "tools" for a
+  // workshop, "luxury" for a luxury workshop, "market" (unused) for a market
+  public final String resourceKey;
+
+  /** Which of Config.SECTORS this business's output counts toward - what
+   * Nation/GameState's sectorHistory groups revenue by for the HUD's
+   * "Sectors" graph. */
+  public String sector() {
+    switch (type) {
+      case "farm": return Config.SECTOR_AGRICULTURE;
+      case "extraction": return Config.SECTOR_EXTRACTION;
+      case "workshop": return Config.SECTOR_MANUFACTURING;
+      case "luxury_workshop": return Config.SECTOR_LUXURY;
+      default: return Config.SECTOR_COMMERCE;
+    }
+  }
   public double capital;
   public double productivity = 1.0;
   public double debt = 0; // outstanding business loan from the nation's bank

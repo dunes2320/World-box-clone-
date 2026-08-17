@@ -30,6 +30,8 @@ public class Government {
     double worldGdp = 0;
     double worldStabilityWeighted = 0;
     int worldPop = 0;
+    java.util.Map<String, Double> worldSectorAccum = new java.util.HashMap<>();
+    for (String sector : Config.SECTORS) worldSectorAccum.put(sector, 0.0);
     java.util.Map<Integer, Double> marketCapByNation = null;
     java.util.Map<Integer, int[]> laborByNation = null; // [total, unemployed]
     java.util.Map<Integer, double[]> wealthByNation = null; // [totalWealth, count]
@@ -103,6 +105,15 @@ public class Government {
         trim(n.stabilityHistory);
         worldStabilityWeighted += n.stability * labor[0];
         worldPop += labor[0];
+
+        for (String sector : Config.SECTORS) {
+          double rev = n.sectorRevenue.getOrDefault(sector, 0.0);
+          java.util.ArrayDeque<Double> hist = n.sectorHistory.get(sector);
+          hist.addLast(rev);
+          trim(hist);
+          worldSectorAccum.merge(sector, rev, Double::sum);
+          n.sectorRevenue.put(sector, 0.0);
+        }
       }
     }
     if (sample) {
@@ -117,6 +128,12 @@ public class Government {
 
       state.worldGdpHistory.addLast(worldGdp);
       trim(state.worldGdpHistory);
+
+      for (String sector : Config.SECTORS) {
+        java.util.ArrayDeque<Double> hist = state.worldSectorHistory.get(sector);
+        hist.addLast(worldSectorAccum.getOrDefault(sector, 0.0));
+        trim(hist);
+      }
     }
   }
 

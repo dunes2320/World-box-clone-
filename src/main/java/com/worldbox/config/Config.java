@@ -80,10 +80,29 @@ public final class Config {
     BASE_PRICES.put("stone", 4.0);
     BASE_PRICES.put("iron", 6.0);
     BASE_PRICES.put("gold_ore", 9.0);
+    // manufactured goods: real sellable output on top of raw resources -
+    // tools (iron+wood, see Economy.updateBusinesses' "workshop" business)
+    // and luxury goods (gold_ore+stone, see "luxury_workshop") - a genuine
+    // second tier of the economy, not just more raw-material variety
+    BASE_PRICES.put("tools", 14.0);
+    BASE_PRICES.put("luxury", 26.0);
   }
   public static final double TAX_RATE_DEFAULT = 0.22;
   public static final double SETTLEMENT_BUFFER = 40;
   public static final double MARKET_ELASTICITY = 0.02;
+
+  // Every business (and the government mining a resource directly, like
+  // gold) belongs to exactly one of these sectors - the grouping
+  // Nation/GameState's sectorHistory tracks revenue by, and what the
+  // HUD's "Sectors" graph tab plots. See Business.sector().
+  public static final String SECTOR_AGRICULTURE = "agriculture";
+  public static final String SECTOR_EXTRACTION = "extraction";
+  public static final String SECTOR_MANUFACTURING = "manufacturing";
+  public static final String SECTOR_LUXURY = "luxury";
+  public static final String SECTOR_COMMERCE = "commerce";
+  public static final String[] SECTORS = {
+      SECTOR_AGRICULTURE, SECTOR_EXTRACTION, SECTOR_MANUFACTURING, SECTOR_LUXURY, SECTOR_COMMERCE
+  };
 
   // military
   // Eras gate which units a nation can raise, keyed off nation age (see

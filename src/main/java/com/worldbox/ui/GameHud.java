@@ -945,8 +945,31 @@ public class GameHud {
       double houseCapacity = totalHouses * Settlement.PEOPLE_PER_HOUSE;
       statRow("Vacant house room", String.format("%.0f", Math.max(0, houseCapacity - owners)));
 
-      Button viewGraph = sidePanel.addChild(new Button("View Stock Chart"));
+      Label tradeHeader = sidePanel.addChild(new Label("TRADE & LAND"));
+      tradeHeader.setColor(MUTED); tradeHeader.setFontSize(fs(12));
+      statRow("Land value index", String.format("%.2fx", n.landValueIndex));
+      statRow("Export tax", (int) Math.round(n.exportTaxRate * 100) + "%");
+      statRow("Import tax", (int) Math.round(n.importTaxRate * 100) + "%");
+      // a real government stockpile (see Nation.stockpile) - only the
+      // goods actually worth showing (nothing rounds to zero) so an empty
+      // reserve just reads as no rows rather than a wall of "0"s
+      boolean anyStock = false;
+      for (String key : GlobalMarket.keys()) {
+        double amt = n.stockpile.getOrDefault(key, 0.0);
+        if (amt < 1) continue;
+        anyStock = true;
+        statRow("Stockpiled " + key, String.format("%.0f", amt));
+      }
+      if (!anyStock) {
+        Label none = sidePanel.addChild(new Label("No government stockpile yet"));
+        none.setColor(MUTED);
+      }
+
+      Container graphButtons = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+      Button viewGraph = graphButtons.addChild(new Button("Stock Chart"));
       viewGraph.addClickCommands(src -> showGraph("nation", id));
+      Button viewSectors = graphButtons.addChild(new Button("Sector Chart"));
+      viewSectors.addClickCommands(src -> { showGraph("nation", id); graphMetric = "sectors"; refreshSidePanel(); });
       return;
     }
     if (!nationTab.equals("Diplomacy")) return;
@@ -1111,13 +1134,25 @@ public class GameHud {
     viewAllNations.addClickCommands(src -> showGraph("allNations", -1));
   }
 
-  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability"};
-  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability"};
-  // "By Nation" reuses the same metrics as the world-total view - every
-  // one of them (market cap, GDP, stability) already has a per-nation
-  // history deque (see metricHistory) as well as a world-total one, so
-  // the same three tabs apply to either view.
-  private static final String[] GRAPH_METRICS_ALL_NATIONS = GRAPH_METRICS_WORLD;
+  private static final String[] GRAPH_METRICS_NATION = {"marketcap", "unemployment", "gdp", "currency", "inflation", "wealth", "stability", "sectors"};
+  private static final String[] GRAPH_METRICS_WORLD = {"marketcap", "gdp", "stability", "sectors"};
+  // "By Nation" only ever compares ONE metric across every living nation
+  // at once - "sectors" is already a multi-series breakdown for a single
+  // nation/world, so it doesn't have a sensible "by nation" overlay of its
+  // own and is deliberately left out of this shorter list.
+  private static final String[] GRAPH_METRICS_ALL_NATIONS = {"marketcap", "gdp", "stability"};
+  // fixed per-sector display identity (label + line color), in the same
+  // order as Config.SECTORS - shared by the summary rows, the legend and
+  // the chart lines themselves so a sector always reads as the same color
+  // everywhere it shows up.
+  private static final String[] SECTOR_LABELS = {"Agriculture", "Extraction", "Manufacturing", "Luxury", "Commerce"};
+  private static final ColorRGBA[] SECTOR_COLORS = {
+      new ColorRGBA(0.42f, 0.78f, 0.35f, 1f),
+      new ColorRGBA(0.72f, 0.52f, 0.28f, 1f),
+      new ColorRGBA(0.35f, 0.58f, 0.88f, 1f),
+      new ColorRGBA(0.82f, 0.62f, 0.18f, 1f),
+      new ColorRGBA(0.35f, 0.78f, 0.78f, 1f),
+  };
   // more than this many living nations would make the legend a wall of
   // text instead of something a player can actually read at a glance -
   // shown ranked by whoever's currently highest on the metric, with a
@@ -1133,6 +1168,7 @@ public class GameHud {
       case "inflation": return "Inflation";
       case "wealth": return "Wealth";
       case "stability": return "Stability";
+      case "sectors": return "Sectors";
       default: return "Cap";
     }
   }
@@ -1145,6 +1181,7 @@ public class GameHud {
       case "inflation": return "Inflation";
       case "wealth": return "Average Citizen Wealth";
       case "stability": return "Stability";
+      case "sectors": return "Market Sectors";
       default: return "Market Cap";
     }
   }
@@ -1228,6 +1265,7 @@ public class GameHud {
       tab.addClickCommands(src -> { graphMetric = metric; refreshSidePanel(); });
     }
 
+    boolean isSectors = "sectors".equals(graphMetric) && !isAllNations;
     int legendRows = 0;
     if (isAllNations) {
       // no single "latest/change/range" block here - there are many series
@@ -1236,6 +1274,20 @@ public class GameHud {
       java.util.List<Nation> living = livingNationsSorted(state, graphMetric);
       statRow("Nations shown", Math.min(living.size(), LEGEND_MAX_ENTRIES) + " of " + living.size());
       legendRows = allNationsLegendRows(state);
+    } else if (isSectors) {
+      // same idea as the all-nations overlay above, but breaking down ONE
+      // nation's (or the world's) own revenue by sector instead of
+      // comparing nations against each other - each sector's own latest
+      // reading, color-matched to its line in the chart below.
+      for (int i = 0; i < Config.SECTORS.length; i++) {
+        double v = latestSectorValue(state, isWorld, n, Config.SECTORS[i]);
+        Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
+        Label lbl = row.addChild(new Label(SECTOR_LABELS[i]));
+        lbl.setColor(SECTOR_COLORS[i]);
+        lbl.setPreferredSize(new Vector3f(160 * uiScale, 20 * uiScale, 0));
+        row.addChild(new Label((int) Math.floor(v) + "g"));
+      }
+      legendRows = (int) Math.ceil(Config.SECTORS.length / 3.0);
     } else {
       java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
       if (hist == null || hist.size() < 2) {
@@ -1288,6 +1340,11 @@ public class GameHud {
 
   private double latestValue(Nation n, String metric) {
     java.util.ArrayDeque<Double> hist = metricHistory(null, metric, false, n);
+    return hist == null || hist.isEmpty() ? 0 : hist.peekLast();
+  }
+
+  private double latestSectorValue(GameState state, boolean isWorld, Nation n, String sector) {
+    java.util.ArrayDeque<Double> hist = isWorld ? state.worldSectorHistory.get(sector) : n.sectorHistory.get(sector);
     return hist == null || hist.isEmpty() ? 0 : hist.peekLast();
   }
 
@@ -1349,6 +1406,7 @@ public class GameHud {
     if (isAllNations) { layoutAllNationsChart(state); return; }
     Nation n = isWorld ? null : state.nations.get(graphNationId);
     if (!isWorld && n == null) return;
+    if ("sectors".equals(graphMetric)) { layoutSectorsChart(state, isWorld, n); return; }
     java.util.ArrayDeque<Double> hist = metricHistory(state, graphMetric, isWorld, n);
     if (hist == null || hist.size() < 2) return;
 
@@ -1514,6 +1572,97 @@ public class GameHud {
       more.setLocalTranslation(originX, legendTop - row * LEGEND_ROW_HEIGHT, 2);
       chartNode.attachChild(more);
       chartLabels.add(more);
+    }
+  }
+
+  /** The "Sectors" tab: one line per Config.SECTORS entry (fixed colors -
+   * see SECTOR_COLORS), sharing one y-axis, for either a single nation's
+   * own sectorHistory or the world-wide worldSectorHistory - same overlay
+   * technique as layoutAllNationsChart, just breaking down ONE economy's
+   * revenue by sector instead of comparing many nations on one metric. */
+  private void layoutSectorsChart(GameState state, boolean isWorld, Nation n) {
+    java.util.Map<String, java.util.List<Double>> series = new java.util.LinkedHashMap<>();
+    double min = 0, max = -Double.MAX_VALUE; // sector revenue is never negative - anchor the floor at 0
+    int maxLen = 0;
+    for (String sector : Config.SECTORS) {
+      java.util.ArrayDeque<Double> hist = isWorld ? state.worldSectorHistory.get(sector) : n.sectorHistory.get(sector);
+      if (hist == null || hist.size() < 2) continue;
+      java.util.List<Double> values = new java.util.ArrayList<>(hist);
+      series.put(sector, values);
+      maxLen = Math.max(maxLen, values.size());
+      for (double v : values) max = Math.max(max, v);
+    }
+    if (series.isEmpty() || maxLen < 2) return;
+    double span = Math.max(1.0, max - min);
+
+    float originX = sidePanel.getLocalTranslation().x + 16;
+    int legendRows = (int) Math.ceil(Config.SECTORS.length / 3.0);
+    float legendHeight = legendRows * LEGEND_ROW_HEIGHT;
+    float contentAboveChart = sidePanel.getPreferredSize().y - (CHART_HEIGHT + legendHeight + 16f);
+    float baselineY = sidePanel.getLocalTranslation().y - contentAboveChart - CHART_HEIGHT;
+    float lineThickness = 2f;
+
+    for (int s = 0; s < Config.SECTORS.length; s++) {
+      java.util.List<Double> values = series.get(Config.SECTORS[s]);
+      if (values == null) continue;
+      int offset = maxLen - values.size();
+      float stepX = CHART_WIDTH / (maxLen - 1);
+      ColorRGBA color = SECTOR_COLORS[s];
+      for (int i = 1; i < values.size(); i++) {
+        double v0 = values.get(i - 1), v1 = values.get(i);
+        float x0 = originX + (offset + i - 1) * stepX, y0 = baselineY + (float) ((v0 - min) / span) * CHART_HEIGHT;
+        float x1 = originX + (offset + i) * stepX, y1 = baselineY + (float) ((v1 - min) / span) * CHART_HEIGHT;
+        float dx = x1 - x0, dy = y1 - y0;
+        float len = Math.max(0.01f, (float) Math.sqrt(dx * dx + dy * dy));
+        Quad quad = new Quad(len, lineThickness);
+        Geometry segment = new Geometry("sectorLine", quad);
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setColor("Color", color);
+        segment.setMaterial(mat);
+        segment.setQueueBucket(RenderQueue.Bucket.Gui);
+        segment.setLocalTranslation(x0, y0 - lineThickness / 2f, 2);
+        segment.rotate(0, 0, FastMath.atan2(dy, dx));
+        chartNode.attachChild(segment);
+        chartBars.add(segment);
+      }
+    }
+
+    Quad baseline = new Quad(CHART_WIDTH, 2f);
+    Geometry baselineBar = new Geometry("sectorsBaseline", baseline);
+    Material baseMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+    baseMat.setColor("Color", MUTED);
+    baselineBar.setMaterial(baseMat);
+    baselineBar.setQueueBucket(RenderQueue.Bucket.Gui);
+    baselineBar.setLocalTranslation(originX, baselineY - 2f, 2);
+    chartNode.attachChild(baselineBar);
+    chartBars.add(baselineBar);
+
+    float colWidth = CHART_WIDTH / 3f;
+    float swatchSize = 9f * uiScale;
+    float legendTop = baselineY - 14f * uiScale;
+    float fontSize = chartFont.getCharSet().getRenderedSize() * 0.62f * uiScale;
+    for (int s = 0; s < Config.SECTORS.length; s++) {
+      int col = s % 3, row = s / 3;
+      float lx = originX + col * colWidth;
+      float ly = legendTop - row * LEGEND_ROW_HEIGHT;
+      Quad swatchQuad = new Quad(swatchSize, swatchSize);
+      Geometry swatch = new Geometry("sectorLegendSwatch", swatchQuad);
+      Material swatchMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+      swatchMat.setColor("Color", SECTOR_COLORS[s]);
+      swatch.setMaterial(swatchMat);
+      swatch.setQueueBucket(RenderQueue.Bucket.Gui);
+      swatch.setLocalTranslation(lx, ly - swatchSize, 2);
+      chartNode.attachChild(swatch);
+      chartBars.add(swatch);
+
+      com.jme3.font.BitmapText text = new com.jme3.font.BitmapText(chartFont);
+      text.setSize(fontSize);
+      text.setColor(TEXT);
+      text.setText(SECTOR_LABELS[s]);
+      text.setQueueBucket(RenderQueue.Bucket.Gui);
+      text.setLocalTranslation(lx + swatchSize + 4f * uiScale, ly, 2);
+      chartNode.attachChild(text);
+      chartLabels.add(text);
     }
   }
 }

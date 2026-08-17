@@ -756,10 +756,22 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
         if (s != null) { pop += s.populationCount; food += s.stock.get("food"); farmCells += s.farmCells; starveTicks += s.starveTicks; }
       }
       System.out.println(String.format(
-          "  NATION %s pop=%d gov=%s treasury=%.0f bankReserves=%.0f bankLoans=%.0f moneySupply=%.0f gdp=%.0f unemployment=%.2f inflation=%.3f exchangeRate=%.2f collapsed=%b stability=%.0f food=%.0f farmCells=%d starveTicks=%d",
+          "  NATION %s pop=%d gov=%s treasury=%.0f bankReserves=%.0f bankLoans=%.0f moneySupply=%.0f gdp=%.0f unemployment=%.2f inflation=%.3f exchangeRate=%.2f collapsed=%b stability=%.0f food=%.0f farmCells=%d starveTicks=%d landValue=%.2f exportTax=%.2f importTax=%.2f",
           nation.name, pop, nation.government, nation.treasury, nation.bank.reserves, nation.bank.loans,
           nation.moneySupply, nation.gdpHistory.isEmpty() ? 0 : nation.gdpHistory.peekLast(), nation.unemploymentRate,
-          nation.inflationRate, nation.exchangeRate, nation.currencyCollapsed, nation.stability, food, farmCells, starveTicks));
+          nation.inflationRate, nation.exchangeRate, nation.currencyCollapsed, nation.stability, food, farmCells, starveTicks,
+          nation.landValueIndex, nation.exportTaxRate, nation.importTaxRate));
+      StringBuilder sectors = new StringBuilder("  SECTORS " + nation.name);
+      for (String sector : com.worldbox.config.Config.SECTORS) {
+        var hist = nation.sectorHistory.get(sector);
+        sectors.append(String.format(" %s=%.0f", sector, hist == null || hist.isEmpty() ? 0 : hist.peekLast()));
+      }
+      StringBuilder stock = new StringBuilder("  STOCKPILE " + nation.name);
+      for (String key : com.worldbox.sim.GlobalMarket.keys()) {
+        stock.append(String.format(" %s=%.0f", key, nation.stockpile.getOrDefault(key, 0.0)));
+      }
+      System.out.println(sectors);
+      System.out.println(stock);
     }
   }
 

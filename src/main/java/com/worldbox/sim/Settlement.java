@@ -76,6 +76,8 @@ public class Settlement implements java.io.Serializable {
     stock.put("stone", 10.0);
     stock.put("iron", 0.0);
     stock.put("gold_ore", 0.0);
+    stock.put("tools", 0.0);
+    stock.put("luxury", 0.0);
   }
 
   public static Settlement create(GameState state, int x, int z, int nationId, String name) {
@@ -114,23 +116,29 @@ public class Settlement implements java.io.Serializable {
   }
 
   /** Whether a candidate founding spot is actually free of any OTHER
-   * living nation's already-claimed land, out to the same radius a brand
-   * new settlement immediately gets (see radius's default) - without
-   * this, a new settlement could be founded a cell or two from a rival's
-   * border and, since territory is locked against peaceful takeover (see
-   * Nation.claimTerritory), permanently end up with its own buildings
-   * sitting inside the rival's territory. */
+   * living nation's territory - checked against every rival settlement's
+   * own authoritative .radius directly, not the painted ownerNation grid.
+   * The grid only gets repainted every 25 ticks (see Settlement.update)
+   * and its per-cell "effective strength" formula goes negative well
+   * inside a settlement's own nominal radius at long range, so a spot
+   * geometrically deep inside a wealthy rival's territory could still
+   * read as unclaimed on the grid at the exact moment someone tries to
+   * found there. Comparing straight-line distance against .radius has no
+   * such lag or fringe - it's the same number that eventually decides
+   * whether the grid paints that cell for that settlement at all, so a
+   * town center can never end up founded inside a border it'll later
+   * turn out to already be inside. A modest buffer keeps the new
+   * settlement's own minimum radius from immediately touching its
+   * neighbor's on day one. */
+  private static final double FOUNDING_BORDER_BUFFER = 6;
+
   public static boolean spotClearOfRivals(GameState state, int x, int y, int excludeNationId) {
-    WorldGrid grid = state.grid;
-    int r = 10;
-    for (int dy = -r; dy <= r; dy++) {
-      for (int dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy > r * r) continue;
-        int nx = x + dx, ny = y + dy;
-        if (!grid.inBounds(nx, ny)) continue;
-        int owner = grid.ownerNation[grid.idx(nx, ny)];
-        if (owner >= 0 && owner != excludeNationId && state.nations.containsKey(owner)) return false;
-      }
+    double cx = x + 0.5, cy = y + 0.5;
+    for (Settlement other : state.settlements.values()) {
+      if (other.abandoned || other.nationId == excludeNationId || other.nationId < 0) continue;
+      if (!state.nations.containsKey(other.nationId)) continue;
+      double d = Math.hypot(cx - other.x, cy - other.z);
+      if (d < other.radius + FOUNDING_BORDER_BUFFER) return false;
     }
     return true;
   }

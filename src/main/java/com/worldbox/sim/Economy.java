@@ -17,8 +17,19 @@ public class Economy {
    * updateBanks); only once a nation's had a real chance to build up
    * reserves does over-leverage carry actual crash risk. */
   private static final int BANK_RUN_IMMUNITY_AGE = 3 * com.worldbox.util.Calendar.DAYS_PER_YEAR;
-  private static final int MAX_BUSINESSES_PER_SETTLEMENT = 4; // farm + market + up to 2 extraction
+  // farm + market + up to 3 extraction (wood/stone/iron) + a workshop
+  // (tools) + a luxury workshop (luxury goods) - the full production
+  // chain a settlement can eventually build out to.
+  private static final int MAX_BUSINESSES_PER_SETTLEMENT = 7;
   private static final String[] BUSINESS_RESOURCES = {"wood", "stone", "iron"};
+  // a workshop needs iron+wood on hand to actually make anything (see the
+  // "workshop" production branch in updateBusinesses); a luxury workshop
+  // needs a real gold_ore stockpile to draw on since nobody runs a
+  // dedicated gold *extraction* business (gold mining is a government job
+  // - see Population.assignJob - so there's no "gold" business to found
+  // after)
+  private static final double WORKSHOP_INPUT_THRESHOLD = 15;
+  private static final double LUXURY_INPUT_THRESHOLD = 8;
   /** Founding capital comes from a bank loan, not free money - "one person
    * decides to take out a loan" to build it. Kept modest so a normal
    * settlement can service it comfortably; only reckless policy (taxing/
@@ -65,6 +76,8 @@ public class Economy {
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
       updateEconCycle(nation);
+      updateLandValue(nation);
+      updateTradePolicy(nation);
 
       for (String key : GlobalMarket.keys()) {
         Settlement seller = biggestStock(state, nation, key);
@@ -100,6 +113,7 @@ public class Economy {
     settlePrices(state);
 
     updateBusinesses(state);
+    updateForeignTrade(state);
     updateBanks(state);
     updateBoomBust(state);
 
@@ -134,12 +148,21 @@ public class Economy {
     baselineDemand.put("stone", population * 0.01);
     baselineDemand.put("iron", population * 0.004 + businesses * 0.3);
     baselineDemand.put("gold_ore", population * 0.0015 + livingNations * 0.5);
+    // manufactured goods have no wanderer-level baseline at all (nobody
+    // makes tools/luxury goods without a real workshop) - demand for them
+    // only exists once there's an actual population wealthy enough to buy
+    // them (see Population's food/luxury purchases), so this is scaled
+    // off population alone, much smaller than raw-material demand
+    baselineDemand.put("tools", population * 0.0012 + businesses * 0.05);
+    baselineDemand.put("luxury", population * 0.0006);
 
     Map<String, Double> baselineSupply = new HashMap<>();
     baselineSupply.put("food", population * 0.052 + settlements * 1.0);
     baselineSupply.put("wood", population * 0.016 + settlements * 0.9);
     baselineSupply.put("stone", population * 0.011 + settlements * 0.7);
     baselineSupply.put("iron", population * 0.0045 + settlements * 0.45);
+    baselineSupply.put("tools", settlements * 0.05);
+    baselineSupply.put("luxury", settlements * 0.02);
     // gold's baseline supply is choked down as real in-ground deposits run
     // out - unlike every other resource, it can't just keep flowing from
     // population growth alone once the world is actually out of it
@@ -160,6 +183,108 @@ public class Economy {
   }
 
   private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /** How much more (or less) than the shared world price this nation's own
+   * goods actually cost, in its own currency - a stronger currency (at or
+   * above its founding peg) commands higher local prices, a weak one
+   * cheaper ones. At exchangeRate == 1.0 (par - where every currency
+   * starts) this is exactly 1.0, so a brand new nation's prices match the
+   * world price with no shock; it only diverges as that currency actually
+   * strengthens or weakens. */
+  private static double localPriceMultiplier(Nation n) {
+    if (n == null) return 1.0;
+    double rate = n.currencyCollapsed ? 0 : n.exchangeRate;
+    return clamp(0.5 + rate * 0.5, 0.5, 2.0);
+  }
+
+  /** The real, nation-specific price for a good - what any transaction
+   * involving this nation's own currency should actually use, instead of
+   * reading the shared world price directly. Wages, business revenue,
+   * citizen purchases and cross-border trade all go through this so a
+   * currency's strength has a real, felt effect on the cost of everything
+   * denominated in it. */
+  public static double nationPrice(GameState state, Nation nation, String key) {
+    double base = state.market.prices.getOrDefault(key, Config.BASE_PRICES.getOrDefault(key, 1.0));
+    return base * localPriceMultiplier(nation);
+  }
+
+  /** Land/property value: a slow-moving index (1.0 = par, same as at
+   * founding) that tracks this nation's currency strength and its
+   * treasury's real health - a prosperous nation with a strong currency
+   * makes its land genuinely worth more. Used to scale real costs (see
+   * Population's HOUSE_PRICE and this class's FOUNDING_LOAN) so a
+   * flourishing nation's citizens/businesses actually pay a premium for
+   * that prosperity, the same way real property values track a strong
+   * economy. */
+  private static void updateLandValue(Nation n) {
+    double prosperity = clamp(0.6 + Math.sqrt(Math.max(0, n.treasury)) * 0.012, 0.6, 2.2);
+    double target = localPriceMultiplier(n) * prosperity;
+    n.landValueIndex += (target - n.landValueIndex) * 0.01;
+    n.landValueIndex = clamp(n.landValueIndex, 0.3, 4.0);
+  }
+
+  /** Real bilateral trade: a nation with a real stockpiled surplus of some
+   * good sells it directly to whichever other living nation (not currently
+   * at war with it) has the least of that good on hand, at the BUYER's own
+   * local price. The seller's government skims its own exportTaxRate off
+   * the top before the proceeds land in its treasury; the buyer's
+   * importTaxRate makes the purchase cost that much more on top of the
+   * sale price - two real, separate policy levers instead of one shared
+   * tax. Throttled to a slow cadence and a shortlist of nations per tick
+   * since it's an O(nations^2) scan otherwise. */
+  private static void updateForeignTrade(GameState state) {
+    if (state.tick % 5 != 0) return;
+    List<Nation> living = new ArrayList<>();
+    for (Nation n : state.nations.values()) if (n.alive) living.add(n);
+    if (living.size() < 2) return;
+
+    for (Nation seller : living) {
+      String bestKey = null;
+      double bestAmt = 5; // not worth exporting a token amount
+      for (String key : GlobalMarket.keys()) {
+        double amt = seller.stockpile.getOrDefault(key, 0.0);
+        if (amt > bestAmt) { bestAmt = amt; bestKey = key; }
+      }
+      if (bestKey == null) continue;
+
+      Nation buyer = null;
+      double buyerLeast = Double.MAX_VALUE;
+      for (Nation candidate : living) {
+        if (candidate.id == seller.id) continue;
+        if (state.diplomacy.getStatus(seller.id, candidate.id).equals(Config.WAR)) continue;
+        double amt = candidate.stockpile.getOrDefault(bestKey, 0.0);
+        if (amt < buyerLeast) { buyerLeast = amt; buyer = candidate; }
+      }
+      if (buyer == null) continue;
+
+      double amount = Math.min(bestAmt * 0.2, 25);
+      double saleValue = amount * nationPrice(state, buyer, bestKey);
+      double sellerNet = saleValue * (1 - seller.exportTaxRate);
+      double buyerCost = saleValue * (1 + buyer.importTaxRate);
+      if (buyer.treasury < buyerCost) continue;
+
+      seller.stockpile.merge(bestKey, -amount, Double::sum);
+      buyer.stockpile.merge(bestKey, amount, Double::sum);
+      buyer.treasury -= buyerCost;
+      seller.treasury += sellerNet;
+      seller.gdpAccum += sellerNet;
+      seller.sectorRevenue.merge(Config.SECTOR_COMMERCE, sellerNet, Double::sum);
+    }
+  }
+
+  /** Both tariff rates drift like ordinary policy, not a fixed constant -
+   * a government leaning on its treasury reaches for tariff revenue the
+   * same way it raises the domestic tax rate (see Nation's own
+   * trySettlementUpkeepSpending). */
+  private static void updateTradePolicy(Nation n) {
+    if (n.treasury < -50) {
+      n.exportTaxRate = Math.min(0.35, n.exportTaxRate + 0.002);
+      n.importTaxRate = Math.min(0.35, n.importTaxRate + 0.002);
+    } else if (n.treasury > 400) {
+      n.exportTaxRate = Math.max(0.02, n.exportTaxRate - 0.001);
+      n.importTaxRate = Math.max(0.02, n.importTaxRate - 0.001);
+    }
+  }
 
   /** A mature, saturated economy (population capped, businesses maxed
    * out per settlement) has nothing left to make its GDP move once
@@ -187,13 +312,16 @@ public class Economy {
   }
 
   /** A new business always starts as a bank loan, never free money - "one
-   * person decides to take out a loan" to build it. */
+   * person decides to take out a loan" to build it. Costs more to found
+   * in an expensive nation, same as the loan a citizen takes out to buy a
+   * house - see Nation.landValueIndex. */
   private static void foundBusiness(GameState state, Settlement s, Nation n, String type, String resourceKey) {
+    double loanAmt = FOUNDING_LOAN * n.landValueIndex;
     Business b = new Business(s.id, s.nationId, type, resourceKey);
-    n.bank.reserves = Math.max(0, n.bank.reserves - FOUNDING_LOAN);
-    n.bank.loans += FOUNDING_LOAN;
-    b.debt = FOUNDING_LOAN;
-    b.capital = FOUNDING_LOAN * 0.7; // the rest went straight to setup costs
+    n.bank.reserves = Math.max(0, n.bank.reserves - loanAmt);
+    n.bank.loans += loanAmt;
+    b.debt = loanAmt;
+    b.capital = loanAmt * 0.7; // the rest went straight to setup costs
     state.businesses.put(b.id, b);
   }
 
@@ -210,10 +338,15 @@ public class Economy {
 
         boolean hasFarm = existing.stream().anyMatch(b -> b.type.equals("farm"));
         boolean hasMarket = existing.stream().anyMatch(b -> b.type.equals("market"));
+        boolean hasIronExtraction = existing.stream().anyMatch(b -> b.type.equals("extraction") && "iron".equals(b.resourceKey));
+        boolean hasWorkshop = existing.stream().anyMatch(b -> b.type.equals("workshop"));
+        boolean hasLuxuryWorkshop = existing.stream().anyMatch(b -> b.type.equals("luxury_workshop"));
 
         // the economy has to be built in order: a settlement's first
         // business is always a farm, then a market - only once both exist
-        // can resource-extraction businesses form
+        // can resource-extraction businesses form, and only once there's a
+        // real iron supply chain running can a workshop (tools) follow, and
+        // only once there's a real gold_ore stockpile can a luxury workshop
         if (!hasFarm) {
           if (Math.random() < 0.03 && s.stock.getOrDefault("food", 0.0) > Config.SETTLEMENT_BUFFER * 0.5) {
             foundBusiness(state, s, n, "farm", "food");
@@ -223,6 +356,13 @@ public class Economy {
         if (!hasMarket) {
           if (Math.random() < 0.03) foundBusiness(state, s, n, "market", "market");
           continue;
+        }
+
+        if (hasIronExtraction && !hasWorkshop && s.stock.getOrDefault("iron", 0.0) > WORKSHOP_INPUT_THRESHOLD) {
+          if (Math.random() < 0.02) { foundBusiness(state, s, n, "workshop", "tools"); continue; }
+        }
+        if (!hasLuxuryWorkshop && s.stock.getOrDefault("gold_ore", 0.0) > LUXURY_INPUT_THRESHOLD) {
+          if (Math.random() < 0.02) { foundBusiness(state, s, n, "luxury_workshop", "luxury"); continue; }
         }
 
         if (Math.random() > 0.02) continue;
@@ -256,16 +396,33 @@ public class Economy {
         s.stock.merge("wood", -wood, Double::sum);
         s.stock.merge("stone", -stone, Double::sum);
         s.stock.merge("food", (wood + stone) * b.productivity * 1.5, Double::sum);
+      } else if (b.type.equals("workshop")) {
+        // tools: real manufacturing, iron worked with wood into a finished
+        // good worth several times the raw iron it started as
+        double iron = Math.min(1.2, s.stock.getOrDefault("iron", 0.0));
+        double wood = Math.min(0.8, s.stock.getOrDefault("wood", 0.0));
+        s.stock.merge("iron", -iron, Double::sum);
+        s.stock.merge("wood", -wood, Double::sum);
+        s.stock.merge("tools", (iron + wood) * b.productivity * 1.1, Double::sum);
+      } else if (b.type.equals("luxury_workshop")) {
+        // luxury goods: gold_ore and stone crafted into jewelry/fine
+        // goods - low volume, high value per unit
+        double gold = Math.min(0.4, s.stock.getOrDefault("gold_ore", 0.0));
+        double stone = Math.min(0.8, s.stock.getOrDefault("stone", 0.0));
+        s.stock.merge("gold_ore", -gold, Double::sum);
+        s.stock.merge("stone", -stone, Double::sum);
+        s.stock.merge("luxury", (gold * 2.5 + stone * 0.3) * b.productivity, Double::sum);
       }
 
       if (!b.type.equals("market")) {
         double surplus = Math.max(0, s.stock.getOrDefault(b.resourceKey, 0.0) - Config.SETTLEMENT_BUFFER);
         double skim = surplus * 0.15;
         s.stock.merge(b.resourceKey, -skim, Double::sum);
-        revenue = skim * state.market.prices.get(b.resourceKey) * b.productivity * govMultiplier * n.econCycle;
+        revenue = skim * nationPrice(state, n, b.resourceKey) * b.productivity * govMultiplier * n.econCycle;
         state.market.nudge(b.resourceKey, 1, 0.4);
       }
       n.gdpAccum += revenue;
+      n.sectorRevenue.merge(b.sector(), revenue, Double::sum);
 
       double stateCut = n.government.equals(Government.OLIGARCHY) ? 0.15 : 0.3;
       b.capital += revenue * (1 - stateCut);
