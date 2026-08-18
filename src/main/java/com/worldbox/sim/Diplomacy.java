@@ -9,6 +9,22 @@ public class Diplomacy {
 
   private static final double CONTACT_RANGE = 34;
 
+  /** A war has to actually be a war, not a monthly skirmish that's over
+   * before it started - no nation may sue for peace on its own until this
+   * many ticks (one full year) have passed since it began. */
+  private static final int MIN_WAR_DURATION = 360;
+  /** How lopsided the fight has to be before a nation even considers
+   * suing for peace on its own - much harsher than a mere disadvantage,
+   * since real WorldBox-style wars grind on until someone is genuinely
+   * broken, not just currently behind. */
+  private static final double EXHAUSTION_RATIO = 0.15;
+  private static final double EXHAUSTION_FLOOR = 1.5;
+  /** Even once a nation is eligible to sue for peace, it only actually
+   * does so this often per check (each check being one DECISION_INTERVAL
+   * apart) - the player asked for truces to be "very rare," not just
+   * gated, so eligibility alone isn't enough to end a war immediately. */
+  private static final double TRUCE_CHANCE = 0.1;
+
   /** Closest distance between any pair of the two nations' settlements, or
    * Double.MAX_VALUE if they share none close enough to compare. Used both
    * as the "are these nations even in contact" gate and, at the peace
@@ -108,6 +124,7 @@ public class Diplomacy {
             // fires much more reliably once tension is real.
           } else if (score < -20 && myPower > theirPower * (1.05 - ambition * 0.3) && Math.random() < 0.35 + ambition * 0.35) {
             dip.setStatus(nation.id, other.id, Config.WAR);
+            dip.markWarStart(nation.id, other.id, state.tick);
             dip.adjustScore(nation.id, other.id, -20);
             String cause = ambition > 0.7 ? "an ambitious leader sensing an opening"
                 : myPower > theirPower * 1.5 ? "a clear military edge"
@@ -115,7 +132,14 @@ public class Diplomacy {
             EventLog.log(state, "war", nation.name + " declared war on " + other.name + " - " + cause);
           }
         } else if (status.equals(Config.WAR)) {
-          if (myPower < theirPower * 0.35 || myPower < 3) {
+          // a war the player personally started (forceWar) only ends when
+          // the player ends it - the AI on either side never sues for
+          // peace out of it on its own, no matter how it's going
+          boolean locked = dip.isPlayerLocked(nation.id, other.id);
+          int warStart = dip.getWarStartTick(nation.id, other.id);
+          boolean longEnough = warStart >= 0 && state.tick - warStart >= MIN_WAR_DURATION;
+          boolean crushed = myPower < theirPower * EXHAUSTION_RATIO || myPower < EXHAUSTION_FLOOR;
+          if (!locked && longEnough && crushed && Math.random() < TRUCE_CHANCE) {
             dip.setStatus(nation.id, other.id, Config.TRUCE, 220);
             dip.adjustScore(nation.id, other.id, 6);
             if (nation.id < other.id) EventLog.log(state, "war", nation.name + " and " + other.name
@@ -137,16 +161,23 @@ public class Diplomacy {
   // --- player ("god") actions: any nation can be directly commanded ---
   public static void forceWar(GameState state, int a, int b) {
     state.diplomacy.setStatus(a, b, Config.WAR);
+    state.diplomacy.markWarStart(a, b, state.tick);
+    // a war the player themselves declares is locked - neither nation's
+    // AI can sue its way out of it; only the player's own forcePeace/
+    // forceAlliance below can end it
+    state.diplomacy.setPlayerLocked(a, b, true);
     state.diplomacy.adjustScore(a, b, -25);
   }
 
   public static void forcePeace(GameState state, int a, int b) {
     state.diplomacy.setStatus(a, b, Config.TRUCE, 260);
+    state.diplomacy.setPlayerLocked(a, b, false);
     state.diplomacy.adjustScore(a, b, 8);
   }
 
   public static void forceAlliance(GameState state, int a, int b) {
     state.diplomacy.setStatus(a, b, Config.ALLIANCE);
+    state.diplomacy.setPlayerLocked(a, b, false);
     state.diplomacy.adjustScore(a, b, 20);
   }
 

@@ -12,6 +12,17 @@ public class DiplomacyManager implements java.io.Serializable {
     public String status = Config.PEACE;
     public double score = 0;
     public int truceTimer = 0;
+    /** Tick this pair's current war began, or -1 if not at war - lets a
+     * war's real elapsed length gate whether either side can sue for
+     * peace on their own (see Diplomacy.update). */
+    public int warStartTick = -1;
+    /** True once the player (not either nation's own AI) declared this
+     * war via forceWar - while set, the AI on either side is never
+     * allowed to sue for peace itself; only the player's own forcePeace/
+     * forceAlliance can end it. Cleared whenever a player action ends the
+     * war, or implicitly when one side is destroyed and the whole
+     * relation entry is purged (see removeNation). */
+    public boolean playerLocked = false;
   }
 
   public final Map<String, Relation> relations = new LinkedHashMap<>();
@@ -37,6 +48,11 @@ public class DiplomacyManager implements java.io.Serializable {
     Relation r = get(a, b);
     r.score = clamp(r.score + delta, -100, 100);
   }
+
+  public void markWarStart(int a, int b, int tick) { get(a, b).warStartTick = tick; }
+  public int getWarStartTick(int a, int b) { return get(a, b).warStartTick; }
+  public void setPlayerLocked(int a, int b, boolean locked) { get(a, b).playerLocked = locked; }
+  public boolean isPlayerLocked(int a, int b) { return get(a, b).playerLocked; }
 
   public static class PairInfo {
     public final int other;

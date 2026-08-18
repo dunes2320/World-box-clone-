@@ -1003,8 +1003,9 @@ public class GameHud {
     int[] range = pager(others.size());
     for (Nation other : others.subList(range[0], range[1])) {
       String status = state.diplomacy.getStatus(id, other.id);
+      boolean locked = Config.WAR.equals(status) && state.diplomacy.isPlayerLocked(id, other.id);
       Container row = sidePanel.addChild(new Container(new SpringGridLayout(Axis.X, Axis.Y)));
-      Label name = row.addChild(new Label(other.displayName() + " (" + status + ")"));
+      Label name = row.addChild(new Label(other.displayName() + " (" + status + (locked ? ", player war" : "") + ")"));
       name.setPreferredSize(new Vector3f(180 * uiScale, 20 * uiScale, 0));
       name.setColor(statusColor(status));
 
