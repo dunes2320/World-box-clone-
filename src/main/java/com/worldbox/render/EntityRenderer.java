@@ -347,6 +347,8 @@ public class EntityRenderer {
       weaponArmTemplates.put(spec.weapon,
           MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(weaponMesh(spec.weapon), 0, -SHOULDER_Y, 0)));
     }
+    weaponArmTemplates.put("banner",
+        MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(weaponMesh("banner"), 0, -SHOULDER_Y, 0)));
     humanArmRWeaponTemplates = weaponArmTemplates;
 
     // settlement tiers: a small hut, a boxy town hall, a tall stacked city
@@ -748,6 +750,14 @@ public class EntityRenderer {
             MeshUtil.translatedCopy(new Box(0.04f, 0.08f, 0.05f), 0, -0.32f, 0));
         MeshUtil.rotateInPlace(w, new Quaternion().fromAngleAxis(0.35f, Vector3f.UNIT_Z));
         return MeshUtil.translatedCopy(w, 0.22f, 0.5f, 0.1f);
+      case "banner":
+        // WorldBox: "armies... follow the person wielding the banner" - a
+        // tall pole with a flag flying above head height so this one
+        // person visibly stands out from the rest of their army at a
+        // glance, same nation-colored silhouette-only trick as any weapon.
+        w = MeshUtil.mergeMeshes(new Box(0.02f, 0.55f, 0.02f),
+            MeshUtil.translatedCopy(new Box(0.14f, 0.11f, 0.015f), 0.13f, 0.42f, 0));
+        return MeshUtil.translatedCopy(w, 0.2f, 0.68f, 0.05f);
       default:
         return MeshUtil.translatedCopy(new Box(0.03f, 0.2f, 0.03f), 0.2f, 0.5f, 0.05f);
     }
@@ -1504,9 +1514,15 @@ public class EntityRenderer {
         // army's makeup (see pickUnitForHuman) decides which weapon
         // silhouette they carry - same "one prop on the arm" idea as a
         // civilian's job tool, just a sword/spear/rifle instead of an axe.
-        String unitType = pickUnitForHuman(sp.army, sp.totalUnits, humanUnitSeed(sp.army.id, h.id));
-        Config.UnitSpec spec = Config.UNIT_TYPES.get(unitType);
-        Mesh gearMesh = spec != null ? humanArmRWeaponTemplates.get(spec.weapon) : null;
+        boolean isGeneral = sp.army.generalHumanId != null && sp.army.generalHumanId == h.id;
+        Mesh gearMesh;
+        if (isGeneral) {
+          gearMesh = humanArmRWeaponTemplates.get("banner");
+        } else {
+          String unitType = pickUnitForHuman(sp.army, sp.totalUnits, humanUnitSeed(sp.army.id, h.id));
+          Config.UnitSpec spec = Config.UNIT_TYPES.get(unitType);
+          gearMesh = spec != null ? humanArmRWeaponTemplates.get(spec.weapon) : null;
+        }
         armRMesh = gearMesh != null ? gearMesh : humanArmRTemplate;
       } else {
         // job-appropriate gear: a lumberjack's axe or a miner's pickaxe

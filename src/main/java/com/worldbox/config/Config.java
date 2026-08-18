@@ -148,6 +148,13 @@ public final class Config {
     UNIT_TYPES.put("artillery", new UnitSpec("Artillery crew", 210, mapOf("gold", 1100.0, "iron", 140.0), 2.6, 0.05, ERA_MODERN, "artillery"));
   }
   public static final int RAISE_BATCH = 6;
+  /** How WorldBox actually sizes armies: a proportion of a village's own
+   * adult population, not a flat recruit quota - a big city can field a
+   * real host, a hamlet only a handful. See Military.maxArmySize. */
+  public static final double ARMY_POP_SHARE = 0.35;
+  /** WorldBox armies "will not start an attack if they are at less than
+   * 70% of their max size" - a raw, half-formed muster doesn't march. */
+  public static final double ARMY_READY_FRACTION = 0.7;
 
   // diplomacy
   public static final String PEACE = "peace";

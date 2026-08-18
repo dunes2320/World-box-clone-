@@ -24,6 +24,11 @@ public class Army implements java.io.Serializable {
    * demobilization affect real, specific people instead of an abstract
    * pool. See Military.raiseArmy/applyDamage/demobilize. */
   public final List<Integer> memberHumanIds = new ArrayList<>();
+  /** The real person carrying this army's banner - WorldBox armies "follow
+   * the person wielding the banner," and when that general dies command
+   * passes to whoever's left (see Military.applyDamage). Null only for a
+   * fully-wiped roster on its way to being disbanded. */
+  public Integer generalHumanId;
   public Integer targetSettlementId;
   public Integer targetArmyId;
   public String state = "idle";

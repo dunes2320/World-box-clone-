@@ -33,6 +33,14 @@ public class Military {
     return n;
   }
 
+  /** WorldBox sizes an army as a proportion of its village's own adult
+   * population, not a flat recruit quota - a real city can field a real
+   * host, a hamlet only a handful, and there is only ever one army per
+   * village (see raiseArmy). */
+  public static int maxArmySize(Settlement settlement) {
+    return Math.max(4, (int) Math.round(settlement.populationCount * Config.ARMY_POP_SHARE));
+  }
+
   private static void applyDamage(GameState state, Army army, double dmg) {
     double total = armyStrength(army);
     if (total <= 0 || dmg <= 0) return;
@@ -55,6 +63,13 @@ public class Military {
       }
       for (Human h : state.humans) {
         if (toKill.contains(h.id)) { h.dead = true; DeathStats.war++; }
+      }
+      // WorldBox: "if the person with the banner dies... a random army
+      // soldier near the place of his death will replace him" - command
+      // passes on rather than the army just losing its identity.
+      if (army.generalHumanId != null && toKill.contains(army.generalHumanId)) {
+        army.generalHumanId = army.memberHumanIds.isEmpty() ? null
+            : army.memberHumanIds.get((int) (Math.random() * army.memberHumanIds.size()));
       }
     }
     army.strength = armyStrength(army);
@@ -136,9 +151,22 @@ public class Military {
     Config.UnitSpec spec = Config.UNIT_TYPES.get(unitType);
     if (spec == null) return new RaiseResult(false, "bad unit", 0);
 
+    // WorldBox: "there can be only one army for each village" - find the
+    // settlement's existing army (wherever it currently is, marching,
+    // fighting, or garrisoned) and reinforce it rather than letting a
+    // village field two separate hosts at once.
+    Army army = null;
+    for (Army a : state.armies.values()) {
+      if (!a.dead && a.nationId == settlement.nationId && a.homeSettlementId == settlementId) { army = a; break; }
+    }
+    int cap = maxArmySize(settlement);
+    int already = army == null ? 0 : armyUnitCount(army);
+    int room = cap - already;
+    if (room <= 0) return new RaiseResult(false, "army already at full strength", 0);
+
     List<Human> civilians = new ArrayList<>();
     for (Human h : state.humans) if (h.settlementId == settlementId && h.role == null) civilians.add(h);
-    int count = Math.min(Config.RAISE_BATCH, civilians.size() - 3); // keep a few workers behind
+    int count = Math.min(Math.min(Config.RAISE_BATCH * 2, room), civilians.size() - 3); // keep a few workers behind
     if (count <= 0) return new RaiseResult(false, "not enough population", 0);
 
     double goldCost = spec.cost.getOrDefault("gold", 0.0) * count;
@@ -155,11 +183,6 @@ public class Military {
       settlement.stock.merge(e.getKey(), -(e.getValue() * count), Double::sum);
     }
 
-    Army army = null;
-    for (Army a : state.armies.values()) {
-      if (a.nationId == settlement.nationId && a.homeSettlementId == settlementId
-          && a.targetSettlementId == null && a.targetArmyId == null) { army = a; break; }
-    }
     if (army == null) {
       army = new Army(settlement.nationId, settlementId, settlement.x + 0.5, settlement.z + 0.5);
       state.armies.put(army.id, army);
@@ -171,6 +194,9 @@ public class Military {
       h.role = "soldier";
       army.memberHumanIds.add(h.id);
     }
+    // the first recruit of a freshly raised army carries its banner; an
+    // already-standing army keeps whichever general it already has
+    if (army.generalHumanId == null && !recruits.isEmpty()) army.generalHumanId = recruits.get(0).id;
     army.units.merge(unitType, recruits.size(), Integer::sum);
     army.strength = armyStrength(army);
     return new RaiseResult(true, null, recruits.size());
@@ -213,6 +239,10 @@ public class Military {
       int humanId = army.memberHumanIds.remove(idx);
       for (Human h : state.humans) {
         if (h.id == humanId) { h.role = null; break; }
+      }
+      if (army.generalHumanId != null && army.generalHumanId == humanId) {
+        army.generalHumanId = army.memberHumanIds.isEmpty() ? null
+            : army.memberHumanIds.get((int) (Math.random() * army.memberHumanIds.size()));
       }
       // shrink whichever unit type still has a count to shrink, to keep
       // the abstract unit map in sync with the real roster size
@@ -292,8 +322,12 @@ public class Military {
           Army army = state.armies.get(aid);
           if (army == null || army.dead) continue;
           if (army.targetSettlementId != null || army.targetArmyId != null) continue;
-          double strength = armyStrength(army);
-          if (strength < 4) continue;
+          // WorldBox: "armies will not start an attack if they are at less
+          // than 70% of their max size" - a half-raised muster stays home
+          // and keeps filling instead of trickling out to be picked apart.
+          Settlement home = state.settlements.get(army.homeSettlementId);
+          int readySize = home != null ? (int) Math.ceil(maxArmySize(home) * Config.ARMY_READY_FRACTION) : 4;
+          if (armyUnitCount(army) < Math.max(4, readySize)) continue;
           Settlement target = nearestEnemySettlement(state, nation);
           if (target != null) { army.targetSettlementId = target.id; army.state = "marching"; }
         }

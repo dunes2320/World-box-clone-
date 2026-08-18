@@ -737,6 +737,26 @@ public class GameHud {
       statRow("Under siege", "no");
     }
 
+    com.worldbox.sim.Army homeArmy = null;
+    for (com.worldbox.sim.Army a : state.armies.values()) {
+      if (!a.dead && a.homeSettlementId == id) { homeArmy = a; break; }
+    }
+    if (homeArmy != null) {
+      int cap = Military.maxArmySize(s);
+      int cur = Military.armyUnitCount(homeArmy);
+      boolean ready = cur >= cap * Config.ARMY_READY_FRACTION;
+      statRow("Army", cur + " / " + cap + (ready ? " (ready)" : " (mustering)"));
+      String generalName = "-";
+      if (homeArmy.generalHumanId != null) {
+        for (com.worldbox.sim.Human h : state.humans) {
+          if (h.id == homeArmy.generalHumanId) { generalName = h.name; break; }
+        }
+      }
+      statRow("General", generalName);
+      statRow("Status", homeArmy.targetSettlementId != null ? "Marching to war"
+          : homeArmy.combatFlashTimer > 0 ? "In combat" : "Garrisoned, awaiting orders");
+    }
+
     Label stockHeader = sidePanel.addChild(new Label("STOCKPILE"));
     stockHeader.setColor(MUTED); stockHeader.setFontSize(fs(12));
     for (Map.Entry<String, Double> e : s.stock.entrySet()) {
@@ -801,7 +821,8 @@ public class GameHud {
         for (com.worldbox.sim.Army a : state.armies.values()) {
           if (!a.dead && a.memberHumanIds.contains(h.id)) { servingArmy = a; break; }
         }
-        statRow("Status", "Serving in the military");
+        boolean isGeneral = servingArmy != null && servingArmy.generalHumanId != null && servingArmy.generalHumanId == h.id;
+        statRow("Status", isGeneral ? "Carrying the army's banner" : "Serving in the military");
         if (servingArmy != null) {
           statRow("Deployment", servingArmy.targetSettlementId != null ? "Marching to war"
               : servingArmy.combatFlashTimer > 0 ? "In combat" : "Garrisoned, awaiting orders");
