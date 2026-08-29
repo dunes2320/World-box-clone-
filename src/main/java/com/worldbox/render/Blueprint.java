@@ -10,12 +10,12 @@ import java.util.Set;
 
 /** A building's real block-by-block layout - literally a list of unit
  * cubes, not a scaled/merged smooth box. A hollow rectangular wall ring
- * (with one door gap) topped by a flat roof slab, an optional smaller
- * centered cap (a stepped roof, for grander buildings), and optional
- * corner towers - generated from a handful of dimensions in code rather
- * than hand-typed layer-by-layer ASCII art, so an odd building size can't
- * silently end up with a mismatched row/column count the way transcribed
- * art risks.
+ * (with a door gap and a couple of window gaps) topped by a real peaked
+ * (gable) roof - not a flat slab, which reads as a plain cube rather than
+ * a house - plus optional corner towers for grander buildings. Generated
+ * from a handful of dimensions in code rather than hand-typed layer-by-
+ * layer ASCII art, so an odd building size can't silently end up with a
+ * mismatched row/column count the way transcribed art risks.
  *
  * Cells are kept in construction order (bottom row first, walls before
  * roof) so a building's live construction progress can slice off a
@@ -41,45 +41,49 @@ public class Blueprint {
   }
 
   /**
-   * @param width, depth   footprint, in blocks
+   * @param width, depth   footprint, in blocks (the roof's ridge runs the
+   *                       length of `depth`, so the peak reads correctly
+   *                       from any of the 4 spiral-placement rotations)
    * @param wallHeight     how many block-layers tall the walls are
-   * @param roofLayers     how many full-footprint flat roof slabs sit on top
-   * @param capSize        a smaller centered roof cap's own footprint (0 = none) -
-   *                       a stepped-roof silhouette for grander buildings
-   * @param capLayers      how many layers tall that cap is
-   * @param corners        a single tower block at each of the 4 corners, one
-   *                       layer above the main roof - a civic/grand cue
+   * @param corners        a single tower block poking up at each of the 4
+   *                       corners, above the roof peak - a civic/grand cue
    */
-  public static Blueprint building(int width, int depth, int wallHeight, int roofLayers,
-      int capSize, int capLayers, boolean corners) {
+  public static Blueprint building(int width, int depth, int wallHeight, boolean corners) {
     List<Cell> cells = new ArrayList<>();
     int doorX = width / 2;
+    // a real house needs to actually look like one at a glance - windows
+    // (small gaps in the two side walls, not the door wall) break up an
+    // otherwise solid brick/plank box the same way a door does
+    boolean windows = wallHeight >= 2 && depth >= 3;
+    int windowY = wallHeight - 1, windowZ = depth / 2;
     for (int y = 0; y < wallHeight; y++) {
       for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
           boolean perimeter = x == 0 || x == width - 1 || z == 0 || z == depth - 1;
           if (!perimeter) continue;
           if (y == 0 && z == depth - 1 && x == doorX) continue; // the front door
+          if (windows && y == windowY && z == windowZ && (x == 0 || x == width - 1)) continue;
           cells.add(new Cell(x, y, z, Block.WALL));
         }
       }
     }
-    for (int r = 0; r < roofLayers; r++) {
-      int y = wallHeight + r;
-      for (int z = 0; z < depth; z++) for (int x = 0; x < width; x++) cells.add(new Cell(x, y, z, Block.ROOF));
-    }
-    if (capSize > 0 && capSize < Math.min(width, depth)) {
-      int cx0 = (width - capSize) / 2, cz0 = (depth - capSize) / 2;
-      for (int r = 0; r < capLayers; r++) {
-        int y = wallHeight + roofLayers + r;
-        for (int z = cz0; z < cz0 + capSize; z++) for (int x = cx0; x < cx0 + capSize; x++) cells.add(new Cell(x, y, z, Block.ROOF));
-      }
+    // a real peaked (gable) roof, not a flat slab - each layer steps in a
+    // block from both sides while still running the FULL depth, giving an
+    // actual triangular ridge profile the length of the building instead
+    // of a flat-topped box. This is the single biggest "this reads as a
+    // house, not a cube" cue a flat roof was missing.
+    int gableLayers = (width + 1) / 2;
+    for (int layer = 0; layer < gableLayers; layer++) {
+      int y = wallHeight + layer;
+      int x0 = layer, x1 = width - 1 - layer;
+      if (x0 > x1) break;
+      for (int z = 0; z < depth; z++) for (int x = x0; x <= x1; x++) cells.add(new Cell(x, y, z, Block.ROOF));
     }
     if (corners) {
-      int y = wallHeight + roofLayers;
+      int y = wallHeight + gableLayers;
       for (int cx : new int[]{0, width - 1}) for (int cz : new int[]{0, depth - 1}) cells.add(new Cell(cx, y, cz, Block.WALL));
     }
-    int height = wallHeight + roofLayers + capLayers + (corners ? 1 : 0);
+    int height = wallHeight + gableLayers + (corners ? 1 : 0);
     return new Blueprint(cells, width, depth, height);
   }
 

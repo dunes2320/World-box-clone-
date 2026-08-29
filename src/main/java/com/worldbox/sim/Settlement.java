@@ -130,8 +130,10 @@ public class Settlement implements java.io.Serializable {
     // footprint - see EntityRenderer's Blueprint set), not the old
     // decorative ~1-unit-wide box props this used to space out - was
     // 2.4 + ring*0.75 + lap*1.0, tight enough that actual multi-block
-    // buildings would have sat on top of each other
-    float radius = 5f + (i % 6) * 2.6f + (i / 6) * 3f;
+    // buildings would have sat on top of each other. Snug rather than
+    // spread out - a real village's houses sit close with just a path
+    // between them, not scattered far apart across an empty field.
+    float radius = 3f + (i % 6) * 2.1f + (i / 6) * 2.4f;
     return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
   }
 

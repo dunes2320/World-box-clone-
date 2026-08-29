@@ -390,8 +390,8 @@ public class EntityRenderer {
     // machinery but always fully built (no per-instance staging needed
     // for a one-per-settlement marker), brick-textured instead of plank
     // to read as a civic building rather than a home.
-    buildingBlueprint[0] = Blueprint.building(3, 3, 2, 1, 0, 0, false); // house
-    buildingBlueprint[1] = Blueprint.building(5, 5, 3, 1, 3, 1, false); // mansion
+    buildingBlueprint[0] = Blueprint.building(3, 3, 2, false); // house
+    buildingBlueprint[1] = Blueprint.building(5, 5, 3, false); // mansion
     for (int t = 0; t < 2; t++) {
       Blueprint bp = buildingBlueprint[t];
       int total = bp.totalCells();
@@ -403,8 +403,8 @@ public class EntityRenderer {
     }
 
     Blueprint govSmallBp = buildingBlueprint[0];
-    Blueprint govMedBp = Blueprint.building(5, 4, 3, 1, 0, 0, false);
-    Blueprint govLargeBp = Blueprint.building(5, 5, 4, 1, 3, 1, true);
+    Blueprint govMedBp = Blueprint.building(5, 4, 3, false);
+    Blueprint govLargeBp = Blueprint.building(5, 5, 4, true);
     hutTemplate = MeshUtil.mergeMeshes(
         govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.WALL),
         govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.ROOF));
