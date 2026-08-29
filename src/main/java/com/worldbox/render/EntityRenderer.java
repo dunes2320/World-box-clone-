@@ -15,6 +15,7 @@ import com.jme3.scene.shape.Torus;
 import com.worldbox.config.Config;
 import com.worldbox.sim.Army;
 import com.worldbox.sim.Bank;
+import com.worldbox.sim.Building;
 import com.worldbox.sim.Business;
 import com.worldbox.sim.Cloud;
 import com.worldbox.sim.GameState;
@@ -173,12 +174,26 @@ public class EntityRenderer {
    * flesh tone while clothing/hair/tools take the nation's accent color,
    * instead of the whole body reading as one flat nation-colored blob. */
   private final Mesh humanSkinTemplate;
-  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate, houseTemplate;
+  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
   private final Mesh cloudTemplate, rainTemplate, foliageTemplate, flowerTemplate;
 
-  private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom, housesGeom;
+  /** Real houses/mansions (see Building) are rendered from an actual
+   * block-by-block Blueprint, not one scaled template - walls and roof
+   * are separate meshes/materials (plank-or-brick vs. shingle), and each
+   * gets STAGE_COUNT precomputed partial-construction meshes so a
+   * building's current progress/integrity (whichever is lower) can pick
+   * the right "how much of it is actually standing" snapshot. Index 0 =
+   * house, 1 = mansion. */
+  private static final int STAGE_COUNT = 4;
+  private final Blueprint[] buildingBlueprint = new Blueprint[2];
+  private final Mesh[][] buildingWallStage = new Mesh[2][STAGE_COUNT];
+  private final Mesh[][] buildingRoofStage = new Mesh[2][STAGE_COUNT];
+  private final Geometry[][] buildingWallGeom = new Geometry[2][STAGE_COUNT];
+  private final Geometry[][] buildingRoofGeom = new Geometry[2][STAGE_COUNT];
+
+  private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom;
   private final Geometry foliageGeom, flowersGeom;
   // the far-population LOD batch (see NEAR_HUMAN_RADIUS) - one merged mesh
   // of humanTemplate placements, rebuilt on its own throttled cadence
@@ -365,14 +380,40 @@ public class EntityRenderer {
         MeshUtil.mergeMeshes(armRBase.deepClone(), MeshUtil.translatedCopy(weaponMesh("banner"), 0, -SHOULDER_Y, 0)));
     humanArmRWeaponTemplates = weaponArmTemplates;
 
-    // settlement tiers: a small hut, a boxy town hall, a tall stacked city
+    // real block-by-block buildings (see Blueprint's own class comment) -
+    // a house/mansion is built from unit blocks the same size as a
+    // terrain block, walls and roof as separate materials, with
+    // STAGE_COUNT precomputed partial-construction snapshots so a
+    // building's live progress/integrity can pick "how much of it is
+    // actually standing" - see updateHouses. A settlement's own single
+    // government-tier marker (hut/town/city) reuses the same Blueprint
+    // machinery but always fully built (no per-instance staging needed
+    // for a one-per-settlement marker), brick-textured instead of plank
+    // to read as a civic building rather than a home.
+    buildingBlueprint[0] = Blueprint.building(3, 3, 2, 1, 0, 0, false); // house
+    buildingBlueprint[1] = Blueprint.building(5, 5, 3, 1, 3, 1, false); // mansion
+    for (int t = 0; t < 2; t++) {
+      Blueprint bp = buildingBlueprint[t];
+      int total = bp.totalCells();
+      for (int s = 0; s < STAGE_COUNT; s++) {
+        int upTo = total * (s + 1) / STAGE_COUNT;
+        buildingWallStage[t][s] = bp.buildStageMesh(upTo, Blueprint.Block.WALL);
+        buildingRoofStage[t][s] = bp.buildStageMesh(upTo, Blueprint.Block.ROOF);
+      }
+    }
+
+    Blueprint govSmallBp = buildingBlueprint[0];
+    Blueprint govMedBp = Blueprint.building(5, 4, 3, 1, 0, 0, false);
+    Blueprint govLargeBp = Blueprint.building(5, 5, 4, 1, 3, 1, true);
     hutTemplate = MeshUtil.mergeMeshes(
-        new Box(0.65f, 0.45f, 0.65f),
-        MeshUtil.translatedCopy(new Box(0.5f, 0.28f, 0.5f), 0, 0.73f, 0));
-    townTemplate = new Box(0.85f, 0.8f, 0.85f);
+        govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.WALL),
+        govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.ROOF));
+    townTemplate = MeshUtil.mergeMeshes(
+        govMedBp.buildStageMesh(govMedBp.totalCells(), Blueprint.Block.WALL),
+        govMedBp.buildStageMesh(govMedBp.totalCells(), Blueprint.Block.ROOF));
     cityTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.translatedCopy(new Box(0.95f, 1.1f, 0.95f), 0, 1.1f, 0),
-        MeshUtil.translatedCopy(new Box(0.62f, 0.7f, 0.62f), 0, 2.9f, 0));
+        govLargeBp.buildStageMesh(govLargeBp.totalCells(), Blueprint.Block.WALL),
+        govLargeBp.buildStageMesh(govLargeBp.totalCells(), Blueprint.Block.ROOF));
 
     businessTemplate = new Box(0.34f, 0.34f, 0.34f);
     bankTemplate = MeshUtil.mergeMeshes(
@@ -436,15 +477,6 @@ public class EntityRenderer {
     foliageTemplate = MeshUtil.buildGrassTuft(0.42f);
     flowerTemplate = MeshUtil.buildGem(0.07f, 0.14f);
 
-    // small satellite houses scattered around a settlement's main building
-    // - the town-hall marker alone read as a single icon, not a village.
-    // Base size bumped up (was 0.34/0.22, rendered at a further 0.55-0.82x
-    // on top of that) - a house that ends up smaller than the person
-    // standing next to it doesn't read as a building at all.
-    houseTemplate = MeshUtil.mergeMeshes(
-        new Box(0.4f, 0.3f, 0.4f),
-        MeshUtil.translatedCopy(new Box(0.3f, 0.16f, 0.3f), 0, 0.46f, 0));
-
     // leaf/bark textures (see TerrainTextures) on top of the same per-tree
     // vertex-color variation trees already had - trees get their own
     // dedicated textured material instead of the shared flat
@@ -482,14 +514,34 @@ public class EntityRenderer {
     // across every pool below, not regenerated per instance.
     com.jme3.texture.Texture2D plankTex = TerrainTextures.buildPlankTexture();
     com.jme3.texture.Texture2D brickTex = TerrainTextures.buildBrickTexture();
+    com.jme3.texture.Texture2D roofTex = TerrainTextures.buildRoofTexture();
 
-    housesGeom = new Geometry("Houses", houseTemplate.deepClone());
-    housesGeom.setMaterial(texturedVertexColorMaterial(plankTex));
-    root.attachChild(housesGeom);
+    // real houses/mansions: one wall + one roof Geometry per construction
+    // stage per type (see the STAGE_COUNT fields' own comment) - a
+    // building's actual current placements are batched into whichever
+    // stage bucket matches its progress/integrity every rebuild (see
+    // updateHouses), same PropBatcher-per-frame-rebake pattern every
+    // other prop pool in this class already uses.
+    com.jme3.texture.Texture2D[] buildingWallTex = {plankTex, brickTex}; // house, mansion
+    for (int t = 0; t < 2; t++) {
+      for (int s = 0; s < STAGE_COUNT; s++) {
+        Geometry wg = new Geometry("BuildingWall" + t + "_" + s, buildingWallStage[t][s]);
+        wg.setMaterial(texturedVertexColorMaterial(buildingWallTex[t]));
+        wg.setCullHint(Spatial.CullHint.Always);
+        root.attachChild(wg);
+        buildingWallGeom[t][s] = wg;
+
+        Geometry rg = new Geometry("BuildingRoof" + t + "_" + s, buildingRoofStage[t][s]);
+        rg.setMaterial(texturedVertexColorMaterial(roofTex));
+        rg.setCullHint(Spatial.CullHint.Always);
+        root.attachChild(rg);
+        buildingRoofGeom[t][s] = rg;
+      }
+    }
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
       Geometry g = new Geometry("Settlement" + i, hutTemplate);
-      g.setMaterial(texturedSoloColorMaterial(ColorRGBA.Gray, plankTex));
+      g.setMaterial(texturedSoloColorMaterial(ColorRGBA.Gray, brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       settlementsNode.attachChild(g);
       settlementPool[i] = g;
@@ -1037,54 +1089,89 @@ public class EntityRenderer {
     flowersGeom.setMesh(PropBatcher.bake(flowerTemplate, flowers));
     flowersGeom.setCullHint(flowers.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
 
-    // one pass over every human to count actual housed residents per
-    // settlement - cheap here (throttled to every 20 ticks) and avoids an
-    // O(settlements x humans) scan below
+    updateHouses(state);
+  }
+
+  /** Real houses/mansions (state.buildings) - each one already knows its
+   * own water-checked position, type, and how much of it is actually
+   * built/still standing (see Building's class comment); this just
+   * buckets every current instance into the right (type, construction
+   * stage) batch and bakes those STAGE_COUNT x 2 x 2 (wall+roof) pools,
+   * the same rebuild-every-call PropBatcher pattern every other prop in
+   * this class already uses. */
+  private void updateHouses(GameState state) {
+    // which of a settlement's buildings (in creation/id order) currently
+    // read as occupied vs. vacant - same idea the old synthetic-count
+    // version used, just walking real instances instead of a fake range
+    Map<Integer, Integer> occupiedRemaining = new HashMap<>();
     Map<Integer, Integer> housedBySettlement = new HashMap<>();
     for (Human h : state.humans) {
       if (h.hasHouse) housedBySettlement.merge(h.settlementId, 1, Integer::sum);
     }
+    for (Map.Entry<Integer, Integer> e : housedBySettlement.entrySet()) {
+      occupiedRemaining.put(e.getKey(), (int) Math.ceil(e.getValue() / Settlement.PEOPLE_PER_HOUSE));
+    }
 
-    List<PropBatcher.Placement> houses = new ArrayList<>();
-    for (Settlement s : state.settlements.values()) {
-      if (houses.size() >= HOUSE_CAP_SAMPLE) break;
-      if (s.populationCount < 1) continue;
-      Nation nation = state.nations.get(s.nationId);
+    @SuppressWarnings("unchecked")
+    List<PropBatcher.Placement>[][] wallPlacements = new List[2][STAGE_COUNT];
+    @SuppressWarnings("unchecked")
+    List<PropBatcher.Placement>[][] roofPlacements = new List[2][STAGE_COUNT];
+    for (int t = 0; t < 2; t++) for (int s = 0; s < STAGE_COUNT; s++) {
+      wallPlacements[t][s] = new ArrayList<>();
+      roofPlacements[t][s] = new ArrayList<>();
+    }
+
+    int rendered = 0;
+    for (Building b : state.buildings.values()) {
+      if (rendered >= HOUSE_CAP_SAMPLE) break;
+      double display = Math.min(b.progress, b.integrity);
+      if (display <= 0) continue; // rubble - nothing left standing to draw
+      int typeIdx = "mansion".equals(b.type) ? 1 : 0;
+      int stage = Math.min(STAGE_COUNT - 1, (int) (display * STAGE_COUNT));
+
+      Nation nation = state.nations.get(b.nationId);
       ColorRGBA color = nation != null ? nationOrFallback(nation.id, HOUSE_FALLBACK) : HOUSE_FALLBACK;
-      // a vacant house reads as an obviously washed-out, duller version
-      // of the nation's color instead of looking identical to an
-      // occupied one
-      ColorRGBA vacantColor = color.clone().interpolateLocal(ColorRGBA.White, 0.65f);
-      vacantColor.a = 0.75f;
-      int housed = housedBySettlement.getOrDefault(s.id, 0);
-      int occupiedHouses = (int) Math.ceil(housed / Settlement.PEOPLE_PER_HOUSE);
-      // even a lone founder gets a couple of houses instead of nothing;
-      // a full-size settlement gets a real cluster instead of topping
-      // out at 10 no matter how big it's grown
-      int houseCount = Math.min(32, Math.max(2 + s.populationCount / 3, occupiedHouses));
-      for (int i = 0; i < houseCount && houses.size() < HOUSE_CAP_SAMPLE; i++) {
-        // spiral placement (radius grows with i, see Settlement.housePosition)
-        // reads as an organic cluster of streets/blocks instead of a single
-        // uniform ring - and is the same formula Nation.updateRoads routes
-        // its street spurs out to, so the roads actually reach the houses.
-        double[] spot = Settlement.housePosition(s, i);
-        float hx = (float) spot[0], hz = (float) spot[1];
-        int gx = clampIdx((int) Math.floor(hx), grid.cols), gz = clampIdx((int) Math.floor(hz), grid.rows);
-        float hh = grid.height[grid.idx(gx, gz)];
-        ColorRGBA c = i < occupiedHouses ? color : vacantColor;
-        // was 0.55-0.82x on top of an already-small base - a house ended
-        // up smaller than the person standing next to it. Now bigger than
-        // a villager (roughly 1.2 units tall) without dwarfing the
-        // town-hall marker it clusters around.
-        float houseScale = 0.95f + (i % 4) * 0.14f;
-        float angle = i * 2.4f + s.id * 0.7f;
-        // houseTemplate's base box is centered at its own origin (half-
-        // height 0.3) so it needs lifting by half its scaled height
-        houses.add(new PropBatcher.Placement(hx, hh + 0.3f * houseScale, hz, angle, houseScale, c));
+      int remaining = occupiedRemaining.getOrDefault(b.settlementId, 0);
+      ColorRGBA wallColor;
+      if (remaining > 0) {
+        occupiedRemaining.put(b.settlementId, remaining - 1);
+        wallColor = color;
+      } else {
+        // a vacant house reads as an obviously washed-out, duller version
+        // of the nation's color instead of looking identical to an
+        // occupied one
+        wallColor = color.clone().interpolateLocal(ColorRGBA.White, 0.65f);
+        wallColor.a = 0.75f;
+      }
+
+      int gx = clampIdx((int) Math.floor(b.x), grid.cols), gz = clampIdx((int) Math.floor(b.z), grid.rows);
+      float hh = grid.height[grid.idx(gx, gz)];
+      // one of 4 cardinal rotations, picked per building id, so a whole
+      // cluster doesn't all face the exact same way - a Blueprint's door
+      // is always cut into one specific wall, so unlike a smooth prop
+      // this can't just take any arbitrary continuous angle without the
+      // door ending up facing a wall segment's own flat face at a weird
+      // mid-angle
+      float angle = (b.id % 4) * 1.5708f;
+      wallPlacements[typeIdx][stage].add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, wallColor));
+      // the roof is its own material (shingle texture) and reads truest
+      // to that texture lit only by the scene, not tinted by whichever
+      // nation owns the walls under it - same as a real roof being a
+      // different material than the walls, not painted to match
+      roofPlacements[typeIdx][stage].add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      rendered++;
+    }
+
+    for (int t = 0; t < 2; t++) {
+      for (int s = 0; s < STAGE_COUNT; s++) {
+        List<PropBatcher.Placement> walls = wallPlacements[t][s];
+        buildingWallGeom[t][s].setMesh(PropBatcher.bake(buildingWallStage[t][s], walls));
+        buildingWallGeom[t][s].setCullHint(walls.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+        List<PropBatcher.Placement> roofs = roofPlacements[t][s];
+        buildingRoofGeom[t][s].setMesh(PropBatcher.bake(buildingRoofStage[t][s], roofs));
+        buildingRoofGeom[t][s].setCullHint(roofs.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
       }
     }
-    housesGeom.setMesh(PropBatcher.bake(houseTemplate, houses));
-    housesGeom.setCullHint(houses.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
 
   public void update(GameState state, float alpha, float animTime, Vector3f camFocus) {

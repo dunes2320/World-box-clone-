@@ -44,11 +44,12 @@ public class Settlement implements java.io.Serializable {
   public int farmCells = 6;
   // must stay at least as big as the widest a settlement's own houses/
   // businesses ever spiral out to (EntityRenderer.updateHouses/
-  // updateBusinesses place them up to ~8.6 units out - see
-  // housePosition/business placement) - a settlement whose own buildings
-  // sit outside its own claimed land is exactly what let two nations'
-  // territories interleave with each other's buildings and look broken.
-  public double radius = 10;
+  // updateBusinesses; real block-built houses need much more spread than
+  // the old decorative props did - see housePosition/business placement)
+  // - a settlement whose own buildings sit outside its own claimed land
+  // is exactly what let two nations' territories interleave with each
+  // other's buildings and look broken.
+  public double radius = 16;
   public double growthAccum = 0;
   public int starveTicks = 0;
   public double siegeProgress = 0;
@@ -64,6 +65,12 @@ public class Settlement implements java.io.Serializable {
    * and territory but its structures stay standing as a visible ruin. */
   public boolean abandoned = false;
   public double housingStock = 5;
+  /** Ever-incrementing counter feeding the spiral house-placement formula
+   * (housePosition) - kept persistent (not just "however many houses
+   * exist right now") so a house that's since been destroyed doesn't
+   * free up its old ring slot for a new house to silently reuse; every
+   * house this settlement ever builds gets its own fresh spot. */
+  public int houseSpiralIndex = 0;
 
   private Settlement(int x, int z, int nationId, String name, int foundedTick) {
     this.id = nextId++;
@@ -100,6 +107,14 @@ public class Settlement implements java.io.Serializable {
       state.humans.add(founder);
     }
 
+    // a fresh settlement already has its starting housingStock's worth of
+    // real houses standing (not empty ground with a promise of housing
+    // later) - each one fully built (progress=1) since founding a town
+    // isn't meant to look like an empty field for its first month
+    for (int i = 0; i < (int) settlement.housingStock; i++) {
+      spawnHouseBuilding(state, settlement, 1.0);
+    }
+
     claimTerritory(state, settlement);
     return settlement;
   }
@@ -111,8 +126,46 @@ public class Settlement implements java.io.Serializable {
    * two computing independent, uncoordinated patterns. */
   public static double[] housePosition(Settlement s, int i) {
     float angle = i * 2.4f + s.id * 0.7f;
-    float radius = 2.4f + (i % 6) * 0.75f + (i / 6) * 1.0f;
+    // spacing sized for real block-built houses (a 3x3-to-5x5 block
+    // footprint - see EntityRenderer's Blueprint set), not the old
+    // decorative ~1-unit-wide box props this used to space out - was
+    // 2.4 + ring*0.75 + lap*1.0, tight enough that actual multi-block
+    // buildings would have sat on top of each other
+    float radius = 5f + (i % 6) * 2.6f + (i / 6) * 3f;
     return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
+  }
+
+  /** The next free spiral ring position that actually lands on dry land -
+   * a house (unlike a settlement's abstract claimed territory, which
+   * simply skips water cells entirely) used to get placed with no terrain
+   * check at all, so a coastal town's spiral could - and did - plant
+   * houses out on open water. Gives up after a generous number of rings
+   * (a settlement boxed in by water on every side at every ring tried is
+   * a real, if rare, possibility) rather than looping forever. */
+  private static double[] findBuildingSpot(GameState state, Settlement s) {
+    WorldGrid grid = state.grid;
+    for (int attempts = 0; attempts < 60; attempts++) {
+      double[] spot = housePosition(s, s.houseSpiralIndex++);
+      int gx = (int) Math.floor(spot[0]), gz = (int) Math.floor(spot[1]);
+      if (!grid.inBounds(gx, gz) || grid.terrain[grid.idx(gx, gz)] != Config.WATER) return spot;
+    }
+    return null;
+  }
+
+  /** Creates one real house (or, for a wealthy nation, occasionally a
+   * mansion instead) at the next dry spiral spot and adds it to
+   * state.buildings - the single place a house Building ever comes into
+   * existence, whether at founding (fully built) or from later organic
+   * growth (starts at progress 0 and visibly rises - see update()'s
+   * construction pass). */
+  private static void spawnHouseBuilding(GameState state, Settlement s, double startProgress) {
+    double[] spot = findBuildingSpot(state, s);
+    if (spot == null) return; // genuinely boxed in by water this attempt - try again next time housing grows
+    Nation nation = state.nations.get(s.nationId);
+    boolean mansion = nation != null && nation.landValueIndex > 1.3 && Math.random() < 0.2;
+    Building b = new Building(s.id, s.nationId, mansion ? "mansion" : "house", spot[0], spot[1]);
+    b.progress = startProgress;
+    state.buildings.put(b.id, b);
   }
 
   /** Whether a candidate founding spot is actually free of any OTHER
@@ -253,7 +306,21 @@ public class Settlement implements java.io.Serializable {
   public static final double PEOPLE_PER_HOUSE = 4.0;
   private static final double HOUSE_WOOD_COST = 12.0;
 
+  /** A house rises from bare foundation to fully built over roughly a
+   * month of game time - slow enough to actually watch happen, not an
+   * instant pop-in, not so slow it reads as never finishing. */
+  private static final double CONSTRUCTION_RATE = 1.0 / 30.0;
+
   public static void update(GameState state) {
+    // real, individually-placed buildings actually rising - see
+    // Building's own class comment. A flat per-tick pass over every
+    // building regardless of settlement, not nested inside the
+    // per-settlement loop below, so this stays O(buildings) instead of
+    // O(settlements x buildings).
+    for (Building b : state.buildings.values()) {
+      if (b.progress < 1.0) b.progress = Math.min(1.0, b.progress + CONSTRUCTION_RATE);
+    }
+
     for (Settlement s : state.settlements.values()) s.populationCount = 0;
     // one pass over every human to figure out which settlements actually
     // have a mature male and a mature female resident - growth below only
@@ -299,10 +366,11 @@ public class Settlement implements java.io.Serializable {
         // border.
         Nation homeNation = state.nations.get(settlement.nationId);
         double wealthBonus = homeNation != null ? Math.sqrt(Math.max(0, homeNation.treasury)) * 0.16 : 0;
-        // floor of 10 (not the old 4.5) for the same reason as the field
-        // default above - never lets the claim radius shrink back below
-        // where this settlement's own buildings actually sit
-        settlement.radius = Math.min(44, 10 + Math.sqrt(settlement.populationCount) * 1.1 + wealthBonus);
+        // floor and cap both raised (10->16, 44->60) to match housePosition's
+        // wider spiral spacing for real multi-block houses (see its own
+        // comment) - never lets the claim radius shrink back below where
+        // this settlement's own buildings actually sit
+        settlement.radius = Math.min(60, 16 + Math.sqrt(settlement.populationCount) * 1.6 + wealthBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
 
@@ -385,6 +453,7 @@ public class Settlement implements java.io.Serializable {
           && settlement.stock.get("wood") > HOUSE_WOOD_COST + Config.SETTLEMENT_BUFFER * 0.5) {
         settlement.stock.merge("wood", -HOUSE_WOOD_COST, Double::sum);
         settlement.housingStock += 1;
+        spawnHouseBuilding(state, settlement, 0.0);
         houseCapacity = settlement.housingStock * PEOPLE_PER_HOUSE;
         // the house that was just built goes to whoever in this
         // settlement still doesn't have one

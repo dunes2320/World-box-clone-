@@ -19,6 +19,11 @@ public class GameState implements java.io.Serializable {
   public Map<Integer, Nation> nations = new LinkedHashMap<>();
   public Map<Integer, Army> armies = new LinkedHashMap<>();
   public Map<Integer, Business> businesses = new LinkedHashMap<>();
+  /** Real, individually-placed houses/mansions - see Building's own class
+   * comment. Businesses/banks/markets/etc. still render from the older
+   * recomputed-template-count approach; only housing was worth the extra
+   * bookkeeping of a persistent per-instance entity this round. */
+  public Map<Integer, Building> buildings = new LinkedHashMap<>();
   /** last ~120 samples of total living-nation treasury, for the world economy graph. */
   public final java.util.ArrayDeque<Double> worldEconomyHistory = new java.util.ArrayDeque<>();
   /** last ~120 samples of every business's combined market-cap style

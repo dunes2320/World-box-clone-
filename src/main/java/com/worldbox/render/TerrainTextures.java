@@ -127,6 +127,28 @@ public final class TerrainTextures {
   // crisp, blocky pixels up close (MagFilter) but mip-mapped so distant
   // terrain doesn't shimmer/moire - the same combination every blocky
   // voxel game uses, since a texture this small aliases badly without it
+  /** A standalone roof-shingle texture - staggered darker shingle rows
+   * over a warm red-brown base, independent of the wall material (plank
+   * or brick) a building otherwise uses, the same way a real roof is a
+   * different material than the walls under it. */
+  public static Texture2D buildRoofTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0x8B3A2E, dark = 0x6E2C22, light = 0xA34A3A;
+    int rowHeight = 2;
+    for (int y = 0; y < TILE; y++) {
+      int rowOffset = ((y / rowHeight) % 2 == 0) ? 0 : 2;
+      boolean seam = y % rowHeight == 0;
+      for (int x = 0; x < TILE; x++) {
+        boolean shingleEdge = ((x + rowOffset) % 4) == 0;
+        float t = noise01(x, y, 0xF21);
+        int c = t < 0.5f ? mix(base, dark, base, t * 2f) : mix(base, base, light, (t - 0.5f) * 2f);
+        if (seam || shingleEdge) c = dark;
+        img.setRGB(x, y, c);
+      }
+    }
+    return toTexture(img);
+  }
+
   private static Texture2D toTexture(BufferedImage img) {
     Image jmeImage = new AWTLoader().load(img, false);
     Texture2D tex = new Texture2D(jmeImage);

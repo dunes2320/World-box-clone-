@@ -491,6 +491,7 @@ public class Military {
     }
     if (Math.random() < severity * 0.4 && settlement.housingStock > 1) {
       settlement.housingStock = Math.max(1, settlement.housingStock - 1);
+      damageRandomBuilding(state, settlement.id, 0.3 + Math.random() * 0.4);
     }
     for (String key : new String[]{"food", "wood", "stone"}) {
       double have = settlement.stock.getOrDefault(key, 0.0);
@@ -529,7 +530,29 @@ public class Military {
     }
     state.humans.removeIf(h -> h.dead);
     settlement.housingStock = Math.max(1, settlement.housingStock * 0.55);
+    // real buildings actually come down with the city, not just the
+    // abstract housingStock number - roughly the same ~45% the housing
+    // count itself just lost
+    List<Building> owned = new ArrayList<>();
+    for (Building b : state.buildings.values()) if (b.settlementId == settlement.id) owned.add(b);
+    int toDestroy = (int) Math.round(owned.size() * 0.45);
+    for (int i = 0; i < toDestroy && !owned.isEmpty(); i++) {
+      Building b = owned.remove((int) (Math.random() * owned.size()));
+      state.buildings.remove(b.id);
+    }
     return killCount;
+  }
+
+  /** A random one of this settlement's real buildings takes real damage -
+   * knocked back toward "still under construction" rather than the whole
+   * thing vanishing outright, unless it was already too far gone. */
+  private static void damageRandomBuilding(GameState state, int settlementId, double amount) {
+    List<Building> owned = new ArrayList<>();
+    for (Building b : state.buildings.values()) if (b.settlementId == settlementId) owned.add(b);
+    if (owned.isEmpty()) return;
+    Building b = owned.get((int) (Math.random() * owned.size()));
+    b.integrity -= amount;
+    if (b.integrity <= 0) state.buildings.remove(b.id);
   }
 
   private static void resolveFieldBattles(GameState state) {

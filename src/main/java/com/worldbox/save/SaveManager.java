@@ -1,6 +1,7 @@
 package com.worldbox.save;
 
 import com.worldbox.sim.Army;
+import com.worldbox.sim.Building;
 import com.worldbox.sim.Business;
 import com.worldbox.sim.Cloud;
 import com.worldbox.sim.GameState;
@@ -134,5 +135,9 @@ public class SaveManager {
     int maxCloud = 0;
     for (Cloud c : state.clouds) maxCloud = Math.max(maxCloud, c.id);
     Cloud.restoreNextId(maxCloud);
+
+    int maxBuilding = 0;
+    for (int id : state.buildings.keySet()) maxBuilding = Math.max(maxBuilding, id);
+    Building.restoreNextId(maxBuilding);
   }
 }
