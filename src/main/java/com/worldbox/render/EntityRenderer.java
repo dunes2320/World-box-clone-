@@ -45,7 +45,7 @@ public class EntityRenderer {
   // hip-anchored local frame (mesh-local y=0 = hip - see the leg mesh
   // comments above); an arm Geometry's own local origin sits here so
   // rotating it swings from the shoulder, not some arbitrary point.
-  private static final float SHOULDER_X = 0.19f;
+  private static final float SHOULDER_X = 0.23f;
   private static final float SHOULDER_Y = 0.40f;
   private static final float ARM_SWING_AMPLITUDE = 0.55f; // radians
   // a civilian with no living nation (a wanderer, or one whose nation
@@ -289,34 +289,36 @@ public class EntityRenderer {
     // since a rock and an ore vein shouldn't look like the same thing.
     depositTemplate = MeshUtil.buildCrystalCluster(0.42f);
     stoneDepositTemplate = MeshUtil.buildRockCluster(0.5f);
-    // a villager used to be one solid torso box plus a head - a believable
-    // silhouette from a distance, but a single blob up close with no sense
-    // of a person actually standing there. Separate legs, a distinct
-    // torso/head, plus a hair tuft, a collar and belt (clothing), and two
-    // small eye bumps (a face) read as an actual little figure instead,
-    // while keeping the same low-poly block style as everything else and
-    // the same overall footprint (local y -0.5..0.72) so placement math
-    // elsewhere doesn't need to change.
-    Mesh legL = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), -0.06f, -0.25f, 0);
-    Mesh legR = MeshUtil.translatedCopy(new Box(0.05f, 0.25f, 0.06f), 0.06f, -0.25f, 0);
-    Mesh torso = MeshUtil.translatedCopy(new Box(0.15f, 0.22f, 0.1f), 0, 0.22f, 0);
-    Mesh head = MeshUtil.translatedCopy(new Box(0.12f, 0.14f, 0.12f), 0, 0.58f, 0);
+    // the player asked for a fully voxel/Minecraft-style world - this is
+    // the last holdout that still read as a smooth low-poly figure rather
+    // than a blocky one: square rectangular limbs (no taper), a big cube
+    // head, and no raised 3D face detail (Minecraft's face is a flat skin
+    // texture, not a bump), instead of the previous slimmer, more
+    // human-proportioned build. SHOULDER_X was widened to match (see its
+    // own comment) so the arms still sit flush against the new wider
+    // torso; every other placement constant (feet at local y=-0.5,
+    // waist at y=0, SHOULDER_Y) is unchanged on purpose so nothing that
+    // positions a human in world space, or attaches a weapon to the arm,
+    // needs to change along with the shape.
+    Mesh legL = MeshUtil.translatedCopy(new Box(0.09f, 0.25f, 0.09f), -0.09f, -0.25f, 0);
+    Mesh legR = MeshUtil.translatedCopy(new Box(0.09f, 0.25f, 0.09f), 0.09f, -0.25f, 0);
+    Mesh torso = MeshUtil.translatedCopy(new Box(0.19f, 0.22f, 0.12f), 0, 0.22f, 0);
+    Mesh head = MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.16f), 0, 0.6f, 0);
     // clothing: a collar at the neckline and a belt at the waist - thin
     // bands slightly wider than the body they wrap, so they read as
     // fabric rather than more torso
-    Mesh collar = MeshUtil.translatedCopy(new Box(0.165f, 0.02f, 0.115f), 0, 0.44f, 0);
-    Mesh belt = MeshUtil.translatedCopy(new Box(0.165f, 0.02f, 0.115f), 0, 0f, 0);
-    // hair: a simple tuft sitting on top of the head
-    Mesh hair = MeshUtil.translatedCopy(new Box(0.1f, 0.035f, 0.1f), 0, 0.735f, 0);
-    // face: two small eye bumps on the front of the head, proud enough of
-    // the surface to catch a highlight/shadow (see the SSAO pass) instead
-    // of just disappearing into the block
-    Mesh eyeL = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), -0.05f, 0.6f, 0.125f);
-    Mesh eyeR = MeshUtil.translatedCopy(new Box(0.02f, 0.02f, 0.01f), 0.05f, 0.6f, 0.125f);
-    // skin (head + face) is its own mesh/material, kept out of the
+    Mesh collar = MeshUtil.translatedCopy(new Box(0.2f, 0.02f, 0.13f), 0, 0.44f, 0);
+    Mesh belt = MeshUtil.translatedCopy(new Box(0.2f, 0.02f, 0.13f), 0, 0f, 0);
+    // hair: a flat block "cap" layer sitting flush on top of the head,
+    // the same idea as a Minecraft skin's separate hat layer, rather than
+    // a rounded tuft
+    Mesh hair = MeshUtil.translatedCopy(new Box(0.165f, 0.03f, 0.165f), 0, 0.79f, 0);
+    // skin (the head) is its own mesh/material, kept out of the
     // nation-colored group entirely - see humanSkinTemplate's field
-    // comment for why
-    humanSkinTemplate = MeshUtil.mergeMeshes(head, MeshUtil.mergeMeshes(eyeL, eyeR));
+    // comment for why. No raised eye/face geometry anymore - a flat
+    // cube head, Minecraft-style, reads as a face via its skin-tone
+    // color alone rather than a 3D bump.
+    humanSkinTemplate = head;
     humanTemplate = MeshUtil.mergeMeshes(
         MeshUtil.mergeMeshes(legL, legR),
         MeshUtil.mergeMeshes(torso, MeshUtil.mergeMeshes(collar, MeshUtil.mergeMeshes(belt, hair))));
@@ -331,8 +333,12 @@ public class EntityRenderer {
     // soldiers' carried weapons) now merges onto the right arm itself
     // instead of the torso, so an axe or pickaxe actually moves with the
     // swinging hand instead of floating fixed on the body.
-    Mesh armLBase = MeshUtil.translatedCopy(new Box(0.045f, 0.2f, 0.055f), -SHOULDER_X, -0.2f, 0);
-    Mesh armRBase = MeshUtil.translatedCopy(new Box(0.045f, 0.2f, 0.055f), SHOULDER_X, -0.2f, 0);
+    // thicker than before (0.045/0.055 -> 0.065/0.07), to match the new
+    // blockier torso/legs - the arm's own half-height (so its length, and
+    // every weapon/tool offset merged onto it below) is untouched, only
+    // its thickness changed, so nothing further needs re-tuning
+    Mesh armLBase = MeshUtil.translatedCopy(new Box(0.065f, 0.2f, 0.07f), -SHOULDER_X, -0.2f, 0);
+    Mesh armRBase = MeshUtil.translatedCopy(new Box(0.065f, 0.2f, 0.07f), SHOULDER_X, -0.2f, 0);
     humanArmLTemplate = armLBase;
     humanArmRTemplate = armRBase;
     // axeMesh()/pickaxeMesh() were built hip-relative (y=0 at the hip,
@@ -469,13 +475,21 @@ public class EntityRenderer {
     flowersGeom.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(flowersGeom);
 
+    // timber vs. stone construction, same texture-pack idea as the
+    // terrain/tree pass - a modest, wood-framed building (house, hut,
+    // shop, market stall) gets plank grain; a grander stone one (bank,
+    // statue, monument, military base) gets brick. Built once and shared
+    // across every pool below, not regenerated per instance.
+    com.jme3.texture.Texture2D plankTex = TerrainTextures.buildPlankTexture();
+    com.jme3.texture.Texture2D brickTex = TerrainTextures.buildBrickTexture();
+
     housesGeom = new Geometry("Houses", houseTemplate.deepClone());
-    housesGeom.setMaterial(vertexColorMaterial());
+    housesGeom.setMaterial(texturedVertexColorMaterial(plankTex));
     root.attachChild(housesGeom);
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
       Geometry g = new Geometry("Settlement" + i, hutTemplate);
-      g.setMaterial(soloColorMaterial(ColorRGBA.Gray));
+      g.setMaterial(texturedSoloColorMaterial(ColorRGBA.Gray, plankTex));
       g.setCullHint(Spatial.CullHint.Always);
       settlementsNode.attachChild(g);
       settlementPool[i] = g;
@@ -515,7 +529,7 @@ public class EntityRenderer {
 
     for (int i = 0; i < BUSINESS_CAP; i++) {
       Geometry g = new Geometry("Business" + i, businessTemplate);
-      g.setMaterial(soloColorMaterial(ColorRGBA.White));
+      g.setMaterial(texturedSoloColorMaterial(ColorRGBA.White, plankTex));
       g.setCullHint(Spatial.CullHint.Always);
       businessesNode.attachChild(g);
       businessPool[i] = g;
@@ -524,7 +538,7 @@ public class EntityRenderer {
 
     for (int i = 0; i < BANK_CAP; i++) {
       Geometry g = new Geometry("Bank" + i, bankTemplate);
-      g.setMaterial(soloColorMaterial(BANK_COLOR));
+      g.setMaterial(texturedSoloColorMaterial(BANK_COLOR, brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       banksNode.attachChild(g);
       bankPool[i] = g;
@@ -533,7 +547,7 @@ public class EntityRenderer {
 
     for (int i = 0; i < BANK_CAP; i++) {
       Geometry g = new Geometry("Statue" + i, statueTemplate);
-      g.setMaterial(soloColorMaterial(new ColorRGBA(0.75f, 0.75f, 0.78f, 1f)));
+      g.setMaterial(texturedSoloColorMaterial(new ColorRGBA(0.75f, 0.75f, 0.78f, 1f), brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       statuesNode.attachChild(g);
       statuePool[i] = g;
@@ -542,7 +556,7 @@ public class EntityRenderer {
 
     for (int i = 0; i < LANDMARK_CAP; i++) {
       Geometry g = new Geometry("Monument" + i, monumentTemplate);
-      g.setMaterial(soloColorMaterial(MONUMENT_COLOR));
+      g.setMaterial(texturedSoloColorMaterial(MONUMENT_COLOR, brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       monumentsNode.attachChild(g);
       monumentPool[i] = g;
@@ -551,7 +565,7 @@ public class EntityRenderer {
 
     for (int i = 0; i < LANDMARK_CAP; i++) {
       Geometry g = new Geometry("MilitaryBase" + i, militaryBaseTemplate);
-      g.setMaterial(soloColorMaterial(MILITARY_BASE_COLOR));
+      g.setMaterial(texturedSoloColorMaterial(MILITARY_BASE_COLOR, brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       militaryBasesNode.attachChild(g);
       militaryBasePool[i] = g;
@@ -839,6 +853,17 @@ public class EntityRenderer {
     mat.setColor("Ambient", c);
     mat.setColor("Specular", new ColorRGBA(0.14f, 0.14f, 0.13f, 1f));
     mat.setFloat("Shininess", 8f);
+    return mat;
+  }
+
+  /** Same as soloColorMaterial() but with a texture multiplying in - a
+   * building's own Diffuse/Ambient color (set per-instance the same way
+   * as before, e.g. a vacant house's whiter tint) still works exactly the
+   * same through setSoloColor below, just modulating real plank/brick
+   * grain now instead of a flat color underneath. */
+  private Material texturedSoloColorMaterial(ColorRGBA c, com.jme3.texture.Texture2D tex) {
+    Material mat = soloColorMaterial(c);
+    mat.setTexture("DiffuseMap", tex);
     return mat;
   }
 

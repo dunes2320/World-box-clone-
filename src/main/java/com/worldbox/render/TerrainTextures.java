@@ -82,6 +82,48 @@ public final class TerrainTextures {
     return toTexture(img);
   }
 
+  /** A standalone wooden-plank texture for wood-framed buildings (houses,
+   * huts, market stalls, business fronts) - horizontal board rows with a
+   * seam line between each and speckled wood grain within a row, so a
+   * building reads as built from timber rather than a solid color box. */
+  public static Texture2D buildPlankTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0x9C7444, dark = 0x7C5A34, light = 0xB18A56;
+    int rowHeight = 4;
+    for (int y = 0; y < TILE; y++) {
+      boolean seam = y % rowHeight == 0;
+      for (int x = 0; x < TILE; x++) {
+        float t = noise01(x, y, 0xF01);
+        int c = t < 0.5f ? mix(base, dark, base, t * 2f) : mix(base, base, light, (t - 0.5f) * 2f);
+        if (seam) c = mix(c, dark, c, 0.55f);
+        img.setRGB(x, y, c);
+      }
+    }
+    return toTexture(img);
+  }
+
+  /** A standalone stone-brick texture for grander stone buildings (banks,
+   * monuments, statues, military bases) - offset brick rows with a darker
+   * mortar grid, distinct from the plain fractured-rock stone tile used
+   * for terrain. */
+  public static Texture2D buildBrickTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0x9A9CA2, mortar = 0x616469;
+    int brickH = 4, brickW = 8;
+    for (int y = 0; y < TILE; y++) {
+      int rowOffset = ((y / brickH) % 2 == 0) ? 0 : brickW / 2;
+      boolean hMortar = y % brickH == 0;
+      for (int x = 0; x < TILE; x++) {
+        boolean vMortar = ((x + rowOffset) % brickW) == 0;
+        float t = noise01(x, y, 0xF11);
+        int c = mix(base, base, 0xACAEB3, t);
+        if (hMortar || vMortar) c = mortar;
+        img.setRGB(x, y, c);
+      }
+    }
+    return toTexture(img);
+  }
+
   // crisp, blocky pixels up close (MagFilter) but mip-mapped so distant
   // terrain doesn't shimmer/moire - the same combination every blocky
   // voxel game uses, since a texture this small aliases badly without it
