@@ -27,6 +27,14 @@ public class PropBatcher {
   public static Mesh bake(Mesh template, List<Placement> placements) {
     FloatBuffer tPos = template.getFloatBuffer(VertexBuffer.Type.Position);
     FloatBuffer tNorm = template.getFloatBuffer(VertexBuffer.Type.Normal);
+    // UV doesn't need any per-instance transform (rotation/scale/
+    // translation only move geometry, not texture coordinates) - a
+    // template that carries real UVs (e.g. a tree built from textured
+    // Boxes, see MeshUtil.mergeMeshes) just gets them copied straight
+    // through per instance; a template with none (the common case - most
+    // batched props are flat vertex-colored, no texture at all) leaves
+    // the output mesh with no TexCoord buffer at all, exactly as before.
+    FloatBuffer tUv = template.getFloatBuffer(VertexBuffer.Type.TexCoord);
     IndexBuffer tIdx = template.getIndicesAsList();
     int vertsPerInstance = template.getVertexCount();
     int idxPerInstance = tIdx.size();
@@ -35,6 +43,7 @@ public class PropBatcher {
     float[] pos = new float[vertsPerInstance * count * 3];
     float[] norm = new float[vertsPerInstance * count * 3];
     float[] col = new float[vertsPerInstance * count * 4];
+    float[] uv = tUv != null ? new float[vertsPerInstance * count * 2] : null;
     int[] idx = new int[idxPerInstance * count];
 
     Quaternion q = new Quaternion();
@@ -58,6 +67,11 @@ public class PropBatcher {
 
         int ci = (vOff + v) * 4;
         col[ci] = placement.color.r; col[ci + 1] = placement.color.g; col[ci + 2] = placement.color.b; col[ci + 3] = 1f;
+
+        if (uv != null) {
+          int ui = (vOff + v) * 2;
+          uv[ui] = tUv.get(v * 2); uv[ui + 1] = tUv.get(v * 2 + 1);
+        }
       }
       for (int t = 0; t < idxPerInstance; t++) idx[iOff + t] = vOff + tIdx.get(t);
       vOff += vertsPerInstance;
@@ -73,6 +87,7 @@ public class PropBatcher {
     m.setBuffer(VertexBuffer.Type.Normal, 3, norm);
     m.setBuffer(VertexBuffer.Type.Color, 4, col);
     m.setBuffer(VertexBuffer.Type.Index, 3, idx);
+    if (uv != null) m.setBuffer(VertexBuffer.Type.TexCoord, 2, uv);
     m.updateBound();
     return m;
   }

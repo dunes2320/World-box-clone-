@@ -9,6 +9,7 @@ import com.jme3.scene.Geometry;
 import com.jme3.scene.Mesh;
 import com.jme3.scene.Node;
 import com.jme3.scene.VertexBuffer;
+import com.jme3.texture.Texture2D;
 import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
@@ -88,13 +89,24 @@ public class VoxelChunkRenderer {
     // responds to view angle, which reads as flat/painted-on rather than
     // actually lit. A soft sheen on terrain and a real glint on water
     // give the sun something to visibly bounce off of.
+    // a small, classic-resolution atlas (grass/dirt/stone/sand/water),
+    // painted procedurally at startup - see TerrainTextures - instead of
+    // the old flat per-block vertex color. DiffuseMap multiplies with
+    // UseVertexColor in Lighting.j3md, so every existing tint (territory
+    // color, farmland, roads, fire, snow, foam - see topColor below) still
+    // works exactly as before, just modulating a textured base now
+    // instead of a flat one.
+    Texture2D atlas = TerrainTextures.buildAtlas();
+
     Material solidMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     solidMat.setBoolean("UseVertexColor", true);
+    solidMat.setTexture("DiffuseMap", atlas);
     solidMat.setColor("Specular", new ColorRGBA(0.16f, 0.16f, 0.15f, 1f));
     solidMat.setFloat("Shininess", 10f);
 
     Material waterMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     waterMat.setBoolean("UseVertexColor", true);
+    waterMat.setTexture("DiffuseMap", atlas);
     waterMat.setColor("Specular", new ColorRGBA(0.85f, 0.89f, 0.93f, 1f));
     waterMat.setFloat("Shininess", 80f);
     waterMat.setTransparent(true);
@@ -294,6 +306,21 @@ public class VoxelChunkRenderer {
     return true; // solid against solid: buried, never seen
   }
 
+  /** Which atlas tile (see TerrainTextures) a block's face should sample -
+   * every face the same for dirt/sand/stone/water, but grass shows its
+   * green top tile, a grass/dirt transition tile on its sides, and plain
+   * dirt underneath, same as the block it's modeled after. */
+  private static int tileFor(byte type, Face f) {
+    switch (type) {
+      case VoxelWorld.GRASS:
+        return f == Face.TOP ? TerrainTextures.GRASS_TOP : f == Face.BOTTOM ? TerrainTextures.DIRT : TerrainTextures.GRASS_SIDE;
+      case VoxelWorld.DIRT: return TerrainTextures.DIRT;
+      case VoxelWorld.SAND: return TerrainTextures.SAND;
+      case VoxelWorld.STONE: return TerrainTextures.STONE;
+      default: return TerrainTextures.WATER;
+    }
+  }
+
   private void addVisibleFaces(MeshBuilder mb, int x, int y, int z, byte type, ColorRGBA color) {
     if (!faceHidden(world.get(x, y + 1, z), type)) {
       ColorRGBA c = type == VoxelWorld.WATER ? color : topColor(x, z, color);
@@ -301,13 +328,13 @@ public class VoxelChunkRenderer {
         float t = Math.min(1f, (y - SNOW_LINE) / 4f);
         c = c.clone().interpolateLocal(SNOW_COLOR, 0.4f + t * 0.5f);
       }
-      mb.face(x, y, z, Face.TOP, c, SHADE_TOP);
+      mb.face(x, y, z, Face.TOP, c, SHADE_TOP, tileFor(type, Face.TOP));
     }
-    if (!faceHidden(world.get(x, y - 1, z), type)) mb.face(x, y, z, Face.BOTTOM, color, SHADE_BOTTOM);
-    if (!faceHidden(world.get(x + 1, y, z), type)) mb.face(x, y, z, Face.EAST, color, SHADE_EW);
-    if (!faceHidden(world.get(x - 1, y, z), type)) mb.face(x, y, z, Face.WEST, color, SHADE_EW);
-    if (!faceHidden(world.get(x, y, z + 1), type)) mb.face(x, y, z, Face.SOUTH, color, SHADE_NS);
-    if (!faceHidden(world.get(x, y, z - 1), type)) mb.face(x, y, z, Face.NORTH, color, SHADE_NS);
+    if (!faceHidden(world.get(x, y - 1, z), type)) mb.face(x, y, z, Face.BOTTOM, color, SHADE_BOTTOM, tileFor(type, Face.BOTTOM));
+    if (!faceHidden(world.get(x + 1, y, z), type)) mb.face(x, y, z, Face.EAST, color, SHADE_EW, tileFor(type, Face.EAST));
+    if (!faceHidden(world.get(x - 1, y, z), type)) mb.face(x, y, z, Face.WEST, color, SHADE_EW, tileFor(type, Face.WEST));
+    if (!faceHidden(world.get(x, y, z + 1), type)) mb.face(x, y, z, Face.SOUTH, color, SHADE_NS, tileFor(type, Face.SOUTH));
+    if (!faceHidden(world.get(x, y, z - 1), type)) mb.face(x, y, z, Face.NORTH, color, SHADE_NS, tileFor(type, Face.NORTH));
   }
 
   /** Blends fire glow, territory-owner tint, and road/farmland overlays
@@ -385,9 +412,10 @@ public class VoxelChunkRenderer {
     final List<Float> pos = new ArrayList<>();
     final List<Float> col = new ArrayList<>();
     final List<Float> norm = new ArrayList<>();
+    final List<Float> uv = new ArrayList<>();
     final List<Integer> idx = new ArrayList<>();
 
-    void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade) {
+    void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade, int tile) {
       float x = bx, y = by - VoxelWorld.Y_OFFSET, z = bz;
       float[][] verts;
       float nx, ny, nz;
@@ -409,6 +437,14 @@ public class VoxelChunkRenderer {
         col.add(r); col.add(g); col.add(b2); col.add(c.a);
         norm.add(nx); norm.add(ny); norm.add(nz);
       }
+      // each quad's own corner maps 0,0 / 1,0 / 1,1 / 0,1 (matching the
+      // vertex winding above), scaled into just this block type's slice of
+      // the shared terrain atlas (see TerrainTextures)
+      float u0 = TerrainTextures.u0(tile), u1 = TerrainTextures.u1(tile);
+      uv.add(u0); uv.add(0f);
+      uv.add(u1); uv.add(0f);
+      uv.add(u1); uv.add(1f);
+      uv.add(u0); uv.add(1f);
       idx.add(base); idx.add(base + 1); idx.add(base + 2);
       idx.add(base); idx.add(base + 2); idx.add(base + 3);
     }
@@ -421,12 +457,15 @@ public class VoxelChunkRenderer {
       for (int i = 0; i < c.length; i++) c[i] = col.get(i);
       float[] n = new float[norm.size()];
       for (int i = 0; i < n.length; i++) n[i] = norm.get(i);
+      float[] t = new float[uv.size()];
+      for (int i = 0; i < t.length; i++) t[i] = uv.get(i);
       int[] ix = new int[idx.size()];
       for (int i = 0; i < ix.length; i++) ix[i] = idx.get(i);
       m.setBuffer(VertexBuffer.Type.Position, 3, p);
       m.setBuffer(VertexBuffer.Type.Color, 4, c);
       m.setBuffer(VertexBuffer.Type.Index, 3, ix);
       m.setBuffer(VertexBuffer.Type.Normal, 3, n);
+      m.setBuffer(VertexBuffer.Type.TexCoord, 2, t);
       m.updateBound();
       return m;
     }

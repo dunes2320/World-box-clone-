@@ -271,9 +271,17 @@ public class EntityRenderer {
     // under 1 - none of it read as one consistent world. A person is now
     // a believable ~0.8 of a block tall, and every other prop is scaled
     // relative to that, not to its own disconnected old number.
+    // a cluster of offset cubes, not two smoothly tapered boxes - the
+    // player explicitly asked for trees that read as voxel/block
+    // construction the way Minecraft's own blocky leaf clusters do,
+    // rather than a rounded canopy silhouette
     treeCanopyTemplate = MeshUtil.mergeMeshes(
-        new Box(0.55f, 0.42f, 0.55f),
-        MeshUtil.translatedCopy(new Box(0.38f, 0.32f, 0.38f), 0, 0.55f, 0));
+        MeshUtil.mergeMeshes(
+            MeshUtil.translatedCopy(new Box(0.42f, 0.36f, 0.42f), 0, 0.36f, 0),
+            MeshUtil.translatedCopy(new Box(0.24f, 0.22f, 0.24f), 0.18f, 0.62f, 0.1f)),
+        MeshUtil.mergeMeshes(
+            MeshUtil.translatedCopy(new Box(0.22f, 0.2f, 0.22f), -0.16f, 0.58f, -0.14f),
+            MeshUtil.translatedCopy(new Box(0.28f, 0.2f, 0.28f), 0, 0.82f, 0)));
     treeTrunkTemplate = new Box(0.15f, 0.42f, 0.15f);
     // iron/gold ore used to be a single smooth bipyramid "gem" - reads as
     // a polished blob rather than raw mineral. An angular jutting crystal
@@ -431,12 +439,16 @@ public class EntityRenderer {
         new Box(0.4f, 0.3f, 0.4f),
         MeshUtil.translatedCopy(new Box(0.3f, 0.16f, 0.3f), 0, 0.46f, 0));
 
+    // leaf/bark textures (see TerrainTextures) on top of the same per-tree
+    // vertex-color variation trees already had - trees get their own
+    // dedicated textured material instead of the shared flat
+    // vertexColorMaterial() every other untextured prop still uses
     treesGeom = new Geometry("Trees", treeCanopyTemplate.deepClone());
-    treesGeom.setMaterial(vertexColorMaterial());
+    treesGeom.setMaterial(texturedVertexColorMaterial(TerrainTextures.buildLeafTexture()));
     root.attachChild(treesGeom);
 
     treeTrunksGeom = new Geometry("TreeTrunks", treeTrunkTemplate.deepClone());
-    treeTrunksGeom.setMaterial(vertexColorMaterial());
+    treeTrunksGeom.setMaterial(texturedVertexColorMaterial(TerrainTextures.buildLogTexture()));
     root.attachChild(treeTrunksGeom);
 
     depositsGeom = new Geometry("Deposits", depositTemplate.deepClone());
@@ -807,6 +819,16 @@ public class EntityRenderer {
     mat.setBoolean("UseVertexColor", true);
     mat.setColor("Specular", new ColorRGBA(0.14f, 0.14f, 0.13f, 1f));
     mat.setFloat("Shininess", 8f);
+    return mat;
+  }
+
+  /** Same as vertexColorMaterial() but with a texture multiplying in too -
+   * DiffuseMap and UseVertexColor combine in Lighting.j3md, so a template
+   * still gets its usual per-instance color variation (see PropBatcher),
+   * just modulating a real texture instead of a flat color underneath. */
+  private Material texturedVertexColorMaterial(com.jme3.texture.Texture2D tex) {
+    Material mat = vertexColorMaterial();
+    mat.setTexture("DiffuseMap", tex);
     return mat;
   }
 

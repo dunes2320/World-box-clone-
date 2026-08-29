@@ -213,6 +213,15 @@ public class MeshUtil {
     FloatBuffer bNorm = b.getFloatBuffer(VertexBuffer.Type.Normal);
     FloatBuffer aCol = a.getFloatBuffer(VertexBuffer.Type.Color);
     FloatBuffer bCol = b.getFloatBuffer(VertexBuffer.Type.Color);
+    // jME's own Box/Cylinder primitives always carry a default TexCoord
+    // buffer, but the hand-built meshes elsewhere in this class (gem,
+    // rock cluster, blades, ...) never did - merge it through when either
+    // side actually has it (falling back to (0,0) on the side that
+    // doesn't) so a textured template (e.g. a tree canopy built from
+    // Boxes) keeps real UVs after merging, without requiring every other
+    // caller of this method to suddenly care about UVs at all.
+    FloatBuffer aUv = a.getFloatBuffer(VertexBuffer.Type.TexCoord);
+    FloatBuffer bUv = b.getFloatBuffer(VertexBuffer.Type.TexCoord);
     com.jme3.scene.mesh.IndexBuffer aIdx = a.getIndicesAsList();
     com.jme3.scene.mesh.IndexBuffer bIdx = b.getIndicesAsList();
     int aVerts = a.getVertexCount(), bVerts = b.getVertexCount();
@@ -237,6 +246,12 @@ public class MeshUtil {
     m.setBuffer(VertexBuffer.Type.Normal, 3, norm);
     m.setBuffer(VertexBuffer.Type.Color, 4, col);
     m.setBuffer(VertexBuffer.Type.Index, 3, idx);
+    if (aUv != null || bUv != null) {
+      float[] uv = new float[(aVerts + bVerts) * 2];
+      if (aUv != null) for (int i = 0; i < aVerts * 2; i++) uv[i] = aUv.get(i);
+      if (bUv != null) for (int i = 0; i < bVerts * 2; i++) uv[aVerts * 2 + i] = bUv.get(i);
+      m.setBuffer(VertexBuffer.Type.TexCoord, 2, uv);
+    }
     m.updateBound();
     return m;
   }
