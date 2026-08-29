@@ -41,6 +41,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
   private VoxelChunkRenderer voxelRenderer;
   private EntityRenderer entityRenderer;
   private GameHud hud;
+  private DirectionalLight sun;
+  /** Follows the camera every frame (see simpleUpdate) since a directional
+   * light has no real world position of its own - the filter needs a
+   * screen-space anchor to radiate its light shafts from, so this is
+   * synthesized as "far away, opposite the sun's direction, relative to
+   * wherever the camera currently is." */
+  private com.jme3.post.filters.LightScatteringFilter lightScatteringFilter;
 
   private String tool = "select";
   private int brushSize = 3;
@@ -103,9 +110,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // block and a shadowed block read as visibly different instead of
     // both sitting close to the same washed-out ambient-dominated value.
     rootNode.addLight(new AmbientLight(new ColorRGBA(0.26f, 0.28f, 0.32f, 1f)));
-    DirectionalLight sun = new DirectionalLight();
-    sun.setDirection(new Vector3f(-0.5f, -1f, -0.4f).normalizeLocal());
-    sun.setColor(new ColorRGBA(0.88f, 0.83f, 0.7f, 1f));
+    sun = new DirectionalLight();
+    // a lower, more grazing angle than before (-1 on Y was near-noon
+    // overhead) throws longer, more dramatic shadows across the terrain -
+    // the single biggest cue that reads as "a shader pack is on" in every
+    // Minecraft shader screenshot, where the sun is rarely straight up.
+    sun.setDirection(new Vector3f(-0.55f, -0.72f, -0.45f).normalizeLocal());
+    sun.setColor(new ColorRGBA(0.95f, 0.86f, 0.68f, 1f));
     rootNode.addLight(sun);
 
     rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
@@ -130,12 +141,46 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // Bias bumped up too, to soften self-shadowing on flat faces.
     com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 1.4f, 0.2f, 0.15f);
     fpp.addFilter(ssao);
+
+    // light shafts through the trees/hills toward the sun - the other
+    // instantly-recognizable "shader pack" cue alongside long shadows.
+    // Kept modest (low light density, few samples) since this camera
+    // looks down at the world far more than it looks toward the horizon,
+    // so the shafts should read as a soft glow near the sun rather than
+    // a heavy, distracting streak across the whole screen.
+    lightScatteringFilter = new com.jme3.post.filters.LightScatteringFilter();
+    lightScatteringFilter.setLightDensity(0.8f);
+    lightScatteringFilter.setNbSamples(40);
+    lightScatteringFilter.setBlurStart(0.05f);
+    lightScatteringFilter.setBlurWidth(0.6f);
+    fpp.addFilter(lightScatteringFilter);
+
     com.jme3.post.filters.BloomFilter bloom = new com.jme3.post.filters.BloomFilter(com.jme3.post.filters.BloomFilter.GlowMode.Scene);
     bloom.setBloomIntensity(0.9f);
     bloom.setExposurePower(4.2f);
     bloom.setExposureCutOff(0.25f);
     bloom.setBlurScale(1.1f);
     fpp.addFilter(bloom);
+
+    // a soft, sky-matched haze on distant terrain - real depth instead of
+    // the map's far edge just clipping into flat color, and it also
+    // softens the harder edges of long-distance voxel geometry the same
+    // way a shader pack's volumetric fog does.
+    com.jme3.post.filters.FogFilter fog = new com.jme3.post.filters.FogFilter();
+    fog.setFogColor(new ColorRGBA(0.62f, 0.8f, 0.92f, 1f));
+    fog.setFogDistance(190f);
+    fog.setFogDensity(1.1f);
+    fpp.addFilter(fog);
+
+    // filmic highlight rolloff - Lighting.j3md has no tonemapping of its
+    // own (see the ambient-light comment above), so a bright bloom source
+    // still clips hard to flat white right at its core; this rounds that
+    // off into a softer, HDR-glow-like falloff instead.
+    com.jme3.post.filters.ToneMapFilter toneMap = new com.jme3.post.filters.ToneMapFilter();
+    toneMap.setWhitePoint(new Vector3f(11f, 11f, 11f));
+    fpp.addFilter(toneMap);
+
+    fpp.addFilter(new com.jme3.post.filters.FXAAFilter());
     viewPort.addProcessor(fpp);
 
     NationColorLookup nationColors = new NationColorLookup() {
@@ -389,6 +434,11 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     maybeTick();
     applyKeyboardMovement(tpf);
     updateCamera(tpf);
+    // the god-ray filter needs a screen-space anchor for its light shafts;
+    // a directional light has no real position, so this fakes one far
+    // away opposite the sun's direction, relative to the camera's current
+    // spot, so the shafts stay correctly aimed as the camera moves/zooms
+    lightScatteringFilter.setLightPosition(cam.getLocation().subtract(sun.getDirection().mult(400f)));
 
     if (leftDown && GodTools.CONTINUOUS_TOOLS.contains(tool)) {
       Vector2f cursor = inputManager.getCursorPosition();

@@ -270,8 +270,8 @@ public class VoxelChunkRenderer {
       float[] out = new float[base.length];
       for (int i = 0; i < base.length; i += 3) {
         float x = base[i], y = base[i + 1], z = base[i + 2];
-        float wave = (float) (Math.sin((x + z) * 0.6 + time * 1.3) * 0.05
-            + Math.sin((x - z) * 0.9 + time * 0.8) * 0.03);
+        float wave = (float) (Math.sin((x + z) * 0.6 + time * 1.3) * 0.075
+            + Math.sin((x - z) * 0.9 + time * 0.8) * 0.045);
         out[i] = x;
         out[i + 1] = y + wave;
         out[i + 2] = z;
