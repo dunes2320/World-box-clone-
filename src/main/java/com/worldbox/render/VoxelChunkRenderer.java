@@ -13,9 +13,7 @@ import com.jme3.texture.Texture2D;
 import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /** Renders a VoxelWorld as one low-poly mesh per chunk, only emitting faces
@@ -49,6 +47,17 @@ public class VoxelChunkRenderer {
   // their tallest, so the snow line has to sit well below that or it
   // would never render on any peak
   private static final int SNOW_LINE = VoxelWorld.Y_OFFSET + 6;
+
+  // How many smaller coplanar quads each visible block face is split into
+  // per side (see MeshBuilder.face) - purely a mesh-generation-time
+  // subdivision, not a change to the underlying sim/VoxelWorld block
+  // grid (which stays at its existing resolution - a prior test found
+  // just 1.5x the grid dimensions collapsing the simulation tick rate).
+  // This is what makes the world actually read as built from many small
+  // blocks instead of big flat 1-unit tiles, at a cost that only scales
+  // with visible surface area (not the full 3D volume), so it's safe to
+  // turn up higher than a literal finer voxel grid would ever be.
+  private static final int SUBDIV = 2;
 
   // Gentler now that real dynamic sun lighting also shades faces by
   // direction - this only needs to add a light baked-AO hint underneath.
@@ -408,12 +417,38 @@ public class VoxelChunkRenderer {
    * entities, picking) needs no changes. Winding is CCW as seen from the
    * direction each face's normal points, matching jME's default
    * front-face convention. */
+  /** A plain growable float array - SUBDIV's subdivided faces push this
+   * builder's vertex counts several times higher than the old one-quad-
+   * per-face version, and List&lt;Float&gt;/List&lt;Integer&gt;'s per-element
+   * boxing (millions of Float/Integer allocations on a full-map rebuild)
+   * was slow enough there to noticeably stall startup - a plain float[]
+   * that doubles its own capacity costs nothing per element instead. */
+  private static final class FloatArr {
+    float[] a = new float[4096];
+    int n = 0;
+    void add(float v) { if (n == a.length) a = java.util.Arrays.copyOf(a, a.length * 2); a[n++] = v; }
+    int size() { return n; }
+    float[] toArray() { return java.util.Arrays.copyOf(a, n); }
+  }
+
+  private static final class IntArr {
+    int[] a = new int[2048];
+    int n = 0;
+    void add(int v) { if (n == a.length) a = java.util.Arrays.copyOf(a, a.length * 2); a[n++] = v; }
+    int[] toArray() { return java.util.Arrays.copyOf(a, n); }
+  }
+
   private static class MeshBuilder {
-    final List<Float> pos = new ArrayList<>();
-    final List<Float> col = new ArrayList<>();
-    final List<Float> norm = new ArrayList<>();
-    final List<Float> uv = new ArrayList<>();
-    final List<Integer> idx = new ArrayList<>();
+    final FloatArr pos = new FloatArr();
+    final FloatArr col = new FloatArr();
+    final FloatArr norm = new FloatArr();
+    final FloatArr uv = new FloatArr();
+    final IntArr idx = new IntArr();
+    // scratch space for the 4 subdivided corners each face-loop iteration
+    // bilerps into - reused across every call instead of allocating 4
+    // new float[3]s per subquad (SUBDIV^2 of those per face, millions
+    // across a full-map rebuild)
+    private final float[] p00 = new float[3], p10 = new float[3], p11 = new float[3], p01 = new float[3];
 
     void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade, int tile) {
       float x = bx, y = by - VoxelWorld.Y_OFFSET, z = bz;
@@ -427,45 +462,73 @@ public class VoxelChunkRenderer {
         case EAST: verts = new float[][]{{x + 1, y, z + 1}, {x + 1, y, z}, {x + 1, y + 1, z}, {x + 1, y + 1, z + 1}}; nx = 1; ny = 0; nz = 0; break;
         default: verts = new float[][]{{x, y, z}, {x, y, z + 1}, {x, y + 1, z + 1}, {x, y + 1, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
       }
-      int base = pos.size() / 3;
-      for (float[] v : verts) { pos.add(v[0]); pos.add(v[1]); pos.add(v[2]); }
-      // a mild baked-AO tint layered under the real dynamic sun lighting -
-      // keeps cliffs/undersides readable even when the sun angle alone
-      // wouldn't shade them
-      float r = c.r * shade, g = c.g * shade, b2 = c.b * shade;
-      for (int i = 0; i < 4; i++) {
-        col.add(r); col.add(g); col.add(b2); col.add(c.a);
-        norm.add(nx); norm.add(ny); norm.add(nz);
-      }
       // each quad's own corner maps 0,0 / 1,0 / 1,1 / 0,1 (matching the
       // vertex winding above), scaled into just this block type's slice of
-      // the shared terrain atlas (see TerrainTextures)
+      // the shared terrain atlas (see TerrainTextures) - every subquad
+      // below reuses this same full tile range, so the texture reads as
+      // repeating at a finer scale rather than being sliced up
       float u0 = TerrainTextures.u0(tile), u1 = TerrainTextures.u1(tile);
-      uv.add(u0); uv.add(0f);
-      uv.add(u1); uv.add(0f);
-      uv.add(u1); uv.add(1f);
-      uv.add(u0); uv.add(1f);
-      idx.add(base); idx.add(base + 1); idx.add(base + 2);
-      idx.add(base); idx.add(base + 2); idx.add(base + 3);
+      // subdivide this one block-sized face into SUBDIV x SUBDIV smaller
+      // coplanar quads via bilinear interpolation of the 4 known-correct
+      // block corners above - a "block" then reads as a cluster of
+      // several smaller ones, with a bit of per-subquad color grain for a
+      // weathered look, instead of one big flat tile. Bilinear
+      // interpolation of an exact axis-aligned rectangle's own corners is
+      // itself exact (no bulge/distortion), so every subquad stays
+      // perfectly coplanar with the original face - no seam or gap risk
+      // versus the old single full-size quad, and neighboring blocks'
+      // faces still butt up against this one exactly as before.
+      for (int a = 0; a < SUBDIV; a++) {
+        float a0 = a / (float) SUBDIV, a1 = (a + 1) / (float) SUBDIV;
+        for (int b = 0; b < SUBDIV; b++) {
+          float b0 = b / (float) SUBDIV, b1 = (b + 1) / (float) SUBDIV;
+          bilerp(verts, a0, b0, p00);
+          bilerp(verts, a1, b0, p10);
+          bilerp(verts, a1, b1, p11);
+          bilerp(verts, a0, b1, p01);
+          int base = pos.size() / 3;
+          for (float[] p : new float[][]{p00, p10, p11, p01}) { pos.add(p[0]); pos.add(p[1]); pos.add(p[2]); }
+          // a mild baked-AO shade tint layered under the real dynamic sun
+          // lighting (keeps cliffs/undersides readable even when the sun
+          // angle alone wouldn't shade them), plus a small deterministic
+          // per-subquad grain offset so a weathered surface doesn't read
+          // as flatly uniform even within one block
+          float grain = (grainHash(bx * SUBDIV + a, by, bz * SUBDIV + b) - 0.5f) * 0.12f;
+          float r = clamp01(c.r * shade + grain), g = clamp01(c.g * shade + grain), b2 = clamp01(c.b * shade + grain);
+          for (int i = 0; i < 4; i++) {
+            col.add(r); col.add(g); col.add(b2); col.add(c.a);
+            norm.add(nx); norm.add(ny); norm.add(nz);
+          }
+          uv.add(u0); uv.add(0f);
+          uv.add(u1); uv.add(0f);
+          uv.add(u1); uv.add(1f);
+          uv.add(u0); uv.add(1f);
+          idx.add(base); idx.add(base + 1); idx.add(base + 2);
+          idx.add(base); idx.add(base + 2); idx.add(base + 3);
+        }
+      }
+    }
+
+    private static void bilerp(float[][] v, float a, float b, float[] out) {
+      for (int k = 0; k < 3; k++) {
+        out[k] = (1 - a) * (1 - b) * v[0][k] + a * (1 - b) * v[1][k] + a * b * v[2][k] + (1 - a) * b * v[3][k];
+      }
+    }
+
+    private static float grainHash(int x, int y, int z) {
+      int h = x * 374761393 + y * 668265263 + z * 2147483647;
+      h = (h ^ (h >>> 13)) * 1274126177;
+      h = h ^ (h >>> 16);
+      return (h & 0xFFFF) / 65535f;
     }
 
     Mesh build() {
       Mesh m = new Mesh();
-      float[] p = new float[pos.size()];
-      for (int i = 0; i < p.length; i++) p[i] = pos.get(i);
-      float[] c = new float[col.size()];
-      for (int i = 0; i < c.length; i++) c[i] = col.get(i);
-      float[] n = new float[norm.size()];
-      for (int i = 0; i < n.length; i++) n[i] = norm.get(i);
-      float[] t = new float[uv.size()];
-      for (int i = 0; i < t.length; i++) t[i] = uv.get(i);
-      int[] ix = new int[idx.size()];
-      for (int i = 0; i < ix.length; i++) ix[i] = idx.get(i);
-      m.setBuffer(VertexBuffer.Type.Position, 3, p);
-      m.setBuffer(VertexBuffer.Type.Color, 4, c);
-      m.setBuffer(VertexBuffer.Type.Index, 3, ix);
-      m.setBuffer(VertexBuffer.Type.Normal, 3, n);
-      m.setBuffer(VertexBuffer.Type.TexCoord, 2, t);
+      m.setBuffer(VertexBuffer.Type.Position, 3, pos.toArray());
+      m.setBuffer(VertexBuffer.Type.Color, 4, col.toArray());
+      m.setBuffer(VertexBuffer.Type.Index, 3, idx.toArray());
+      m.setBuffer(VertexBuffer.Type.Normal, 3, norm.toArray());
+      m.setBuffer(VertexBuffer.Type.TexCoord, 2, uv.toArray());
       m.updateBound();
       return m;
     }

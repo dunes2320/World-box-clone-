@@ -9,20 +9,29 @@ import java.util.List;
 import java.util.Set;
 
 /** A building's real block-by-block layout - literally a list of unit
- * cubes, not a scaled/merged smooth box. A hollow rectangular wall ring
- * (with a door gap and a couple of window gaps) topped by a real peaked
- * (gable) roof - not a flat slab, which reads as a plain cube rather than
- * a house - plus optional corner towers for grander buildings. Generated
- * from a handful of dimensions in code rather than hand-typed layer-by-
- * layer ASCII art, so an odd building size can't silently end up with a
- * mismatched row/column count the way transcribed art risks.
+ * cubes, not a scaled/merged smooth box. Modeled on how real Minecraft
+ * survival houses are actually built (see the class-level research this
+ * was based on): a cobblestone foundation course a block wider than the
+ * walls, a hollow wall ring (door + window gaps, with a log/quartz-style
+ * TRIM accent at the corners and framing the openings) topped by a real
+ * peaked (gable) roof with a proper overhang - not a flat slab flush with
+ * the walls, which reads as a plain cube rather than a house - plus a
+ * free-standing chimney column and optional corner towers for grander
+ * buildings. Generated from a handful of dimensions in code rather than
+ * hand-typed layer-by-layer ASCII art, so an odd building size can't
+ * silently end up with a mismatched row/column count the way transcribed
+ * art risks.
  *
- * Cells are kept in construction order (bottom row first, walls before
- * roof) so a building's live construction progress can slice off a
+ * Cells are kept in construction order (foundation first, then walls,
+ * then roof) so a building's live construction progress can slice off a
  * prefix of the list and get a sensible "still rising" partial structure
  * - see buildStageMesh, and Building.progress/integrity in the sim layer. */
 public class Blueprint {
-  public enum Block { WALL, ROOF }
+  /** WALL/ROOF/FOUNDATION/TRIM are rendered as separate meshes, each with
+   * its own material (see EntityRenderer) - FOUNDATION is the cobblestone
+   * plinth + chimney stack, TRIM is the corner posts and window/door
+   * framing (log on a house, quartz on a civic building). */
+  public enum Block { WALL, ROOF, FOUNDATION, TRIM }
 
   private static final class Cell {
     final int x, y, z;
@@ -51,39 +60,78 @@ public class Blueprint {
   public static Blueprint building(int width, int depth, int wallHeight, boolean corners) {
     List<Cell> cells = new ArrayList<>();
     int doorX = width / 2;
+
+    // a cobblestone plinth a block wider than the walls on every side -
+    // every real-build tutorial this was modeled on starts the same way
+    // (lay the foundation out past the wall line, then build the walls on
+    // top of it), and it's what stops the building from reading as walls
+    // simply starting flush out of the bare ground
+    for (int z = -1; z <= depth; z++) {
+      for (int x = -1; x <= width; x++) cells.add(new Cell(x, 0, z, Block.FOUNDATION));
+    }
+
     // a real house needs to actually look like one at a glance - windows
     // (small gaps in the two side walls, not the door wall) break up an
-    // otherwise solid brick/plank box the same way a door does
+    // otherwise solid plank/brick box the same way a door does, and both
+    // openings get a TRIM "frame" cell instead of just a bare gap
     boolean windows = wallHeight >= 2 && depth >= 3;
-    int windowY = wallHeight - 1, windowZ = depth / 2;
-    for (int y = 0; y < wallHeight; y++) {
+    int windowY = wallHeight, windowZ = depth / 2;
+    for (int y = 1; y <= wallHeight; y++) {
       for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
           boolean perimeter = x == 0 || x == width - 1 || z == 0 || z == depth - 1;
           if (!perimeter) continue;
-          if (y == 0 && z == depth - 1 && x == doorX) continue; // the front door
-          if (windows && y == windowY && z == windowZ && (x == 0 || x == width - 1)) continue;
-          cells.add(new Cell(x, y, z, Block.WALL));
+          boolean corner = (x == 0 || x == width - 1) && (z == 0 || z == depth - 1);
+          boolean isDoor = y == 1 && z == depth - 1 && x == doorX;
+          boolean isDoorFrame = z == depth - 1 && !corner && (x == doorX - 1 || x == doorX + 1);
+          boolean isWindow = windows && y == windowY && z == windowZ && (x == 0 || x == width - 1);
+          boolean isWindowFrame = windows && y == windowY - 1 && z == windowZ && (x == 0 || x == width - 1);
+          if (isDoor || isWindow) continue; // the actual openings
+          // corner posts (like real log corner framing) and the trim
+          // bordering each opening read as a deliberate frame rather than
+          // one flat wall material everywhere
+          cells.add(new Cell(x, y, z, corner || isDoorFrame || isWindowFrame ? Block.TRIM : Block.WALL));
         }
       }
     }
-    // a real peaked (gable) roof, not a flat slab - each layer steps in a
-    // block from both sides while still running the FULL depth, giving an
-    // actual triangular ridge profile the length of the building instead
-    // of a flat-topped box. This is the single biggest "this reads as a
-    // house, not a cube" cue a flat roof was missing.
-    int gableLayers = (width + 1) / 2;
+
+    // a real peaked (gable) roof with a proper overhang - the eave (the
+    // very first/lowest layer) sticks out a full block past the wall line
+    // on every side, then each layer above steps in from the two long
+    // sides while still running the FULL depth (plus its own 1-block
+    // overhang past the gable ends), giving an actual triangular ridge
+    // profile the length of the building. Roof starting flush with the
+    // wall face (no overhang at all) was the single biggest remaining
+    // "this reads as a plain box" cue once the walls themselves got trim.
+    int roofBaseY = wallHeight + 1;
+    int gableLayers = (width + 1) / 2 + 1;
+    int lastRoofLayer = 0;
     for (int layer = 0; layer < gableLayers; layer++) {
-      int y = wallHeight + layer;
-      int x0 = layer, x1 = width - 1 - layer;
+      int inset = layer - 1; // -1 on the eave layer, 0, 1, 2... tapering up to the ridge
+      int x0 = inset, x1 = width - 1 - inset;
       if (x0 > x1) break;
-      for (int z = 0; z < depth; z++) for (int x = x0; x <= x1; x++) cells.add(new Cell(x, y, z, Block.ROOF));
+      int y = roofBaseY + layer;
+      lastRoofLayer = layer;
+      for (int z = -1; z <= depth; z++) for (int x = x0; x <= x1; x++) cells.add(new Cell(x, y, z, Block.ROOF));
     }
+
     if (corners) {
-      int y = wallHeight + gableLayers;
-      for (int cx : new int[]{0, width - 1}) for (int cz : new int[]{0, depth - 1}) cells.add(new Cell(cx, y, cz, Block.WALL));
+      int y = roofBaseY + lastRoofLayer + 1;
+      for (int cx : new int[]{0, width - 1}) for (int cz : new int[]{0, depth - 1}) cells.add(new Cell(cx, y, cz, Block.TRIM));
     }
-    int height = wallHeight + gableLayers + (corners ? 1 : 0);
+
+    // a free-standing chimney stack, offset a full block clear of the
+    // foundation/eave footprint so it never overlaps the roof cells above
+    // (that would double up faces at the same coordinate) - it reads as
+    // built onto the house's exterior wall rather than floating apart
+    // from it since it sits immediately against that footprint's edge
+    if (depth >= 2) {
+      int chimX = -2, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
+      int chimTop = roofBaseY + lastRoofLayer + 1;
+      for (int y = 1; y <= chimTop; y++) cells.add(new Cell(chimX, y, chimZ, Block.FOUNDATION));
+    }
+
+    int height = roofBaseY + lastRoofLayer + 1 + (corners ? 1 : 0);
     return new Blueprint(cells, width, depth, height);
   }
 

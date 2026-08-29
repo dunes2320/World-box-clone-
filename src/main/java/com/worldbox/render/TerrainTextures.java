@@ -149,6 +149,49 @@ public final class TerrainTextures {
     return toTexture(img);
   }
 
+  /** A standalone cobblestone texture for building foundations - irregular
+   * grey stone lumps with dark mortar gaps between them, distinct from
+   * both the fractured-rock terrain stone tile and the mortared-brick
+   * texture, so a foundation course reads as "loose fitted stones" the
+   * way a real cobblestone plinth does. */
+  public static Texture2D buildCobbleTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0x7D7F84, dark = 0x55575C, light = 0x93959A;
+    for (int y = 0; y < TILE; y++) {
+      for (int x = 0; x < TILE; x++) {
+        // a coarse per-lump id (4x4 cells) so each "stone" gets one
+        // consistent shade across several pixels instead of pixel noise,
+        // then a thin dark seam wherever the lump id changes
+        int lumpX = x / 4, lumpY = y / 4;
+        float t = noise01(lumpX, lumpY, 0xC71);
+        int c = t < 0.5f ? mix(base, dark, base, t * 2f) : mix(base, base, light, (t - 0.5f) * 2f);
+        boolean seam = (x % 4 == 0) || (y % 4 == 0);
+        if (seam && noise01(x, y, 0xC72) < 0.8f) c = dark;
+        img.setRGB(x, y, c);
+      }
+    }
+    return toTexture(img);
+  }
+
+  /** A standalone quartz-block texture for civic/government trim (entrance
+   * columns, cornices) - a pale, faintly warm stone with fine vertical
+   * veining, reading as "polished" next to the rough terrain stone and
+   * mortared brick tiles. */
+  public static Texture2D buildQuartzTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0xE9E4D8, dark = 0xCFC8B6, light = 0xF7F3EA;
+    for (int y = 0; y < TILE; y++) {
+      for (int x = 0; x < TILE; x++) {
+        float t = noise01(x, y, 0xD71);
+        int c = t < 0.5f ? mix(base, dark, base, t * 2f) : mix(base, base, light, (t - 0.5f) * 2f);
+        // faint vertical veins every few columns, like real quartz
+        if ((x + (int) (noise01(0, y, 0xD72) * 2)) % 5 == 0 && noise01(x, y, 0xD73) < 0.5f) c = mix(c, dark, c, 0.4f);
+        img.setRGB(x, y, c);
+      }
+    }
+    return toTexture(img);
+  }
+
   private static Texture2D toTexture(BufferedImage img) {
     Image jmeImage = new AWTLoader().load(img, false);
     Texture2D tex = new Texture2D(jmeImage);

@@ -62,6 +62,17 @@ public class WorldGen {
         double elevation = (rawElevation[i] - mean) + 0.28;
         elevation = elevation * edgeFade - (1 - edgeFade) * 1.2;
 
+        // an independent, very-low-frequency field that occasionally
+        // carves a broad strait/channel straight through what would
+        // otherwise be one single landmass - without it every seed comes
+        // out as one blob of continent no matter how the other noise
+        // terms are tuned, since they only ever vary a blob's edge, never
+        // split its interior. Only fires in a small top slice of the
+        // field's own range, so it stays rare (a strait here or there,
+        // not the map fractured into gravel).
+        double strait = fbm.fbm(x * 0.008 + 15000, y * 0.008 + 15000, 3, 2, 0.5);
+        if (strait > 0.72) elevation -= (strait - 0.72) * 3.0;
+
         // Ridged noise (folding fbm's usual rolling peaks into sharp
         // valleys-turned-ridges via |2v-1|) sharpens whatever's already
         // trending uphill into a real jagged mountain spine instead of the
@@ -131,6 +142,9 @@ public class WorldGen {
       }
     }
 
+    scatterIslands(grid, fbm);
+    carveRivers(grid, rng);
+
     for (int y = 0; y < rows; y++) {
       for (int x = 0; x < cols; x++) {
         int i = grid.idx(x, y);
@@ -179,6 +193,93 @@ public class WorldGen {
 
     grid.dirty.clear();
     for (int i = 0; i < cols * rows; i++) grid.dirty.add(i);
+  }
+
+  /** Scatters small offshore islands into open water - a separate,
+   * higher-frequency noise field from the continent/hill/base terms
+   * above, so an island's location has nothing to do with where the
+   * mainland's own shape happens to be. Only touches cells that were
+   * already water going in, so it can never eat into (or leave a stray
+   * patch inside) the actual coastline. */
+  private static void scatterIslands(WorldGrid grid, Noise fbm) {
+    int cols = grid.cols, rows = grid.rows;
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        int i = grid.idx(x, y);
+        if (grid.terrain[i] != Config.WATER) continue;
+        double nx = (double) x / cols - 0.5, ny = (double) y / rows - 0.5;
+        double edgeDist = 0.5 - Math.max(Math.abs(nx), Math.abs(ny));
+        if (edgeDist < 0.05) continue; // keep the outermost rim open ocean
+        double islandN = fbm.fbm(x * 0.09 + 12000, y * 0.09 + 12000, 3, 2, 0.5);
+        if (islandN > 0.82) {
+          grid.terrain[i] = Config.GRASS;
+          grid.height[i] = 1.2f;
+        } else if (islandN > 0.76) {
+          grid.terrain[i] = Config.SAND;
+          grid.height[i] = 0.2f;
+        }
+      }
+    }
+  }
+
+  private static final int[][] NEIGH4 = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+  private static final int[][] NEIGH8 = {
+      {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+  /** Carves a handful of real rivers: each starts at a random point up in
+   * the hills and walks steepest-descent (with a little noise so it
+   * meanders instead of cutting a ruler-straight line) until it reaches
+   * existing water or gets stuck in a local pit, turning every cell it
+   * crosses into a narrow water channel with sand banks alongside. Runs
+   * after the base terrain pass so it carves into the real generated
+   * landscape rather than a separate abstract layer, and before resource
+   * placement so a river cell can never end up double-booked as a forest
+   * or ore deposit. */
+  private static void carveRivers(WorldGrid grid, Rng rng) {
+    int cols = grid.cols, rows = grid.rows;
+    int riverCount = 4 + rng.intRange(0, 4);
+    for (int r = 0; r < riverCount; r++) {
+      int sx = -1, sy = -1;
+      for (int tries = 0; tries < 60; tries++) {
+        int x = rng.intRange(0, cols - 1), y = rng.intRange(0, rows - 1);
+        int i = grid.idx(x, y);
+        if (grid.terrain[i] == Config.WATER) continue;
+        if (grid.height[i] < 3.0f) continue; // only start rivers up in high ground
+        sx = x; sy = y;
+        break;
+      }
+      if (sx < 0) continue;
+
+      int x = sx, y = sy;
+      java.util.Set<Long> visited = new java.util.HashSet<>();
+      for (int step = 0; step < 400; step++) {
+        long key = (long) x * rows + y;
+        if (!visited.add(key)) break; // wandered back onto itself - stop rather than loop forever
+        int i = grid.idx(x, y);
+        if (grid.terrain[i] == Config.WATER) break; // reached the sea or a lake
+
+        grid.terrain[i] = Config.WATER;
+        grid.height[i] = Math.min(grid.height[i], -0.6f);
+        grid.resource[i] = Config.RES_NONE;
+        for (int[] d : NEIGH4) {
+          int nx = x + d[0], ny = y + d[1];
+          if (!grid.inBounds(nx, ny)) continue;
+          int ni = grid.idx(nx, ny);
+          if (grid.terrain[ni] != Config.WATER && grid.height[ni] < 2.5f) grid.terrain[ni] = Config.SAND;
+        }
+
+        int bestX = x, bestY = y;
+        float bestH = grid.height[i];
+        for (int[] d : NEIGH8) {
+          int nx = x + d[0], ny = y + d[1];
+          if (!grid.inBounds(nx, ny)) continue;
+          float h = grid.height[grid.idx(nx, ny)] + (float) (rng.next() * 0.6 - 0.3);
+          if (h < bestH) { bestH = h; bestX = nx; bestY = ny; }
+        }
+        if (bestX == x && bestY == y) break; // pooled - nowhere lower to flow
+        x = bestX; y = bestY;
+      }
+    }
   }
 
   public static class Spot { public final int x, y; public Spot(int x, int y) { this.x = x; this.y = y; } }

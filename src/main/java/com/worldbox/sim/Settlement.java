@@ -2,6 +2,7 @@ package com.worldbox.sim;
 
 import com.worldbox.config.Config;
 import com.worldbox.util.Rng;
+import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
 import java.util.ArrayList;
@@ -168,6 +169,53 @@ public class Settlement implements java.io.Serializable {
     Building b = new Building(s.id, s.nationId, mansion ? "mansion" : "house", spot[0], spot[1]);
     b.progress = startProgress;
     state.buildings.put(b.id, b);
+    // a house that's actually being built now (not one of the settlement's
+    // pre-existing starting homes) gets its site leveled first, the same
+    // way a real crew grades a lot before framing goes up - otherwise the
+    // building's single flat blueprint mesh would sit clipped into (or
+    // floating over) whatever slope happened to already be there
+    if (startProgress < 1.0) terraformFootprint(state, spot[0], spot[1], mansion ? MANSION_FOOTPRINT : HOUSE_FOOTPRINT);
+  }
+
+  // must match the footprint (width, depth - both squares, so rotation
+  // doesn't change the bounding area) of buildingBlueprint[0]/[1] in
+  // EntityRenderer's Blueprint.building(...) calls
+  private static final int HOUSE_FOOTPRINT = 3;
+  private static final int MANSION_FOOTPRINT = 5;
+
+  /** Flattens the ground under a new building's footprint (plus a 1-block
+   * margin for the blueprint's own foundation overhang - see Blueprint's
+   * class comment) to the elevation at its own anchor cell, via the same
+   * real per-column dig/build voxel ops every other terrain-editing tool
+   * in this codebase already uses (see Events.earthquake for the same
+   * pattern) - not a fake cosmetic flourish, an actual change to the
+   * voxel terrain the building then sits flush on. Never touches a cell
+   * that was already water (findBuildingSpot only ever picks a dry
+   * anchor, but a low-lying neighbor could still be a real pond that
+   * shouldn't get paved over). */
+  private static void terraformFootprint(GameState state, double cx, double cz, int size) {
+    WorldGrid grid = state.grid;
+    VoxelWorld voxels = state.voxels;
+    int anchorX = (int) Math.floor(cx), anchorZ = (int) Math.floor(cz);
+    if (!grid.inBounds(anchorX, anchorZ)) return;
+    int target = Math.round(grid.height[grid.idx(anchorX, anchorZ)]);
+    int half = size / 2 + 1;
+    for (int dz = -half; dz <= half; dz++) {
+      for (int dx = -half; dx <= half; dx++) {
+        int x = anchorX + dx, z = anchorZ + dz;
+        if (!grid.inBounds(x, z)) continue;
+        int i = grid.idx(x, z);
+        if (grid.terrain[i] == Config.WATER) continue;
+        int cur = Math.round(grid.height[i]);
+        if (cur < target) {
+          for (int k = 0; k < target - cur; k++) voxels.buildColumn(x, z, VoxelWorld.blockForTerrain(grid.terrain[i]));
+        } else if (cur > target) {
+          for (int k = 0; k < cur - target; k++) voxels.digColumn(x, z);
+        }
+        voxels.resyncHeight(grid, x, z);
+        grid.markDirtyIdx(i);
+      }
+    }
   }
 
   /** Whether a candidate founding spot is actually free of any OTHER

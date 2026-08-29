@@ -174,24 +174,36 @@ public class EntityRenderer {
    * flesh tone while clothing/hair/tools take the nation's accent color,
    * instead of the whole body reading as one flat nation-colored blob. */
   private final Mesh humanSkinTemplate;
-  private final Mesh hutTemplate, townTemplate, cityTemplate, businessTemplate, bankTemplate;
+  private final Mesh businessTemplate, bankTemplate;
   private final Mesh farmTemplate, marketTemplate, statueTemplate, monumentTemplate, militaryBaseTemplate;
   private final Mesh flagTemplate, fireTemplate, sparkleTemplate;
   private final Mesh cloudTemplate, rainTemplate, foliageTemplate, flowerTemplate;
 
   /** Real houses/mansions (see Building) are rendered from an actual
-   * block-by-block Blueprint, not one scaled template - walls and roof
-   * are separate meshes/materials (plank-or-brick vs. shingle), and each
-   * gets STAGE_COUNT precomputed partial-construction meshes so a
-   * building's current progress/integrity (whichever is lower) can pick
-   * the right "how much of it is actually standing" snapshot. Index 0 =
-   * house, 1 = mansion. */
+   * block-by-block Blueprint, not one scaled template - wall, roof, the
+   * cobblestone foundation, and the log/quartz trim are all separate
+   * meshes/materials, and each gets STAGE_COUNT precomputed partial-
+   * construction meshes so a building's current progress/integrity
+   * (whichever is lower) can pick the right "how much of it is actually
+   * standing" snapshot. First index 0 = house, 1 = mansion; second index
+   * is Blueprint.Block.ordinal(). */
   private static final int STAGE_COUNT = 4;
+  private static final int MATERIAL_COUNT = Blueprint.Block.values().length;
   private final Blueprint[] buildingBlueprint = new Blueprint[2];
-  private final Mesh[][] buildingWallStage = new Mesh[2][STAGE_COUNT];
-  private final Mesh[][] buildingRoofStage = new Mesh[2][STAGE_COUNT];
-  private final Geometry[][] buildingWallGeom = new Geometry[2][STAGE_COUNT];
-  private final Geometry[][] buildingRoofGeom = new Geometry[2][STAGE_COUNT];
+  private final Mesh[][][] buildingStage = new Mesh[2][MATERIAL_COUNT][STAGE_COUNT];
+  private final Geometry[][][] buildingGeom = new Geometry[2][MATERIAL_COUNT][STAGE_COUNT];
+
+  /** Settlement-tier markers (hut/town/city) reuse the same Blueprint
+   * machinery as a real house but are always fully built (no per-instance
+   * staging needed for a one-per-settlement marker) and split into just 2
+   * materials: WALL+FOUNDATION+TRIM merged into one brick "structure"
+   * mesh, and ROOF kept separate on its own shingle-textured mesh -
+   * enough to read as an actual building with a foundation/roofline
+   * instead of one flat brick box, without a full per-material pool for
+   * something that only ever appears fully constructed. Index 0=hut,
+   * 1=town, 2=city. */
+  private final Mesh[] govStructureTemplate = new Mesh[3];
+  private final Mesh[] govRoofTemplate = new Mesh[3];
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom;
   private final Geometry foliageGeom, flowersGeom;
@@ -218,6 +230,7 @@ public class EntityRenderer {
   private final Node cloudsNode = new Node("clouds");
   private final Node siegeLabelsNode = new Node("siegeLabels");
   private final Geometry[] settlementPool = new Geometry[SETTLEMENT_CAP];
+  private final Geometry[] settlementRoofPool = new Geometry[SETTLEMENT_CAP];
   private final Geometry[] humanPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanSkinPool = new Geometry[Config.MAX_HUMANS];
   private final Geometry[] humanArmLPool = new Geometry[Config.MAX_HUMANS];
@@ -382,38 +395,40 @@ public class EntityRenderer {
 
     // real block-by-block buildings (see Blueprint's own class comment) -
     // a house/mansion is built from unit blocks the same size as a
-    // terrain block, walls and roof as separate materials, with
-    // STAGE_COUNT precomputed partial-construction snapshots so a
-    // building's live progress/integrity can pick "how much of it is
-    // actually standing" - see updateHouses. A settlement's own single
-    // government-tier marker (hut/town/city) reuses the same Blueprint
-    // machinery but always fully built (no per-instance staging needed
-    // for a one-per-settlement marker), brick-textured instead of plank
-    // to read as a civic building rather than a home.
+    // terrain block, one merged mesh per material (wall/roof/foundation/
+    // trim), with STAGE_COUNT precomputed partial-construction snapshots
+    // so a building's live progress/integrity can pick "how much of it is
+    // actually standing" - see updateHouses.
     buildingBlueprint[0] = Blueprint.building(3, 3, 2, false); // house
     buildingBlueprint[1] = Blueprint.building(5, 5, 3, false); // mansion
+    Blueprint.Block[] blockTypes = Blueprint.Block.values();
     for (int t = 0; t < 2; t++) {
       Blueprint bp = buildingBlueprint[t];
       int total = bp.totalCells();
       for (int s = 0; s < STAGE_COUNT; s++) {
         int upTo = total * (s + 1) / STAGE_COUNT;
-        buildingWallStage[t][s] = bp.buildStageMesh(upTo, Blueprint.Block.WALL);
-        buildingRoofStage[t][s] = bp.buildStageMesh(upTo, Blueprint.Block.ROOF);
+        for (Blueprint.Block bt : blockTypes) buildingStage[t][bt.ordinal()][s] = bp.buildStageMesh(upTo, bt);
       }
     }
 
+    // A settlement's own single government-tier marker (hut/town/city)
+    // reuses the same Blueprint machinery but always fully built (no
+    // per-instance staging needed for a one-per-settlement marker) -
+    // WALL+FOUNDATION+TRIM merge into one brick "structure" mesh, ROOF
+    // stays its own shingle-textured mesh, so it reads as a real building
+    // with a plinth/roofline instead of one flat brick box.
     Blueprint govSmallBp = buildingBlueprint[0];
     Blueprint govMedBp = Blueprint.building(5, 4, 3, false);
     Blueprint govLargeBp = Blueprint.building(5, 5, 4, true);
-    hutTemplate = MeshUtil.mergeMeshes(
-        govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.WALL),
-        govSmallBp.buildStageMesh(govSmallBp.totalCells(), Blueprint.Block.ROOF));
-    townTemplate = MeshUtil.mergeMeshes(
-        govMedBp.buildStageMesh(govMedBp.totalCells(), Blueprint.Block.WALL),
-        govMedBp.buildStageMesh(govMedBp.totalCells(), Blueprint.Block.ROOF));
-    cityTemplate = MeshUtil.mergeMeshes(
-        govLargeBp.buildStageMesh(govLargeBp.totalCells(), Blueprint.Block.WALL),
-        govLargeBp.buildStageMesh(govLargeBp.totalCells(), Blueprint.Block.ROOF));
+    Blueprint[] govBp = {govSmallBp, govMedBp, govLargeBp};
+    for (int tier = 0; tier < 3; tier++) {
+      Blueprint bp = govBp[tier];
+      int total = bp.totalCells();
+      govStructureTemplate[tier] = MeshUtil.mergeMeshes(
+          MeshUtil.mergeMeshes(bp.buildStageMesh(total, Blueprint.Block.WALL), bp.buildStageMesh(total, Blueprint.Block.FOUNDATION)),
+          bp.buildStageMesh(total, Blueprint.Block.TRIM));
+      govRoofTemplate[tier] = bp.buildStageMesh(total, Blueprint.Block.ROOF);
+    }
 
     businessTemplate = new Box(0.34f, 0.34f, 0.34f);
     bankTemplate = MeshUtil.mergeMeshes(
@@ -515,36 +530,52 @@ public class EntityRenderer {
     com.jme3.texture.Texture2D plankTex = TerrainTextures.buildPlankTexture();
     com.jme3.texture.Texture2D brickTex = TerrainTextures.buildBrickTexture();
     com.jme3.texture.Texture2D roofTex = TerrainTextures.buildRoofTexture();
+    // cobblestone (foundation/chimney) and log (corner posts, window/door
+    // framing) - see Blueprint's class comment for why every building now
+    // has these as real, separately-textured blocks rather than just a
+    // wall+roof box
+    com.jme3.texture.Texture2D cobbleTex = TerrainTextures.buildCobbleTexture();
+    com.jme3.texture.Texture2D logTex = TerrainTextures.buildLogTexture();
 
-    // real houses/mansions: one wall + one roof Geometry per construction
-    // stage per type (see the STAGE_COUNT fields' own comment) - a
-    // building's actual current placements are batched into whichever
-    // stage bucket matches its progress/integrity every rebuild (see
-    // updateHouses), same PropBatcher-per-frame-rebake pattern every
-    // other prop pool in this class already uses.
+    // real houses/mansions: one Geometry per (type, material, construction
+    // stage) - see the STAGE_COUNT/MATERIAL_COUNT fields' own comment. The
+    // body material (plank for a house, brick for a mansion) varies by
+    // type, but the foundation/trim/roof read the same regardless of what
+    // the walls above them are built from, the same way a real build's
+    // stone plinth and log framing don't change just because the walls
+    // are a different wood. A building's actual current placements are
+    // batched into whichever stage bucket matches its progress/integrity
+    // every rebuild (see updateHouses), same PropBatcher-per-frame-rebake
+    // pattern every other prop pool in this class already uses.
     com.jme3.texture.Texture2D[] buildingWallTex = {plankTex, brickTex}; // house, mansion
     for (int t = 0; t < 2; t++) {
-      for (int s = 0; s < STAGE_COUNT; s++) {
-        Geometry wg = new Geometry("BuildingWall" + t + "_" + s, buildingWallStage[t][s]);
-        wg.setMaterial(texturedVertexColorMaterial(buildingWallTex[t]));
-        wg.setCullHint(Spatial.CullHint.Always);
-        root.attachChild(wg);
-        buildingWallGeom[t][s] = wg;
-
-        Geometry rg = new Geometry("BuildingRoof" + t + "_" + s, buildingRoofStage[t][s]);
-        rg.setMaterial(texturedVertexColorMaterial(roofTex));
-        rg.setCullHint(Spatial.CullHint.Always);
-        root.attachChild(rg);
-        buildingRoofGeom[t][s] = rg;
+      for (Blueprint.Block bt : Blueprint.Block.values()) {
+        com.jme3.texture.Texture2D tex = bt == Blueprint.Block.ROOF ? roofTex
+            : bt == Blueprint.Block.FOUNDATION ? cobbleTex
+            : bt == Blueprint.Block.TRIM ? logTex
+            : buildingWallTex[t];
+        for (int s = 0; s < STAGE_COUNT; s++) {
+          Geometry g = new Geometry("Building" + t + "_" + bt + "_" + s, buildingStage[t][bt.ordinal()][s]);
+          g.setMaterial(texturedVertexColorMaterial(tex));
+          g.setCullHint(Spatial.CullHint.Always);
+          root.attachChild(g);
+          buildingGeom[t][bt.ordinal()][s] = g;
+        }
       }
     }
 
     for (int i = 0; i < SETTLEMENT_CAP; i++) {
-      Geometry g = new Geometry("Settlement" + i, hutTemplate);
+      Geometry g = new Geometry("Settlement" + i, govStructureTemplate[0]);
       g.setMaterial(texturedSoloColorMaterial(ColorRGBA.Gray, brickTex));
       g.setCullHint(Spatial.CullHint.Always);
       settlementsNode.attachChild(g);
       settlementPool[i] = g;
+
+      Geometry rg = new Geometry("SettlementRoof" + i, govRoofTemplate[0]);
+      rg.setMaterial(texturedSoloColorMaterial(ColorRGBA.Gray, roofTex));
+      rg.setCullHint(Spatial.CullHint.Always);
+      settlementsNode.attachChild(rg);
+      settlementRoofPool[i] = rg;
     }
     root.attachChild(settlementsNode);
 
@@ -1113,12 +1144,9 @@ public class EntityRenderer {
     }
 
     @SuppressWarnings("unchecked")
-    List<PropBatcher.Placement>[][] wallPlacements = new List[2][STAGE_COUNT];
-    @SuppressWarnings("unchecked")
-    List<PropBatcher.Placement>[][] roofPlacements = new List[2][STAGE_COUNT];
-    for (int t = 0; t < 2; t++) for (int s = 0; s < STAGE_COUNT; s++) {
-      wallPlacements[t][s] = new ArrayList<>();
-      roofPlacements[t][s] = new ArrayList<>();
+    List<PropBatcher.Placement>[][][] placements = new List[2][MATERIAL_COUNT][STAGE_COUNT];
+    for (int t = 0; t < 2; t++) for (int m = 0; m < MATERIAL_COUNT; m++) for (int s = 0; s < STAGE_COUNT; s++) {
+      placements[t][m][s] = new ArrayList<>();
     }
 
     int rendered = 0;
@@ -1153,23 +1181,30 @@ public class EntityRenderer {
       // door ending up facing a wall segment's own flat face at a weird
       // mid-angle
       float angle = (b.id % 4) * 1.5708f;
-      wallPlacements[typeIdx][stage].add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, wallColor));
-      // the roof is its own material (shingle texture) and reads truest
-      // to that texture lit only by the scene, not tinted by whichever
-      // nation owns the walls under it - same as a real roof being a
+      placements[typeIdx][Blueprint.Block.WALL.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, wallColor));
+      // the roof, foundation, and trim are each their own material
+      // (shingle/cobble/log texture) and read truest to that texture lit
+      // only by the scene, not tinted by whichever nation owns the walls
+      // above/below them - same as a real roof or stone plinth being a
       // different material than the walls, not painted to match
-      roofPlacements[typeIdx][stage].add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      placements[typeIdx][Blueprint.Block.ROOF.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      placements[typeIdx][Blueprint.Block.FOUNDATION.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      placements[typeIdx][Blueprint.Block.TRIM.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
       rendered++;
     }
 
     for (int t = 0; t < 2; t++) {
-      for (int s = 0; s < STAGE_COUNT; s++) {
-        List<PropBatcher.Placement> walls = wallPlacements[t][s];
-        buildingWallGeom[t][s].setMesh(PropBatcher.bake(buildingWallStage[t][s], walls));
-        buildingWallGeom[t][s].setCullHint(walls.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
-        List<PropBatcher.Placement> roofs = roofPlacements[t][s];
-        buildingRoofGeom[t][s].setMesh(PropBatcher.bake(buildingRoofStage[t][s], roofs));
-        buildingRoofGeom[t][s].setCullHint(roofs.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+      for (Blueprint.Block bt : Blueprint.Block.values()) {
+        int m = bt.ordinal();
+        for (int s = 0; s < STAGE_COUNT; s++) {
+          List<PropBatcher.Placement> list = placements[t][m][s];
+          buildingGeom[t][m][s].setMesh(PropBatcher.bake(buildingStage[t][m][s], list));
+          buildingGeom[t][m][s].setCullHint(list.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+        }
       }
     }
   }
@@ -1191,10 +1226,10 @@ public class EntityRenderer {
     updateWeather(state, alpha, animTime);
   }
 
-  private Mesh tierTemplate(int population) {
-    if (population >= 35) return cityTemplate;
-    if (population >= 15) return townTemplate;
-    return hutTemplate;
+  private int tierIndex(int population) {
+    if (population >= 35) return 2; // city
+    if (population >= 15) return 1; // town
+    return 0; // hut
   }
 
   // each tier's base box is centered at its own local origin, so it needs
@@ -1211,22 +1246,30 @@ public class EntityRenderer {
     for (Settlement s : state.settlements.values()) {
       if (i >= SETTLEMENT_CAP) break;
       Geometry g = settlementPool[i];
+      Geometry rg = settlementRoofPool[i];
       float h = grid.height[grid.idx(s.x, s.z)];
       float scale = (float) (0.55 + Math.sqrt(Math.max(1, s.populationCount)) * 0.13);
-      g.setMesh(tierTemplate(s.populationCount));
-      g.setLocalTranslation(s.x + 0.5f, h + tierGroundOffset(s.populationCount) * scale, s.z + 0.5f);
+      int tier = tierIndex(s.populationCount);
+      g.setMesh(govStructureTemplate[tier]);
+      rg.setMesh(govRoofTemplate[tier]);
+      Vector3f pos = new Vector3f(s.x + 0.5f, h + tierGroundOffset(s.populationCount) * scale, s.z + 0.5f);
+      g.setLocalTranslation(pos);
       g.setLocalScale(scale);
+      rg.setLocalTranslation(pos);
+      rg.setLocalScale(scale);
       Geometry flag = flagPool[i];
       if (s.abandoned) {
         // ruin: structure stays standing (per design) but drained of its
         // nation's color and flying no flag - a dead settlement, not a
         // living one that just happens to have a small population
         setSoloColor(g.getMaterial(), RUIN_COLOR);
+        setSoloColor(rg.getMaterial(), RUIN_COLOR);
         flag.setCullHint(Spatial.CullHint.Always);
       } else {
         Nation nation = state.nations.get(s.nationId);
         ColorRGBA c = nation != null ? nationOrFallback(nation.id, ColorRGBA.Gray) : ColorRGBA.Gray;
         setSoloColor(g.getMaterial(), c);
+        setSoloColor(rg.getMaterial(), c);
         float flagOffset = scale * 0.55f + 0.65f;
         flag.setLocalTranslation(s.x + 0.5f + flagOffset, h, s.z + 0.5f + flagOffset);
         flag.setLocalScale(0.85f);
@@ -1235,11 +1278,13 @@ public class EntityRenderer {
       }
       g.setUserData("settlementId", s.id);
       g.setCullHint(Spatial.CullHint.Inherit);
+      rg.setCullHint(Spatial.CullHint.Inherit);
       i++;
     }
     int activeSettlements = i;
     for (; i < Math.max(activeSettlements, lastSettlementCount); i++) {
       settlementPool[i].setCullHint(Spatial.CullHint.Always);
+      settlementRoofPool[i].setCullHint(Spatial.CullHint.Always);
       flagPool[i].setCullHint(Spatial.CullHint.Always);
     }
     lastSettlementCount = activeSettlements;
