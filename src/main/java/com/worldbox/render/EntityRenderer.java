@@ -1239,13 +1239,12 @@ public class EntityRenderer {
       float angle = (b.id % 4) * 1.5708f;
       placements[typeIdx][Blueprint.Block.WALL.ordinal()][stage]
           .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, wallColor));
-      // the roof, foundation, and trim are each their own material
-      // (shingle/cobble/log texture) and read truest to that texture lit
-      // only by the scene, not tinted by whichever nation owns the walls
-      // above/below them - same as a real roof or stone plinth being a
-      // different material than the walls, not painted to match
+      // the roof is tinted the same nation color as the walls (including
+      // the vacant-house wash) - a real, visible cue for which nation a
+      // house belongs to from a normal play camera distance, where the
+      // roof is usually the most visible part of a house
       placements[typeIdx][Blueprint.Block.ROOF.ordinal()][stage]
-          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, wallColor));
       // ground that was already flat here needed no grading - see
       // Settlement.terraformFootprint - so this house gets no cobblestone
       // plinth either, the same way a real house built on already-level

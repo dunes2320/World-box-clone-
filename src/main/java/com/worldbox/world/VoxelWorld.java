@@ -198,10 +198,30 @@ public class VoxelWorld implements java.io.Serializable {
    * generation-time jitter above) have made them diverge slightly. */
   public void resyncHeight(WorldGrid grid, int x, int z) {
     double sum = 0;
+    boolean allWater = true;
     for (int dz = 0; dz < FINE; dz++) {
-      for (int dx = 0; dx < FINE; dx++) sum += heightWorld(x * FINE + dx, z * FINE + dz);
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        sum += heightWorld(fx, fz);
+        if (get(fx, WATER_LEVEL, fz) != WATER) allWater = false;
+      }
     }
     grid.height[grid.idx(x, z)] = (float) (sum / (FINE * FINE));
+    int gi = grid.idx(x, z);
+    // flowWaterInto (see its own comment) can flood a cell's voxels that
+    // was dry land at worldgen time - WorldGrid's own coarse terrain
+    // classification needs to catch up too, or gameplay (isBuildable,
+    // farmland, house placement) would keep treating a now-flooded cell
+    // as dry land and immediately try to terraform the water back out
+    if (allWater) {
+      grid.terrain[gi] = Config.WATER;
+    } else if (grid.terrain[gi] == Config.WATER) {
+      // the reverse: building/filling has reclaimed this cell from water
+      // (buildColumn simply overwrites whatever was there, water
+      // included) - it needs a real land classification too, not to stay
+      // marked WATER forever just because it once was
+      grid.terrain[gi] = Config.DIRT;
+    }
   }
 
   /** Removes (sets to air) every non-water block within `radius` WORLD
@@ -233,7 +253,10 @@ public class VoxelWorld implements java.io.Serializable {
           set(x, y, z, AIR);
           touched = true;
         }
-        if (touched && touchedColumns != null) touchedColumns.add((long) (z / FINE) * coarseCols + (x / FINE));
+        if (touched) {
+          flowWaterInto(x, z);
+          if (touchedColumns != null) touchedColumns.add((long) (z / FINE) * coarseCols + (x / FINE));
+        }
       }
     }
   }
@@ -252,6 +275,7 @@ public class VoxelWorld implements java.io.Serializable {
         byte r = get(fx, top, fz);
         set(fx, top, fz, AIR);
         if (removed == AIR) removed = r;
+        flowWaterInto(fx, fz);
       }
     }
     return removed;
@@ -286,6 +310,32 @@ public class VoxelWorld implements java.io.Serializable {
     int top = columnTopY(fx, fz);
     while (top < targetTop) { set(fx, ++top, fz, fillType); }
     while (top > targetTop) { set(fx, top, fz, AIR); top--; }
+    flowWaterInto(fx, fz);
+  }
+
+  /** After digging/terraforming exposes empty space below WATER_LEVEL (sea
+   * level) right next to existing water, water needs to actually flow
+   * back into it - the way a real hole dug at the water's edge floods -
+   * not stay a dry pit just because nothing painted it as a lake at
+   * worldgen time. Deliberately requires an actual water NEIGHBOR, not
+   * just "below WATER_LEVEL": plenty of ordinary dry land (a low beach, a
+   * marshy hollow) legitimately sits below that constant with nothing but
+   * open air above it, generated that way on purpose - flooding every low
+   * spot unconditionally the moment it's touched would drown ground that
+   * was never meant to be water at all. Fine-column coordinates. */
+  public void flowWaterInto(int fx, int fz) {
+    int top = columnTopY(fx, fz);
+    if (top >= WATER_LEVEL) return;
+    if (!isWaterColumn(fx - 1, fz) && !isWaterColumn(fx + 1, fz)
+        && !isWaterColumn(fx, fz - 1) && !isWaterColumn(fx, fz + 1)) return;
+    for (int y = top + 1; y <= WATER_LEVEL; y++) {
+      if (get(fx, y, fz) == AIR) set(fx, y, fz, WATER);
+    }
+  }
+
+  private boolean isWaterColumn(int fx, int fz) {
+    if (fx < 0 || fz < 0 || fx >= cols || fz >= rows) return false;
+    return get(fx, WATER_LEVEL, fz) == WATER;
   }
 
   /** Repaints every fine sub-column's surface block under this coarse

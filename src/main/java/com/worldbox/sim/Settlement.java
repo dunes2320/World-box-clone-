@@ -203,9 +203,31 @@ public class Settlement implements java.io.Serializable {
     for (int attempts = 0; attempts < 60; attempts++) {
       double[] spot = housePosition(s, s.houseSpiralIndex++);
       int gx = (int) Math.floor(spot[0]), gz = (int) Math.floor(spot[1]);
-      if (!grid.inBounds(gx, gz) || grid.isBuildable(grid.idx(gx, gz))) return spot;
+      if (grid.inBounds(gx, gz) && !grid.isBuildable(grid.idx(gx, gz))) continue;
+      // housePosition's spiral only guarantees no overlap WITHIN this one
+      // settlement's own lots - it has no idea where any OTHER
+      // settlement's houses already are, so two settlements whose spirals
+      // happen to reach into the same patch of ground (a common, if
+      // unintentional, ring-2-3 overlap once both towns have grown a bit)
+      // could otherwise plant houses right on top of each other.
+      if (overlapsExistingBuilding(state, spot[0], spot[1])) continue;
+      return spot;
     }
     return null;
+  }
+
+  /** Whether ANY existing building (from any settlement, any nation) sits
+   * too close to this candidate spot to both fit - reusing LOT_SPACING
+   * (already sized to comfortably fit even a mansion's full footprint,
+   * chimney included) as the same minimum clearance between two
+   * completely unrelated buildings, not just two lots in the same town's
+   * own grid. */
+  private static boolean overlapsExistingBuilding(GameState state, double x, double z) {
+    double minClearance = LOT_SPACING * 0.8;
+    for (Building b : state.buildings.values()) {
+      if (Math.hypot(x - b.x, z - b.z) < minClearance) return true;
+    }
+    return false;
   }
 
   /** Creates one real house - one of several genuinely different shapes
@@ -431,6 +453,27 @@ public class Settlement implements java.io.Serializable {
       if (d < other.radius + FOUNDING_BORDER_BUFFER) return false;
     }
     return true;
+  }
+
+  /** A flat minimum separation from EVERY existing settlement, regardless
+   * of which nation owns it - unlike spotClearOfRivals (which deliberately
+   * excludes the founding nation's own settlements, since a nation is
+   * allowed to expand into its own claimed territory), a brand new city
+   * still can never physically land on top of - or right next to - one
+   * that already exists, including one of the SAME nation's own other
+   * cities. Nation.tryExpand picking a spot near an existing settlement of
+   * its own (spotClearOfRivals alone never catches that, since same-
+   * nation settlements are exactly what it skips) is what was reading as
+   * "a city founded in the middle of another city". */
+  private static final double MIN_SETTLEMENT_SEPARATION = 22;
+
+  public static boolean tooCloseToAnySettlement(GameState state, int x, int y) {
+    double cx = x + 0.5, cy = y + 0.5;
+    for (Settlement other : state.settlements.values()) {
+      if (other.abandoned) continue;
+      if (Math.hypot(cx - other.x, cy - other.z) < MIN_SETTLEMENT_SEPARATION) return true;
+    }
+    return false;
   }
 
   /** How many houses a settlement this size actually gets placed - kept

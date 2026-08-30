@@ -688,6 +688,7 @@ public class Population {
       // as Nation.tryExpand, so a brand new nation never starts out with
       // its own capital sitting inside a rival's territory
       if (!Settlement.spotClearOfRivals(state, gx, gz, -1)) return;
+      if (Settlement.tooCloseToAnySettlement(state, gx, gz)) return;
       h.dead = true; // folded into the new settlement's founding population
       pendingFoundings.add(new int[]{gx, gz});
     }

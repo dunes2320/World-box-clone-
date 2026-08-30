@@ -239,6 +239,54 @@ public final class TerrainTextures {
     return toTexture(img);
   }
 
+  /** A tiny procedural sky cubemap - a plain sky-blue top face, a soft
+   * blue-to-pale-horizon gradient on the four side faces, and a muted
+   * ground tone on the bottom - built once and reused as water's EnvMap
+   * (see VoxelChunkRenderer) so the sea reflects a believable sky instead
+   * of being lit with no reflection at all. Not a real-time environment
+   * capture (this world has no reflective geometry that itself needs to
+   * show up in the reflection - a static sky is what a real body of
+   * water reflects the vast majority of the time anyway), so a handful of
+   * flat/gradient faces is enough to read as "the sky is bouncing off
+   * this" without the cost of a live reflection camera pass. */
+  public static com.jme3.texture.TextureCubeMap buildSkyCubeMap() {
+    int size = 16;
+    int skyTop = 0x5B93D6, horizon = 0x9DC0DE, ground = 0x596B57;
+    java.util.ArrayList<java.nio.ByteBuffer> faces = new java.util.ArrayList<>();
+    faces.add(gradientFace(size, skyTop, horizon)); // +X
+    faces.add(gradientFace(size, skyTop, horizon)); // -X
+    faces.add(solidFace(size, skyTop));              // +Y (up)
+    faces.add(solidFace(size, ground));              // -Y (down)
+    faces.add(gradientFace(size, skyTop, horizon)); // +Z
+    faces.add(gradientFace(size, skyTop, horizon)); // -Z
+    Image img = new Image(Image.Format.RGBA8, size, size, 6, faces, com.jme3.texture.image.ColorSpace.sRGB);
+    com.jme3.texture.TextureCubeMap cubeMap = new com.jme3.texture.TextureCubeMap(img);
+    cubeMap.setMagFilter(Texture.MagFilter.Bilinear);
+    cubeMap.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+    cubeMap.setWrap(Texture.WrapMode.EdgeClamp);
+    return cubeMap;
+  }
+
+  private static java.nio.ByteBuffer gradientFace(int size, int topRgb, int bottomRgb) {
+    java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(size * size * 4);
+    for (int y = 0; y < size; y++) {
+      float t = y / (float) (size - 1);
+      int c = mix(topRgb, topRgb, bottomRgb, t);
+      byte r = (byte) ((c >> 16) & 0xFF), g = (byte) ((c >> 8) & 0xFF), b = (byte) (c & 0xFF);
+      for (int x = 0; x < size; x++) buf.put(r).put(g).put(b).put((byte) 255);
+    }
+    buf.flip();
+    return buf;
+  }
+
+  private static java.nio.ByteBuffer solidFace(int size, int rgb) {
+    java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(size * size * 4);
+    byte r = (byte) ((rgb >> 16) & 0xFF), g = (byte) ((rgb >> 8) & 0xFF), b = (byte) (rgb & 0xFF);
+    for (int i = 0; i < size * size; i++) buf.put(r).put(g).put(b).put((byte) 255);
+    buf.flip();
+    return buf;
+  }
+
   private static Texture2D toTexture(BufferedImage img) {
     Image jmeImage = new AWTLoader().load(img, false);
     Texture2D tex = new Texture2D(jmeImage);

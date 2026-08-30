@@ -115,6 +115,18 @@ public class VoxelChunkRenderer {
     waterMat.setTransparent(true);
     waterMat.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
     waterMat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
+    // a real (if cheap - see TerrainTextures.buildSkyCubeMap) sky
+    // reflection instead of water just being lit with no reflection at
+    // all. bias/scale/power (0.85 scale at power 2) first tried here
+    // washed the whole surface out to near-white - this camera looks
+    // down at the world from a fairly shallow angle most of the time, so
+    // "grazing angle" was most of what's actually on screen, not a rare
+    // edge case. A much smaller scale and a steeper power curve keeps the
+    // reflection concentrated at genuinely near-grazing angles, reading
+    // as a subtle sky sheen rather than overpowering the water's own
+    // blue color.
+    waterMat.setTexture("EnvMap", TerrainTextures.buildSkyCubeMap());
+    waterMat.setVector3("FresnelParams", new com.jme3.math.Vector3f(0.02f, 0.22f, 4.5f));
 
     for (int ci = 0; ci < n; ci++) {
       Geometry sg = new Geometry("chunk_solid_" + ci, new Mesh());
@@ -425,9 +437,13 @@ public class VoxelChunkRenderer {
         if (nc != null) {
           // a genuinely darker interior, not just a faint wash of the
           // full-brightness color - reads as "this ground belongs to
-          // someone" without competing with the border for attention
-          ColorRGBA darker = new ColorRGBA(nc.r * 0.5f, nc.g * 0.5f, nc.b * 0.5f, 1f);
-          c.interpolateLocal(darker, 0.3f);
+          // someone" without competing with the border for attention.
+          // The old 0.3 blend of an already-halved color was reading as
+          // "practically invisible" against real terrain/lighting - this
+          // is a clearly visible tint at a normal play camera distance
+          // without fully overpowering the underlying terrain texture.
+          ColorRGBA darker = new ColorRGBA(nc.r * 0.62f, nc.g * 0.62f, nc.b * 0.62f, 1f);
+          c.interpolateLocal(darker, 0.5f);
         }
       }
     }
@@ -444,9 +460,19 @@ public class VoxelChunkRenderer {
     return grid.ownerNation[grid.idx(x, z)] != owner;
   }
 
+  // a border only 1 cell wide (immediate neighbors only) was a near-hairline
+  // stripe at any normal play camera distance - checking a wider
+  // neighborhood makes the border read as an actual visible band instead
+  private static final int BORDER_WIDTH = 2;
+
   private boolean isBorderCell(int x, int z, int owner) {
-    return borderNeighborDiffers(x - 1, z, owner) || borderNeighborDiffers(x + 1, z, owner)
-        || borderNeighborDiffers(x, z - 1, owner) || borderNeighborDiffers(x, z + 1, owner);
+    for (int dz = -BORDER_WIDTH; dz <= BORDER_WIDTH; dz++) {
+      for (int dx = -BORDER_WIDTH; dx <= BORDER_WIDTH; dx++) {
+        if (dx == 0 && dz == 0) continue;
+        if (borderNeighborDiffers(x + dx, z + dz, owner)) return true;
+      }
+    }
+    return false;
   }
 
   private enum Face { TOP, BOTTOM, NORTH, SOUTH, EAST, WEST }

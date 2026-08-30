@@ -15,9 +15,9 @@ import java.util.Set;
  * walls, a hollow wall ring (door + window gaps, with a log/quartz-style
  * TRIM accent at the corners and framing the openings) topped by a real
  * peaked (gable) roof with a proper overhang - not a flat slab flush with
- * the walls, which reads as a plain cube rather than a house - plus a
- * free-standing chimney column and optional corner towers for grander
- * buildings. Generated from a handful of dimensions in code rather than
+ * the walls, which reads as a plain cube rather than a house - plus
+ * optional corner towers for grander buildings. Generated from a handful
+ * of dimensions in code rather than
  * hand-typed layer-by-layer ASCII art, so an odd building size can't
  * silently end up with a mismatched row/column count the way transcribed
  * art risks.
@@ -28,11 +28,11 @@ import java.util.Set;
  * - see buildStageMesh, and Building.progress/integrity in the sim layer. */
 public class Blueprint {
   /** Each is rendered as its own separate mesh with its own material (see
-   * EntityRenderer) - FOUNDATION is the cobblestone plinth + chimney
-   * stack, TRIM is the corner posts and window/door framing (log on a
-   * house, quartz on a civic building), DOOR is a real paneled door block
-   * filling the doorway, and WINDOW is real (transparent) glass filling a
-   * window opening - not bare gaps either one used to be. */
+   * EntityRenderer) - FOUNDATION is the cobblestone plinth, TRIM is the
+   * corner posts and window/door framing (log on a house, quartz on a
+   * civic building), DOOR is a real paneled door block filling the
+   * doorway, and WINDOW is real (transparent) glass filling a window
+   * opening - not bare gaps either one used to be. */
   public enum Block { WALL, ROOF, FOUNDATION, TRIM, DOOR, WINDOW }
 
   /** World-unit size of one block cube - matches VoxelWorld.FINE's terrain
@@ -177,20 +177,10 @@ public class Blueprint {
       for (int cx : new int[]{0, width - 1}) for (int cz : new int[]{0, depth - 1}) cells.add(new Cell(cx, y, cz, Block.TRIM));
     }
 
-    // a chimney stack flush against the foundation's own outer edge - one
-    // column further out than the eave/foundation footprint (-1) so it
-    // never overlaps the roof cells above (that would double up faces at
-    // the same coordinate), but no further: touching, not floating a gap
-    // away from the wall. A real chimney is built directly onto an
-    // exterior wall; sitting several blocks clear of the house (the old
-    // -4, a leftover from when this scale was doubled without re-checking
-    // the actual gap it left) read as a small detached pillar standing
-    // apart from the building instead of part of it.
-    if (depth >= 2) {
-      int chimX = -2, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
-      int chimTop = roofBaseY + lastRoofLayer + 1;
-      for (int y = 1; y <= chimTop; y++) cells.add(new Cell(chimX, y, chimZ, Block.FOUNDATION));
-    }
+    // no chimney - every version of one (floating clear of the house,
+    // then flush against the wall) still read as a small stray block
+    // stuck onto the building rather than a deliberate feature, so it's
+    // gone entirely rather than re-tuned again.
 
     int height = roofBaseY + lastRoofLayer + 1 + (corners ? 1 : 0);
     return new Blueprint(cells, width, depth, height);
@@ -201,14 +191,11 @@ public class Blueprint {
   /** Real world-space half-extent of this blueprint's FULL footprint -
    * every cell it actually contains, not just width/depth/2 - measured
    * from its own center out to the furthest edge on either horizontal
-   * axis. The free-standing chimney (see its own comment above) and any
-   * corner towers sit well outside the wall footprint proper, so a
-   * caller that only terraforms a pad sized off width/depth (the bug
-   * this method exists to make impossible) leaves the chimney standing
-   * on whatever unleveled ground happened to already be there - which is
-   * exactly what read as a small detached "pillar" next to an otherwise
-   * flush house. +SCALE at the end accounts for a cell's own width past
-   * its near corner, not just the corner itself. */
+   * axis. Corner towers on grander buildings sit well outside the plain
+   * wall footprint, so a caller that only terraforms a pad sized off
+   * width/depth leaves them standing on whatever unleveled ground
+   * happened to already be there. +SCALE at the end accounts for a
+   * cell's own width past its near corner, not just the corner itself. */
   public float footprintHalfExtent() {
     float ox = width / 2f, oz = depth / 2f;
     float maxR = 0;
@@ -221,15 +208,14 @@ public class Blueprint {
 
   /** Every distinct (x, z) column, as a world-space offset from this
    * blueprint's own center, that any of its cells actually occupies - the
-   * foundation slab and the chimney's own separate column, each a real
-   * spot on the ground something is actually built on. Lets a caller (see
-   * Settlement.terraformFootprint) flatten ground that hugs the building's
-   * true silhouette instead of footprintHalfExtent's single circle sized
-   * off whichever one point (almost always the chimney) sits furthest
-   * from center - a circle that size wastefully flattens a lot of empty
-   * ground on the side of the building away from the chimney too, which
-   * is what was reading as an oversized, unnaturally flat "chunk taken
-   * out of the land" around every house. */
+   * foundation slab, each a real spot on the ground something is actually
+   * built on. Lets a caller (see Settlement.terraformFootprint) flatten
+   * ground that hugs the building's true silhouette instead of
+   * footprintHalfExtent's single circle sized off whichever one point
+   * sits furthest from center - a circle that size wastefully flattens a
+   * lot of empty ground the building doesn't actually stand on, which is
+   * what was reading as an oversized, unnaturally flat "chunk taken out
+   * of the land" around every house. */
   public java.util.List<float[]> footprintColumns() {
     float ox = width / 2f, oz = depth / 2f;
     Set<Long> seen = new HashSet<>();

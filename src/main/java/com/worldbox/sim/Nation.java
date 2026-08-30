@@ -426,6 +426,7 @@ public class Nation implements java.io.Serializable {
     WorldGen.Spot spot = WorldGen.findLandSpot(state.grid, from.x, from.z, 16, state.rng);
     if (spot == null) return;
     if (!Settlement.spotClearOfRivals(state, spot.x, spot.y, nation.id)) return;
+    if (Settlement.tooCloseToAnySettlement(state, spot.x, spot.y)) return;
     nation.treasury -= 200;
     Settlement settlement = Settlement.create(state, spot.x, spot.y, nation.id, Settlement.randomSettlementName(state.rng));
     nation.settlementIds.add(settlement.id);
