@@ -192,13 +192,27 @@ public class EntityRenderer {
    * meshes/materials, and each gets STAGE_COUNT precomputed partial-
    * construction meshes so a building's current progress/integrity
    * (whichever is lower) can pick the right "how much of it is actually
-   * standing" snapshot. First index 0 = house, 1 = mansion; second index
-   * is Blueprint.Block.ordinal(). */
+   * standing" snapshot. First index is the house variant (see
+   * HOUSE_VARIANTS/houseTypeIndex - a real village has more than one
+   * house shape); second index is Blueprint.Block.ordinal(). */
   private static final int STAGE_COUNT = 4;
   private static final int MATERIAL_COUNT = Blueprint.Block.values().length;
-  private final Blueprint[] buildingBlueprint = new Blueprint[2];
-  private final Mesh[][][] buildingStage = new Mesh[2][MATERIAL_COUNT][STAGE_COUNT];
-  private final Geometry[][][] buildingGeom = new Geometry[2][MATERIAL_COUNT][STAGE_COUNT];
+  /** Building.type strings, in the same order as buildingBlueprint/Stage/
+   * Geom's first index - a handful of genuinely different shapes (a
+   * squat cottage, a long low cabin, a taller two-story house, a small
+   * corner-towered one) instead of just "house" vs "mansion", so a
+   * village doesn't read as one house copy-pasted everywhere. */
+  private static final String[] HOUSE_VARIANTS = {"cottage", "cabin", "tall_house", "towered_house", "mansion"};
+  private static final int HOUSE_TYPE_COUNT = HOUSE_VARIANTS.length;
+
+  private static int houseTypeIndex(String type) {
+    for (int t = 0; t < HOUSE_VARIANTS.length; t++) if (HOUSE_VARIANTS[t].equals(type)) return t;
+    return 0;
+  }
+
+  private final Blueprint[] buildingBlueprint = new Blueprint[HOUSE_TYPE_COUNT];
+  private final Mesh[][][] buildingStage = new Mesh[HOUSE_TYPE_COUNT][MATERIAL_COUNT][STAGE_COUNT];
+  private final Geometry[][][] buildingGeom = new Geometry[HOUSE_TYPE_COUNT][MATERIAL_COUNT][STAGE_COUNT];
 
   /** Settlement-tier markers (hut/town/city) reuse the same Blueprint
    * machinery as a real house but are always fully built (no per-instance
@@ -401,19 +415,22 @@ public class EntityRenderer {
     humanArmRWeaponTemplates = weaponArmTemplates;
 
     // real block-by-block buildings (see Blueprint's own class comment) -
-    // a house/mansion is built from unit blocks the same (smaller) size
-    // as a terrain block (Blueprint.SCALE == 1/VoxelWorld.FINE), one
-    // merged mesh per material (wall/roof/foundation/trim), with
-    // STAGE_COUNT precomputed partial-construction snapshots so a
-    // building's live progress/integrity can pick "how much of it is
-    // actually standing" - see updateHouses. Dimensions are doubled from
-    // the old 1-unit-block versions (3x3x2, 5x5x3) so the building's
-    // actual physical footprint stays about the same now that each block
-    // is half the size - more, smaller blocks, not a smaller house.
-    buildingBlueprint[0] = Blueprint.building(6, 6, 4, false); // house
-    buildingBlueprint[1] = Blueprint.building(10, 10, 6, false); // mansion
+    // a house is built from unit blocks the same (smaller) size as a
+    // terrain block (Blueprint.SCALE == 1/VoxelWorld.FINE), one merged
+    // mesh per material (wall/roof/foundation/trim), with STAGE_COUNT
+    // precomputed partial-construction snapshots so a building's live
+    // progress/integrity can pick "how much of it is actually standing" -
+    // see updateHouses. Dimensions are all in the new doubled-from-1-unit
+    // scale (see Blueprint.SCALE's own comment) so physical footprints
+    // land in a believable range - more, smaller blocks, not smaller
+    // houses. See HOUSE_VARIANTS for what each index below actually is.
+    buildingBlueprint[0] = Blueprint.building(6, 6, 4, false); // cottage: the old plain house
+    buildingBlueprint[1] = Blueprint.building(8, 6, 4, false); // cabin: long and low
+    buildingBlueprint[2] = Blueprint.building(6, 6, 7, false); // tall_house: two-story
+    buildingBlueprint[3] = Blueprint.building(8, 8, 4, true); // towered_house: small corner towers
+    buildingBlueprint[4] = Blueprint.building(10, 10, 6, false); // mansion
     Blueprint.Block[] blockTypes = Blueprint.Block.values();
-    for (int t = 0; t < 2; t++) {
+    for (int t = 0; t < HOUSE_TYPE_COUNT; t++) {
       Blueprint bp = buildingBlueprint[t];
       int total = bp.totalCells();
       for (int s = 0; s < STAGE_COUNT; s++) {
@@ -550,16 +567,18 @@ public class EntityRenderer {
 
     // real houses/mansions: one Geometry per (type, material, construction
     // stage) - see the STAGE_COUNT/MATERIAL_COUNT fields' own comment. The
-    // body material (plank for a house, brick for a mansion) varies by
-    // type, but the foundation/trim/roof read the same regardless of what
-    // the walls above them are built from, the same way a real build's
-    // stone plinth and log framing don't change just because the walls
-    // are a different wood. A building's actual current placements are
-    // batched into whichever stage bucket matches its progress/integrity
-    // every rebuild (see updateHouses), same PropBatcher-per-frame-rebake
-    // pattern every other prop pool in this class already uses.
-    com.jme3.texture.Texture2D[] buildingWallTex = {plankTex, brickTex}; // house, mansion
-    for (int t = 0; t < 2; t++) {
+    // body material (plank for every plain house variant, brick for the
+    // mansion) varies by type, but the foundation/trim/roof read the same
+    // regardless of what the walls above them are built from, the same
+    // way a real build's stone plinth and log framing don't change just
+    // because the walls are a different wood. A building's actual current
+    // placements are batched into whichever stage bucket matches its
+    // progress/integrity every rebuild (see updateHouses), same
+    // PropBatcher-per-frame-rebake pattern every other prop pool in this
+    // class already uses.
+    com.jme3.texture.Texture2D[] buildingWallTex =
+        {plankTex, plankTex, plankTex, plankTex, brickTex}; // cottage, cabin, tall_house, towered_house, mansion
+    for (int t = 0; t < HOUSE_TYPE_COUNT; t++) {
       for (Blueprint.Block bt : Blueprint.Block.values()) {
         com.jme3.texture.Texture2D tex = bt == Blueprint.Block.ROOF ? roofTex
             : bt == Blueprint.Block.FOUNDATION ? cobbleTex
@@ -1159,8 +1178,8 @@ public class EntityRenderer {
     }
 
     @SuppressWarnings("unchecked")
-    List<PropBatcher.Placement>[][][] placements = new List[2][MATERIAL_COUNT][STAGE_COUNT];
-    for (int t = 0; t < 2; t++) for (int m = 0; m < MATERIAL_COUNT; m++) for (int s = 0; s < STAGE_COUNT; s++) {
+    List<PropBatcher.Placement>[][][] placements = new List[HOUSE_TYPE_COUNT][MATERIAL_COUNT][STAGE_COUNT];
+    for (int t = 0; t < HOUSE_TYPE_COUNT; t++) for (int m = 0; m < MATERIAL_COUNT; m++) for (int s = 0; s < STAGE_COUNT; s++) {
       placements[t][m][s] = new ArrayList<>();
     }
 
@@ -1169,7 +1188,7 @@ public class EntityRenderer {
       if (rendered >= HOUSE_CAP_SAMPLE) break;
       double display = Math.min(b.progress, b.integrity);
       if (display <= 0) continue; // rubble - nothing left standing to draw
-      int typeIdx = "mansion".equals(b.type) ? 1 : 0;
+      int typeIdx = houseTypeIndex(b.type);
       int stage = Math.min(STAGE_COUNT - 1, (int) (display * STAGE_COUNT));
 
       Nation nation = state.nations.get(b.nationId);
@@ -1212,7 +1231,7 @@ public class EntityRenderer {
       rendered++;
     }
 
-    for (int t = 0; t < 2; t++) {
+    for (int t = 0; t < HOUSE_TYPE_COUNT; t++) {
       for (Blueprint.Block bt : Blueprint.Block.values()) {
         int m = bt.ordinal();
         for (int s = 0; s < STAGE_COUNT; s++) {

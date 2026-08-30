@@ -171,18 +171,21 @@ public class Settlement implements java.io.Serializable {
     return null;
   }
 
-  /** Creates one real house (or, for a wealthy nation, occasionally a
-   * mansion instead) at the next dry spiral spot and adds it to
-   * state.buildings - the single place a house Building ever comes into
-   * existence, whether at founding (fully built) or from later organic
-   * growth (starts at progress 0 and visibly rises - see update()'s
-   * construction pass). */
+  /** Creates one real house - one of several genuinely different shapes
+   * (or, for a wealthy nation, occasionally a mansion instead), picked at
+   * random per building rather than every house in a settlement being
+   * the same cookie-cutter shape - at the next dry spiral spot and adds
+   * it to state.buildings - the single place a house Building ever comes
+   * into existence, whether at founding (fully built) or from later
+   * organic growth (starts at progress 0 and visibly rises - see
+   * update()'s construction pass). */
   private static void spawnHouseBuilding(GameState state, Settlement s, double startProgress) {
     double[] spot = findBuildingSpot(state, s);
     if (spot == null) return; // genuinely boxed in by water this attempt - try again next time housing grows
     Nation nation = state.nations.get(s.nationId);
     boolean mansion = nation != null && nation.landValueIndex > 1.3 && Math.random() < 0.2;
-    Building b = new Building(s.id, s.nationId, mansion ? "mansion" : "house", spot[0], spot[1]);
+    String type = mansion ? "mansion" : HOUSE_VARIANTS[(int) (Math.random() * HOUSE_VARIANTS.length)];
+    Building b = new Building(s.id, s.nationId, type, spot[0], spot[1]);
     b.progress = startProgress;
     state.buildings.put(b.id, b);
     // every new building's site gets leveled first, the same way a real
@@ -192,31 +195,43 @@ public class Settlement implements java.io.Serializable {
     // flat blueprint mesh would sit clipped into (or floating over)
     // whatever slope happened to already be there right from the very
     // first time a settlement is founded
-    terraformFootprint(state, spot[0], spot[1], mansion ? MANSION_FOOTPRINT : HOUSE_FOOTPRINT);
+    terraformFootprint(state, spot[0], spot[1], HOUSE_FOOTPRINT_BY_TYPE.get(type));
   }
 
-  // must match the footprint (width, depth - both squares, so rotation
-  // doesn't change the bounding area) of buildingBlueprint[0]/[1] in
-  // EntityRenderer's Blueprint.building(...) calls
-  private static final int HOUSE_FOOTPRINT = 3;
-  private static final int MANSION_FOOTPRINT = 5;
+  // must match EntityRenderer.HOUSE_VARIANTS and each one's real footprint
+  // (max(width, depth) * Blueprint.SCALE, rounded up to whole WorldGrid
+  // cells) from its buildingBlueprint[t] = Blueprint.building(...) call
+  private static final String[] HOUSE_VARIANTS = {"cottage", "cabin", "tall_house", "towered_house"};
+  private static final java.util.Map<String, Integer> HOUSE_FOOTPRINT_BY_TYPE = new java.util.HashMap<>();
+  static {
+    HOUSE_FOOTPRINT_BY_TYPE.put("cottage", 3);
+    HOUSE_FOOTPRINT_BY_TYPE.put("cabin", 4);
+    HOUSE_FOOTPRINT_BY_TYPE.put("tall_house", 3);
+    HOUSE_FOOTPRINT_BY_TYPE.put("towered_house", 4);
+    HOUSE_FOOTPRINT_BY_TYPE.put("mansion", 5);
+  }
 
   /** Flattens the ground under a new building's footprint (plus a 1-block
    * margin for the blueprint's own foundation overhang - see Blueprint's
-   * class comment) to the elevation at its own anchor cell, via the same
-   * real per-column dig/build voxel ops every other terrain-editing tool
-   * in this codebase already uses (see Events.earthquake for the same
-   * pattern) - not a fake cosmetic flourish, an actual change to the
-   * voxel terrain the building then sits flush on. Never touches a cell
-   * that was already water (findBuildingSpot only ever picks a dry
-   * anchor, but a low-lying neighbor could still be a real pond that
-   * shouldn't get paved over). */
+   * class comment) to the elevation at its own anchor cell - genuinely
+   * flat, every real FINE sub-column set to the exact same target height
+   * (see VoxelWorld.levelColumn), not just shifted by a uniform delta
+   * from wherever it already happened to be (which - since generation's
+   * per-fine-column jitter means neighboring columns don't necessarily
+   * start at the same height - left the "leveled" site with the same
+   * bumps it started with, just at a different average elevation, which
+   * is what was still reading as buildings floating/clipping into the
+   * ground). Not a fake cosmetic flourish - a real change to the voxel
+   * terrain the building then sits flush on. Never touches a cell that
+   * was already water (findBuildingSpot only ever picks a dry anchor,
+   * but a low-lying neighbor could still be a real pond that shouldn't
+   * get paved over). */
   private static void terraformFootprint(GameState state, double cx, double cz, int size) {
     WorldGrid grid = state.grid;
     VoxelWorld voxels = state.voxels;
     int anchorX = (int) Math.floor(cx), anchorZ = (int) Math.floor(cz);
     if (!grid.inBounds(anchorX, anchorZ)) return;
-    int target = Math.round(grid.height[grid.idx(anchorX, anchorZ)]);
+    int targetTop = Math.round(grid.height[grid.idx(anchorX, anchorZ)]) + VoxelWorld.Y_OFFSET - 1;
     int half = size / 2 + 1;
     for (int dz = -half; dz <= half; dz++) {
       for (int dx = -half; dx <= half; dx++) {
@@ -224,11 +239,11 @@ public class Settlement implements java.io.Serializable {
         if (!grid.inBounds(x, z)) continue;
         int i = grid.idx(x, z);
         if (grid.terrain[i] == Config.WATER) continue;
-        int cur = Math.round(grid.height[i]);
-        if (cur < target) {
-          for (int k = 0; k < target - cur; k++) voxels.buildColumn(x, z, VoxelWorld.blockForTerrain(grid.terrain[i]));
-        } else if (cur > target) {
-          for (int k = 0; k < cur - target; k++) voxels.digColumn(x, z);
+        byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
+        for (int fdz = 0; fdz < VoxelWorld.FINE; fdz++) {
+          for (int fdx = 0; fdx < VoxelWorld.FINE; fdx++) {
+            voxels.levelColumn(x * VoxelWorld.FINE + fdx, z * VoxelWorld.FINE + fdz, targetTop, fillType);
+          }
         }
         voxels.resyncHeight(grid, x, z);
         grid.markDirtyIdx(i);

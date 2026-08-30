@@ -15,9 +15,10 @@ public class Building implements java.io.Serializable {
   public final int id;
   public int settlementId;
   public int nationId;
-  /** "house" | "mansion" - see EntityRenderer's blueprint set for what
-   * else a settlement's single government-tier marker uses (that one
-   * isn't a per-Building instance; a settlement only ever has one). */
+  /** One of EntityRenderer.HOUSE_VARIANTS ("cottage"/"cabin"/"tall_house"/
+   * "towered_house"/"mansion") - see that blueprint set for what else a
+   * settlement's single government-tier marker uses (that one isn't a
+   * per-Building instance; a settlement only ever has one). */
   public final String type;
   public final double x, z;
   public double progress;

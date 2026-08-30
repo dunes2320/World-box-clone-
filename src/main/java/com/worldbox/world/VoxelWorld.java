@@ -258,6 +258,24 @@ public class VoxelWorld implements java.io.Serializable {
     }
   }
 
+  /** Sets one FINE column's actual surface to exactly targetTop (a real
+   * block-layer index, not a WorldGrid height) - digs down or builds up
+   * from wherever that column's own current top really is. This is NOT
+   * the same as calling digColumn/buildColumn a fixed number of times:
+   * those only ever apply the same DELTA to every column, which merely
+   * shifts each one by the same amount and preserves whatever height
+   * differences it already had with its neighbors (generation's sparse
+   * per-fine-column jitter - see generate() - means neighboring columns
+   * routinely don't start at the same height) - not actually flat, which
+   * is what a building's site needs to be so its single flat blueprint
+   * mesh doesn't clip into (or float above) a lot that only reads as
+   * flat at the coarse WorldGrid level. Fine-column coordinates. */
+  public void levelColumn(int fx, int fz, int targetTop, byte fillType) {
+    int top = columnTopY(fx, fz);
+    while (top < targetTop) { set(fx, ++top, fz, fillType); }
+    while (top > targetTop) { set(fx, top, fz, AIR); top--; }
+  }
+
   /** Repaints every fine sub-column's surface block under this coarse
    * cell - used by the terrain-paint tools (grass/sand/dirt/stone) so
    * they still visibly change the ground. Coarse (WorldGrid) x/z. */
