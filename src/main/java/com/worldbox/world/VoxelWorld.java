@@ -2,7 +2,11 @@ package com.worldbox.world;
 
 import com.worldbox.config.Config;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /** A real 3D block grid, generated from the existing 2D heightmap/terrain
@@ -313,29 +317,72 @@ public class VoxelWorld implements java.io.Serializable {
     flowWaterInto(fx, fz);
   }
 
-  /** After digging/terraforming exposes empty space below WATER_LEVEL (sea
-   * level) right next to existing water, water needs to actually flow
-   * back into it - the way a real hole dug at the water's edge floods -
-   * not stay a dry pit just because nothing painted it as a lake at
-   * worldgen time. Deliberately requires an actual water NEIGHBOR, not
-   * just "below WATER_LEVEL": plenty of ordinary dry land (a low beach, a
-   * marshy hollow) legitimately sits below that constant with nothing but
-   * open air above it, generated that way on purpose - flooding every low
-   * spot unconditionally the moment it's touched would drown ground that
-   * was never meant to be water at all. Fine-column coordinates. */
+  /** The actual rule: any AIR block at or below sea level that is directly
+   * touching a WATER block becomes water itself. After digging/terraforming
+   * exposes empty space below WATER_LEVEL, this floods it the way a real
+   * hole dug at the water's edge floods - not stay a dry pit just because
+   * nothing painted it as a lake at worldgen time. And because a
+   * newly-flooded block is now itself water, it can flood ITS OWN air
+   * neighbors in turn - this is a real flood-fill outward from wherever
+   * this edit exposed new air, through every connected air block below sea
+   * level, not just a single column.
+   *
+   * Deliberately does not flood an air pocket that never actually reaches
+   * a real water block: plenty of ordinary dry land (a low beach, a marshy
+   * hollow, a sealed basement dug out below sea level) legitimately sits
+   * below WATER_LEVEL with nothing but open air around it, on purpose -
+   * flooding every low spot unconditionally the moment it's touched would
+   * drown ground that was never meant to be water at all. So this explores
+   * the whole connected air pocket first and only actually fills it with
+   * water if that exploration finds a real water block somewhere in it.
+   * Bounded (FLOOD_BUDGET) so an unusually large connected cavity can't
+   * stall a tick; a fully-flooded column short-circuits back out on any
+   * later call (its air is already water, so there's nothing left to seed
+   * the search with). Fine-column coordinates. */
+  private static final int FLOOD_BUDGET = 4000;
+
   public void flowWaterInto(int fx, int fz) {
     int top = columnTopY(fx, fz);
     if (top >= WATER_LEVEL) return;
-    if (!isWaterColumn(fx - 1, fz) && !isWaterColumn(fx + 1, fz)
-        && !isWaterColumn(fx, fz - 1) && !isWaterColumn(fx, fz + 1)) return;
+
+    ArrayDeque<int[]> frontier = new ArrayDeque<>();
+    List<int[]> pocket = new ArrayList<>();
+    Set<Long> visited = new HashSet<>();
     for (int y = top + 1; y <= WATER_LEVEL; y++) {
-      if (get(fx, y, fz) == AIR) set(fx, y, fz, WATER);
+      if (get(fx, y, fz) == AIR) {
+        int[] p = {fx, y, fz};
+        frontier.add(p);
+        pocket.add(p);
+        visited.add(voxelKey(fx, y, fz));
+      }
     }
+    if (frontier.isEmpty()) return;
+
+    boolean touchesWater = false;
+    int budget = FLOOD_BUDGET;
+    while (!frontier.isEmpty() && budget-- > 0) {
+      int[] p = frontier.poll();
+      int[][] neighbors = {
+          {p[0] + 1, p[1], p[2]}, {p[0] - 1, p[1], p[2]},
+          {p[0], p[1] + 1, p[2]}, {p[0], p[1] - 1, p[2]},
+          {p[0], p[1], p[2] + 1}, {p[0], p[1], p[2] - 1},
+      };
+      for (int[] n : neighbors) {
+        if (n[1] > WATER_LEVEL || n[1] < 0) continue;
+        byte b = get(n[0], n[1], n[2]);
+        if (b == WATER) { touchesWater = true; continue; }
+        if (b != AIR) continue;
+        if (!visited.add(voxelKey(n[0], n[1], n[2]))) continue;
+        frontier.add(n);
+        pocket.add(n);
+      }
+    }
+    if (!touchesWater) return;
+    for (int[] p : pocket) set(p[0], p[1], p[2], WATER);
   }
 
-  private boolean isWaterColumn(int fx, int fz) {
-    if (fx < 0 || fz < 0 || fx >= cols || fz >= rows) return false;
-    return get(fx, WATER_LEVEL, fz) == WATER;
+  private long voxelKey(int x, int y, int z) {
+    return ((long) z * cols + x) * MAX_Y + y;
   }
 
   /** Repaints every fine sub-column's surface block under this coarse
