@@ -149,6 +149,27 @@ public class Blueprint {
 
   public int totalCells() { return cells.size(); }
 
+  /** Real world-space half-extent of this blueprint's FULL footprint -
+   * every cell it actually contains, not just width/depth/2 - measured
+   * from its own center out to the furthest edge on either horizontal
+   * axis. The free-standing chimney (see its own comment above) and any
+   * corner towers sit well outside the wall footprint proper, so a
+   * caller that only terraforms a pad sized off width/depth (the bug
+   * this method exists to make impossible) leaves the chimney standing
+   * on whatever unleveled ground happened to already be there - which is
+   * exactly what read as a small detached "pillar" next to an otherwise
+   * flush house. +SCALE at the end accounts for a cell's own width past
+   * its near corner, not just the corner itself. */
+  public float footprintHalfExtent() {
+    float ox = width / 2f, oz = depth / 2f;
+    float maxR = 0;
+    for (Cell c : cells) {
+      maxR = Math.max(maxR, Math.abs(c.x - ox));
+      maxR = Math.max(maxR, Math.abs(c.z - oz));
+    }
+    return maxR * SCALE + SCALE;
+  }
+
   private static long key(int x, int y, int z) { return ((long) (x + 32) << 20) | ((long) (y + 32) << 10) | (z + 32); }
 
   /** A merged mesh of every visible face among the first `upTo` cells (in

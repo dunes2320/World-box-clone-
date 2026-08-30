@@ -1,6 +1,8 @@
 package com.worldbox.sim;
 
 import com.worldbox.config.Config;
+import com.worldbox.render.GovStructures;
+import com.worldbox.render.HouseVariants;
 import com.worldbox.util.Rng;
 import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
@@ -108,12 +110,28 @@ public class Settlement implements java.io.Serializable {
       state.humans.add(founder);
     }
 
-    // a fresh settlement already has its starting housingStock's worth of
-    // real houses standing (not empty ground with a promise of housing
-    // later) - each one fully built (progress=1) since founding a town
-    // isn't meant to look like an empty field for its first month
+    // the settlement's own government marker (hut/town/city - see
+    // EntityRenderer.updateSettlements) sits at the town center and never
+    // moves, so its lot gets graded once here, sized for the LARGEST tier
+    // it could ever grow into (see GovStructures.maxFootprintHalfExtent) -
+    // otherwise a later population-driven tier upgrade to a wider building
+    // would land on ground that was only ever leveled for the small
+    // starting hut, reading as the exact same floating/clipping bug a
+    // house's own lot grading fixes.
+    terraformFootprint(state, x + 0.5, z + 0.5, GovStructures.maxFootprintHalfExtent());
+
+    // a fresh settlement's starting houses each rise from bare foundation
+    // the same visible, block-by-block way organic growth does (see
+    // update()'s construction pass just below) - a settlement popping
+    // into existence with its houses already fully built read as
+    // buildings materializing out of nowhere with no one actually having
+    // built them. A staggered head start (earlier houses further along)
+    // means the town doesn't read as a totally empty field either - it's
+    // mid-construction, like the founders have already been at it a
+    // while, not starting from literally nothing.
     for (int i = 0; i < (int) settlement.housingStock; i++) {
-      spawnHouseBuilding(state, settlement, 1.0);
+      double headStart = Math.max(0, 0.7 - i * 0.18);
+      spawnHouseBuilding(state, settlement, headStart);
     }
 
     claimTerritory(state, settlement);
@@ -139,10 +157,23 @@ public class Settlement implements java.io.Serializable {
    * line up identically) - the center itself stays clear for downtown
    * (see EntityRenderer.updateBusinesses/updateBanks/hutTemplate's own
    * exact-center placement), the same way a real town's commercial core
-   * sits apart from its residential blocks. */
-  private static final double LOT_SPACING = 6.0;
-  private static final double DOWNTOWN_CLEARANCE = 7.0;
+   * sits apart from its residential blocks. Spacing sized off the widest
+   * real footprint any house variant actually has (a mansion's chimney
+   * included - see HouseVariants/Blueprint.footprintHalfExtent), doubled
+   * for a real street's width plus yard on both sides between rows/
+   * columns, rather than a guessed constant that turned out to leave
+   * neighboring lots almost touching. */
+  private static final double LOT_SPACING = houseSpacing();
+  private static final double DOWNTOWN_CLEARANCE = LOT_SPACING + 1.0;
   private static final int LOTS_PER_ROW = 7;
+
+  private static double houseSpacing() {
+    float maxHalfExtent = 0;
+    for (String name : HouseVariants.NAMES) {
+      maxHalfExtent = Math.max(maxHalfExtent, HouseVariants.blueprintFor(name).footprintHalfExtent());
+    }
+    return maxHalfExtent * 2 + 3.0;
+  }
 
   public static double[] housePosition(Settlement s, int i) {
     int row = i / LOTS_PER_ROW, col = i % LOTS_PER_ROW;
@@ -184,55 +215,55 @@ public class Settlement implements java.io.Serializable {
     if (spot == null) return; // genuinely boxed in by water this attempt - try again next time housing grows
     Nation nation = state.nations.get(s.nationId);
     boolean mansion = nation != null && nation.landValueIndex > 1.3 && Math.random() < 0.2;
-    String type = mansion ? "mansion" : HOUSE_VARIANTS[(int) (Math.random() * HOUSE_VARIANTS.length)];
+    String[] pool = HouseVariants.ORDINARY_NAMES;
+    String type = mansion ? "mansion" : pool[(int) (Math.random() * pool.length)];
     Building b = new Building(s.id, s.nationId, type, spot[0], spot[1]);
     b.progress = startProgress;
     state.buildings.put(b.id, b);
     // every new building's site gets leveled first, the same way a real
     // crew grades a lot before framing goes up - including a
-    // settlement's own pre-built starting homes (startProgress == 1.0),
-    // not just later organic growth - otherwise the building's single
-    // flat blueprint mesh would sit clipped into (or floating over)
-    // whatever slope happened to already be there right from the very
-    // first time a settlement is founded
-    terraformFootprint(state, spot[0], spot[1], HOUSE_FOOTPRINT_BY_TYPE.get(type));
+    // settlement's own pre-built starting homes, not just later organic
+    // growth - otherwise the building's single flat blueprint mesh would
+    // sit clipped into (or floating over) whatever slope happened to
+    // already be there right from the very first time a settlement is
+    // founded. Sized off this exact variant's real footprint (see
+    // HouseVariants/Blueprint.footprintHalfExtent) - including its
+    // free-standing chimney, which sits well outside the wall footprint
+    // proper and used to be left standing on unleveled ground, reading as
+    // a small detached pillar next to an otherwise flush house.
+    b.hasFoundation = terraformFootprint(state, spot[0], spot[1], HouseVariants.blueprintFor(type).footprintHalfExtent());
   }
 
-  // must match EntityRenderer.HOUSE_VARIANTS and each one's real footprint
-  // (max(width, depth) * Blueprint.SCALE, rounded up to whole WorldGrid
-  // cells) from its buildingBlueprint[t] = Blueprint.building(...) call
-  private static final String[] HOUSE_VARIANTS = {"cottage", "cabin", "tall_house", "towered_house"};
-  private static final java.util.Map<String, Integer> HOUSE_FOOTPRINT_BY_TYPE = new java.util.HashMap<>();
-  static {
-    HOUSE_FOOTPRINT_BY_TYPE.put("cottage", 3);
-    HOUSE_FOOTPRINT_BY_TYPE.put("cabin", 4);
-    HOUSE_FOOTPRINT_BY_TYPE.put("tall_house", 3);
-    HOUSE_FOOTPRINT_BY_TYPE.put("towered_house", 4);
-    HOUSE_FOOTPRINT_BY_TYPE.put("mansion", 5);
-  }
-
-  /** Flattens the ground under a new building's footprint (plus a 1-block
-   * margin for the blueprint's own foundation overhang - see Blueprint's
-   * class comment) to the elevation at its own anchor cell - genuinely
-   * flat, every real FINE sub-column set to the exact same target height
-   * (see VoxelWorld.levelColumn), not just shifted by a uniform delta
-   * from wherever it already happened to be (which - since generation's
-   * per-fine-column jitter means neighboring columns don't necessarily
-   * start at the same height - left the "leveled" site with the same
-   * bumps it started with, just at a different average elevation, which
-   * is what was still reading as buildings floating/clipping into the
-   * ground). Not a fake cosmetic flourish - a real change to the voxel
-   * terrain the building then sits flush on. Never touches a cell that
-   * was already water (findBuildingSpot only ever picks a dry anchor,
-   * but a low-lying neighbor could still be a real pond that shouldn't
-   * get paved over). */
-  private static void terraformFootprint(GameState state, double cx, double cz, int size) {
+  /** Flattens the ground under a new building's footprint (its real,
+   * per-variant bounding box - see HouseVariants/Blueprint.
+   * footprintHalfExtent, which covers the free-standing chimney and any
+   * corner towers, not just the wall footprint) to the elevation at its
+   * own anchor cell - genuinely flat, every real FINE sub-column set to
+   * the exact same target height (see VoxelWorld.levelColumn), not just
+   * shifted by a uniform delta from wherever it already happened to be
+   * (which - since generation's per-fine-column jitter means neighboring
+   * columns don't necessarily start at the same height - left the
+   * "leveled" site with the same bumps it started with, just at a
+   * different average elevation, which is what was still reading as
+   * buildings floating/clipping into the ground). Not a fake cosmetic
+   * flourish - a real change to the voxel terrain the building then sits
+   * flush on. Never touches a cell that was already water (findBuildingSpot
+   * only ever picks a dry anchor, but a low-lying neighbor could still be
+   * a real pond that shouldn't get paved over).
+   *
+   * @return true if any column actually needed to move to reach the
+   * target height - ground that was already flat here needs no
+   * cobblestone plinth poured around the building (see Building.
+   * hasFoundation/EntityRenderer.updateHouses), same as a real house built
+   * on already-level ground getting no raised curb. */
+  private static boolean terraformFootprint(GameState state, double cx, double cz, double halfExtentWorld) {
     WorldGrid grid = state.grid;
     VoxelWorld voxels = state.voxels;
     int anchorX = (int) Math.floor(cx), anchorZ = (int) Math.floor(cz);
-    if (!grid.inBounds(anchorX, anchorZ)) return;
-    int targetTop = Math.round(grid.height[grid.idx(anchorX, anchorZ)]) + VoxelWorld.Y_OFFSET - 1;
-    int half = size / 2 + 1;
+    if (!grid.inBounds(anchorX, anchorZ)) return true;
+    int targetTop = Math.round(grid.height[grid.idx(anchorX, anchorZ)] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
+    int half = (int) Math.ceil(halfExtentWorld) + 1;
+    boolean graded = false;
     for (int dz = -half; dz <= half; dz++) {
       for (int dx = -half; dx <= half; dx++) {
         int x = anchorX + dx, z = anchorZ + dz;
@@ -242,11 +273,62 @@ public class Settlement implements java.io.Serializable {
         byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
         for (int fdz = 0; fdz < VoxelWorld.FINE; fdz++) {
           for (int fdx = 0; fdx < VoxelWorld.FINE; fdx++) {
-            voxels.levelColumn(x * VoxelWorld.FINE + fdx, z * VoxelWorld.FINE + fdz, targetTop, fillType);
+            int fx = x * VoxelWorld.FINE + fdx, fz = z * VoxelWorld.FINE + fdz;
+            if (voxels.columnTopY(fx, fz) != targetTop) graded = true;
+            voxels.levelColumn(fx, fz, targetTop, fillType);
           }
         }
         voxels.resyncHeight(grid, x, z);
         grid.markDirtyIdx(i);
+      }
+    }
+    return graded;
+  }
+
+  /** A settlement's claimed land slowly reads as actually shaped by
+   * someone, not just houses dropped onto raw wilderness - every owned
+   * cell's own FINE sub-columns get leveled to that cell's single already-
+   * existing rounded height, clearing generation's sparse per-fine-column
+   * jitter (see VoxelWorld.generate's fineHash) wherever a nation actually
+   * holds the ground. This is NOT a big multi-cell flatten: each cell
+   * still follows its own grid.height, so the broader hill/slope profile
+   * across the territory is untouched - only the fine bumpiness WITHIN a
+   * single cell disappears, the way a real town's tended yards and streets
+   * read distinctly smoother than the wild ground just past its border,
+   * without leveling an entire hillside into one flat plateau. Bounded to
+   * a modest radius around the settlement center (not the full territory
+   * radius, which can reach 60) so this stays cheap regardless of how
+   * large a nation's claimed land eventually grows - cheaper, in fact,
+   * than the claimTerritory sweep it already runs alongside every 25
+   * ticks. */
+  private static final double TERRITORY_DECLUTTER_RADIUS = 22;
+
+  private static void declutterTerritory(GameState state, Settlement settlement) {
+    WorldGrid grid = state.grid;
+    VoxelWorld voxels = state.voxels;
+    double radius = Math.min(TERRITORY_DECLUTTER_RADIUS, settlement.radius);
+    int r = (int) Math.ceil(radius);
+    for (int dz = -r; dz <= r; dz++) {
+      int z = settlement.z + dz;
+      if (z < 0 || z >= grid.rows) continue;
+      for (int dx = -r; dx <= r; dx++) {
+        int x = settlement.x + dx;
+        if (x < 0 || x >= grid.cols || Math.hypot(dx, dz) > radius) continue;
+        int i = grid.idx(x, z);
+        if (grid.ownerNation[i] != settlement.nationId || grid.terrain[i] == Config.WATER) continue;
+        int targetTop = Math.round(grid.height[i] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
+        byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
+        boolean changed = false;
+        for (int fdz = 0; fdz < VoxelWorld.FINE; fdz++) {
+          for (int fdx = 0; fdx < VoxelWorld.FINE; fdx++) {
+            int fx = x * VoxelWorld.FINE + fdx, fz = z * VoxelWorld.FINE + fdz;
+            if (voxels.columnTopY(fx, fz) != targetTop) {
+              changed = true;
+              voxels.levelColumn(fx, fz, targetTop, fillType);
+            }
+          }
+        }
+        if (changed) { voxels.resyncHeight(grid, x, z); grid.markDirtyIdx(i); }
       }
     }
   }
@@ -458,6 +540,7 @@ public class Settlement implements java.io.Serializable {
         settlement.radius = Math.min(60, 16 + Math.sqrt(settlement.populationCount) * 1.6 + wealthBonus);
         settlement.farmCells = countFarmCells(state, settlement);
         claimTerritory(state, settlement);
+        declutterTerritory(state, settlement);
 
         // public housing backstop: housingStock is built to track total
         // population, not how many residents can actually afford to buy

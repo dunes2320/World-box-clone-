@@ -76,10 +76,46 @@ public class Events {
   private static final int SIZABLE_FIRE = 30;
   private static final int BURNOUT_ONSET_TICKS = 150;
 
+  /** How close a building's own center has to be to a burning cell to
+   * actually catch - a fixed radius rather than a per-variant footprint
+   * lookup (every real house/mansion footprint - see HouseVariants/
+   * Blueprint.footprintHalfExtent - comfortably fits inside it), since
+   * this runs against every burning cell every tick and needs to stay
+   * cheap. */
+  private static final double FIRE_BUILDING_RADIUS = 3.0;
+  /** A house catching fire burns down over roughly its own burn lifetime
+   * (see igniteCellBounded's ~20-45 tick burnTimer roll), not
+   * instantly and not so slowly it never visibly finishes - matches
+   * Building.integrity's 0..1 range. */
+  private static final double FIRE_BUILDING_DAMAGE_PER_TICK = 0.035;
+
+  /** Real houses/mansions actually burn down when fire reaches them -
+   * Building.integrity used to only ever move from war damage
+   * (Military.inflictWarDamage), so a wildfire or a lightning strike could
+   * roar right through a village with every house rendering fully intact
+   * the whole time. Runs against the same burningCells list updateFire is
+   * already iterating, so a quiet world (no fire) costs nothing beyond the
+   * empty-list check. */
+  private static void damageBuildingsFromFire(GameState state, List<Integer> burningCells) {
+    if (burningCells.isEmpty() || state.buildings.isEmpty()) return;
+    WorldGrid grid = state.grid;
+    for (Building b : state.buildings.values()) {
+      for (int cell : burningCells) {
+        double cellX = (cell % grid.cols) + 0.5, cellZ = (cell / grid.cols) + 0.5;
+        if (Math.hypot(b.x - cellX, b.z - cellZ) <= FIRE_BUILDING_RADIUS) {
+          b.integrity -= FIRE_BUILDING_DAMAGE_PER_TICK;
+          break;
+        }
+      }
+    }
+    state.buildings.values().removeIf(b -> b.integrity <= 0);
+  }
+
   private static void updateFire(GameState state) {
     WorldGrid grid = state.grid;
     if (grid.burningCells.isEmpty()) { grid.fireStreak = 0; return; }
     List<Integer> burningCells = new ArrayList<>(grid.burningCells);
+    damageBuildingsFromFire(state, burningCells);
     boolean canSpread = grid.burningCells.size() < MAX_SIMULTANEOUS_FIRE;
 
     if (grid.burningCells.size() >= SIZABLE_FIRE) grid.fireStreak++; else grid.fireStreak = 0;
@@ -229,6 +265,15 @@ public class Events {
 
     double r = radius;
     state.humans.removeIf(h -> Math.hypot(h.x - cx, h.z - cy) < r * 0.7);
+    // buildings physically inside the blast take real structural damage
+    // (Building.integrity), same as war damage - a meteor/nuke used to
+    // only ever kill nearby people and dent a settlement's food stock
+    // while every house in the crater rendered fully intact
+    for (Building b : state.buildings.values()) {
+      double d = Math.hypot(b.x - cx, b.z - cy);
+      if (d < radius) b.integrity -= (1 - d / radius) * 0.95;
+    }
+    state.buildings.values().removeIf(b -> b.integrity <= 0);
     for (Settlement settlement : state.settlements.values()) {
       if (settlement.abandoned) continue;
       double d = Math.hypot(settlement.x - cx, settlement.z - cy);
@@ -246,7 +291,11 @@ public class Events {
       int i = grid.idx(x, y);
       if (grid.terrain[i] == Config.WATER) return;
       double intensity = 1 - d / radius;
-      int delta = (int) Math.round((Math.random() - 0.5) * 3 * intensity);
+      // *FINE so a quake still shakes the ground by the same real amount
+      // in world units as before - each buildColumn/digColumn call now
+      // only moves a column by 1/FINE of a world unit (see VoxelWorld's
+      // FINE comment), so it takes FINE calls to do what one used to.
+      int delta = (int) Math.round((Math.random() - 0.5) * 3 * intensity) * VoxelWorld.FINE;
       if (delta > 0) {
         for (int k = 0; k < delta; k++) voxels.buildColumn(x, y, VoxelWorld.STONE);
       } else if (delta < 0) {
@@ -266,6 +315,15 @@ public class Events {
       double d = Math.hypot(h.x - cx, h.z - cy);
       return d < radius * 0.5 && Math.random() < 0.3;
     });
+    // real structural damage to any building the shaking actually reaches -
+    // milder than a direct explosion (an earthquake is frequent/automatic,
+    // see updateAutoDisasters, not a deliberate strike), so most quakes
+    // crack a house rather than flatten it outright
+    for (Building b : state.buildings.values()) {
+      double d = Math.hypot(b.x - cx, b.z - cy);
+      if (d < radius) b.integrity -= (1 - d / radius) * 0.4;
+    }
+    state.buildings.values().removeIf(b -> b.integrity <= 0);
   }
 
   public static void blessing(GameState state, double cx, double cy, double radius) {

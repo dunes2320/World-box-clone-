@@ -201,14 +201,14 @@ public class EntityRenderer {
    * Geom's first index - a handful of genuinely different shapes (a
    * squat cottage, a long low cabin, a taller two-story house, a small
    * corner-towered one) instead of just "house" vs "mansion", so a
-   * village doesn't read as one house copy-pasted everywhere. */
-  private static final String[] HOUSE_VARIANTS = {"cottage", "cabin", "tall_house", "towered_house", "mansion"};
-  private static final int HOUSE_TYPE_COUNT = HOUSE_VARIANTS.length;
+   * village doesn't read as one house copy-pasted everywhere. See
+   * HouseVariants for the single shared source of truth on names/shapes -
+   * Settlement (terraforming a lot's real footprint) reads the exact same
+   * table instead of keeping its own copy that could quietly drift out of
+   * sync with this one. */
+  private static final int HOUSE_TYPE_COUNT = HouseVariants.COUNT;
 
-  private static int houseTypeIndex(String type) {
-    for (int t = 0; t < HOUSE_VARIANTS.length; t++) if (HOUSE_VARIANTS[t].equals(type)) return t;
-    return 0;
-  }
+  private static int houseTypeIndex(String type) { return HouseVariants.indexOf(type); }
 
   private final Blueprint[] buildingBlueprint = new Blueprint[HOUSE_TYPE_COUNT];
   private final Mesh[][][] buildingStage = new Mesh[HOUSE_TYPE_COUNT][MATERIAL_COUNT][STAGE_COUNT];
@@ -424,11 +424,7 @@ public class EntityRenderer {
     // scale (see Blueprint.SCALE's own comment) so physical footprints
     // land in a believable range - more, smaller blocks, not smaller
     // houses. See HOUSE_VARIANTS for what each index below actually is.
-    buildingBlueprint[0] = Blueprint.building(6, 6, 4, false); // cottage: the old plain house
-    buildingBlueprint[1] = Blueprint.building(8, 6, 4, false); // cabin: long and low
-    buildingBlueprint[2] = Blueprint.building(6, 6, 7, false); // tall_house: two-story
-    buildingBlueprint[3] = Blueprint.building(8, 8, 4, true); // towered_house: small corner towers
-    buildingBlueprint[4] = Blueprint.building(10, 10, 6, false); // mansion
+    for (int t = 0; t < HOUSE_TYPE_COUNT; t++) buildingBlueprint[t] = HouseVariants.blueprintAt(t);
     Blueprint.Block[] blockTypes = Blueprint.Block.values();
     for (int t = 0; t < HOUSE_TYPE_COUNT; t++) {
       Blueprint bp = buildingBlueprint[t];
@@ -445,12 +441,8 @@ public class EntityRenderer {
     // WALL+FOUNDATION+TRIM merge into one brick "structure" mesh, ROOF
     // stays its own shingle-textured mesh, so it reads as a real building
     // with a plinth/roofline instead of one flat brick box.
-    Blueprint govSmallBp = buildingBlueprint[0];
-    Blueprint govMedBp = Blueprint.building(10, 8, 6, false);
-    Blueprint govLargeBp = Blueprint.building(10, 10, 8, true);
-    Blueprint[] govBp = {govSmallBp, govMedBp, govLargeBp};
     for (int tier = 0; tier < 3; tier++) {
-      Blueprint bp = govBp[tier];
+      Blueprint bp = GovStructures.blueprintAt(tier);
       int total = bp.totalCells();
       govStructureTemplate[tier] = MeshUtil.mergeMeshes(
           MeshUtil.mergeMeshes(bp.buildStageMesh(total, Blueprint.Block.WALL), bp.buildStageMesh(total, Blueprint.Block.FOUNDATION)),
@@ -1224,8 +1216,14 @@ public class EntityRenderer {
       // different material than the walls, not painted to match
       placements[typeIdx][Blueprint.Block.ROOF.ordinal()][stage]
           .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
-      placements[typeIdx][Blueprint.Block.FOUNDATION.ordinal()][stage]
-          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      // ground that was already flat here needed no grading - see
+      // Settlement.terraformFootprint - so this house gets no cobblestone
+      // plinth either, the same way a real house built on already-level
+      // ground gets no raised curb poured around it
+      if (b.hasFoundation) {
+        placements[typeIdx][Blueprint.Block.FOUNDATION.ordinal()][stage]
+            .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      }
       placements[typeIdx][Blueprint.Block.TRIM.ordinal()][stage]
           .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
       rendered++;

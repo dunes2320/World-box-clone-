@@ -51,7 +51,7 @@ public class VoxelChunkRenderer {
   // measured actual terrain heights only reach ~7-10 above sea level at
   // their tallest, so the snow line has to sit well below that or it
   // would never render on any peak
-  private static final int SNOW_LINE = VoxelWorld.Y_OFFSET + 6;
+  private static final int SNOW_LINE = VoxelWorld.Y_OFFSET + 6 * VoxelWorld.FINE;
 
   // Gentler now that real dynamic sun lighting also shades faces by
   // direction - this only needs to add a light baked-AO hint underneath.
@@ -371,7 +371,7 @@ public class VoxelChunkRenderer {
     if (!faceHidden(world.get(x, y + 1, z), type)) {
       ColorRGBA c = type == VoxelWorld.WATER ? color : topColor(x, z, color);
       if (type == VoxelWorld.STONE && y >= SNOW_LINE) {
-        float t = Math.min(1f, (y - SNOW_LINE) / 4f);
+        float t = Math.min(1f, (y - SNOW_LINE) / (4f * VoxelWorld.FINE));
         c = c.clone().interpolateLocal(SNOW_COLOR, 0.4f + t * 0.5f);
       }
       mb.face(x, y, z, Face.TOP, c, SHADE_TOP, tileFor(type, Face.TOP));
@@ -485,23 +485,24 @@ public class VoxelChunkRenderer {
     final FloatArr uv = new FloatArr();
     final IntArr idx = new IntArr();
 
-    /** bx/bz are fine-column coordinates - each one is really only
-     * 1/VoxelWorld.FINE world units wide (that's the actual "smaller
-     * blocks" this whole class exists to deliver now - see VoxelWorld's
-     * class comment), so the quad this emits is scaled down accordingly.
-     * Y stays unscaled - only the horizontal axes are subdivided. */
+    /** bx/by/bz are fine-column coordinates - every axis, Y included, is
+     * really only 1/VoxelWorld.FINE world units per step (see FINE's own
+     * comment on VoxelWorld - Y used to stay a full unscaled world unit
+     * per step while X/Z were subdivided, which rendered every terrain
+     * block as a 0.5x1.0x0.5 slab instead of a real cube), so the quad
+     * this emits is scaled down on every axis accordingly. */
     void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade, int tile) {
       float s = 1f / VoxelWorld.FINE;
-      float x = bx * s, y = by - VoxelWorld.Y_OFFSET, z = bz * s;
+      float x = bx * s, y = (by - VoxelWorld.Y_OFFSET) * s, z = bz * s;
       float[][] verts;
       float nx, ny, nz;
       switch (f) {
-        case TOP: verts = new float[][]{{x, y + 1, z}, {x, y + 1, z + s}, {x + s, y + 1, z + s}, {x + s, y + 1, z}}; nx = 0; ny = 1; nz = 0; break;
+        case TOP: verts = new float[][]{{x, y + s, z}, {x, y + s, z + s}, {x + s, y + s, z + s}, {x + s, y + s, z}}; nx = 0; ny = 1; nz = 0; break;
         case BOTTOM: verts = new float[][]{{x, y, z + s}, {x, y, z}, {x + s, y, z}, {x + s, y, z + s}}; nx = 0; ny = -1; nz = 0; break;
-        case NORTH: verts = new float[][]{{x + s, y, z}, {x, y, z}, {x, y + 1, z}, {x + s, y + 1, z}}; nx = 0; ny = 0; nz = -1; break;
-        case SOUTH: verts = new float[][]{{x, y, z + s}, {x + s, y, z + s}, {x + s, y + 1, z + s}, {x, y + 1, z + s}}; nx = 0; ny = 0; nz = 1; break;
-        case EAST: verts = new float[][]{{x + s, y, z + s}, {x + s, y, z}, {x + s, y + 1, z}, {x + s, y + 1, z + s}}; nx = 1; ny = 0; nz = 0; break;
-        default: verts = new float[][]{{x, y, z}, {x, y, z + s}, {x, y + 1, z + s}, {x, y + 1, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
+        case NORTH: verts = new float[][]{{x + s, y, z}, {x, y, z}, {x, y + s, z}, {x + s, y + s, z}}; nx = 0; ny = 0; nz = -1; break;
+        case SOUTH: verts = new float[][]{{x, y, z + s}, {x + s, y, z + s}, {x + s, y + s, z + s}, {x, y + s, z + s}}; nx = 0; ny = 0; nz = 1; break;
+        case EAST: verts = new float[][]{{x + s, y, z + s}, {x + s, y, z}, {x + s, y + s, z}, {x + s, y + s, z + s}}; nx = 1; ny = 0; nz = 0; break;
+        default: verts = new float[][]{{x, y, z}, {x, y, z + s}, {x, y + s, z + s}, {x, y + s, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
       }
       int base = pos.size() / 3;
       for (float[] v : verts) { pos.add(v[0]); pos.add(v[1]); pos.add(v[2]); }

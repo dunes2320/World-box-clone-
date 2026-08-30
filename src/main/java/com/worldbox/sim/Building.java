@@ -23,6 +23,12 @@ public class Building implements java.io.Serializable {
   public final double x, z;
   public double progress;
   public double integrity = 1.0;
+  /** Whether the lot under this building actually needed grading - see
+   * Settlement.terraformFootprint. Ground that was already flat gets no
+   * cobblestone plinth in the render layer (EntityRenderer skips the
+   * FOUNDATION material entirely), the same way a real house built on
+   * already-level ground doesn't get a raised curb poured around it. */
+  public boolean hasFoundation = true;
 
   public Building(int settlementId, int nationId, String type, double x, double z) {
     this.id = nextId++;

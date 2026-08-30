@@ -39,18 +39,27 @@ public class VoxelWorld implements java.io.Serializable {
   public static final byte WATER = 5;
   public static final byte PATH = 6;
 
-  /** World-space height 0 sits at this block layer, so negative terrain
-   * heights (seabeds, valleys) still have a valid non-negative index. */
-  public static final int Y_OFFSET = 9;
-  public static final int MAX_Y = 30;
-  public static final int WATER_LEVEL = Y_OFFSET - 1;
-
   /** How many real fine columns each WorldGrid cell becomes, per
-   * horizontal axis - the actual "smaller blocks" knob. Only the
-   * horizontal axes are subdivided; vertical stays 1-world-unit steps
-   * (heights are already integer-quantized there, and subdividing that
-   * too wouldn't add much while doubling memory/mesh cost again). */
+   * horizontal axis - the actual "smaller blocks" knob. Also used as the
+   * vertical step divisor (see Y_OFFSET/MAX_Y below): every block, terrain
+   * or building, is exactly 1/FINE world units on every axis - a real
+   * cube, not a slab. It used to only subdivide X/Z while Y stayed a full
+   * world-unit step, which made every terrain block 0.5 wide x 1.0 tall x
+   * 0.5 deep - visibly a tall narrow slab instead of a cube next to a
+   * building's own already-cubic Blueprint blocks (Blueprint.SCALE applies
+   * the same 1/FINE to x, y, and z alike). */
   public static final int FINE = 2;
+
+  /** World-space height 0 sits at the TOP FACE of block layer Y_OFFSET-1,
+   * so negative terrain heights (seabeds, valleys) still have a valid
+   * non-negative index. Scaled by FINE (same as MAX_Y/WATER_LEVEL below)
+   * since each index step is now 1/FINE world units instead of a full
+   * one - this keeps the same real amount of below/above-sea-level
+   * headroom in world units as before, just expressed in twice as many,
+   * twice as fine, steps. */
+  public static final int Y_OFFSET = 9 * FINE;
+  public static final int MAX_Y = 30 * FINE;
+  public static final int WATER_LEVEL = Y_OFFSET - 1;
   public static final int CHUNK_SIZE = 16 * FINE;
 
   /** The WorldGrid's own (coarse) dimensions - what every sim-facing
@@ -116,10 +125,11 @@ public class VoxelWorld implements java.io.Serializable {
   }
 
   /** World-space Y of the top face of a column's surface - what the old
-   * smooth WorldGrid.height used to mean, now quantized to whole blocks.
-   * Fine-column coordinates. */
+   * smooth WorldGrid.height used to mean, now quantized to whole blocks
+   * (1/FINE world units each - see FINE's own comment). Fine-column
+   * coordinates. */
   public float heightWorld(int x, int z) {
-    return columnTopY(x, z) + 1 - Y_OFFSET;
+    return (columnTopY(x, z) + 1 - Y_OFFSET) / (float) FINE;
   }
 
   private void generate(WorldGrid grid) {
@@ -128,14 +138,15 @@ public class VoxelWorld implements java.io.Serializable {
         int gx = x / FINE, gz = z / FINE;
         int i = grid.idx(gx, gz);
         byte terrain = grid.terrain[i];
-        int h = Math.round(grid.height[i]) + Y_OFFSET;
-        // a sparse, deterministic +-1 jitter per fine column (not every
-        // one - most stay flush with their coarse cell) so upsampling to
-        // real smaller blocks actually shows new bumps/weathering at the
-        // finer scale instead of just re-tiling the exact same flat
-        // surface at a higher block count. Never touches water or the
-        // outermost 2 columns of a cell (keeps shorelines/cliffs reading
-        // as clean edges rather than fuzzy noise).
+        int h = Math.round(grid.height[i] * FINE) + Y_OFFSET;
+        // a sparse, deterministic +-1 FINE-STEP jitter per fine column
+        // (not every one - most stay flush with their coarse cell) so
+        // upsampling to real smaller blocks actually shows new
+        // bumps/weathering at the finer scale instead of just re-tiling
+        // the exact same flat surface at a higher block count. Never
+        // touches water or the outermost 2 columns of a cell (keeps
+        // shorelines/cliffs reading as clean edges rather than fuzzy
+        // noise).
         if (terrain != Config.WATER) {
           int jitter = fineHash(x, z);
           if (jitter == 0) h -= 1;
@@ -148,8 +159,9 @@ public class VoxelWorld implements java.io.Serializable {
           for (int y = seabed + 1; y <= WATER_LEVEL; y++) setRaw(x, y, z, WATER);
         } else {
           byte surfaceBlock = blockForTerrain(terrain);
+          int dirtDepth = 3 * FINE;
           for (int y = 0; y < h; y++) {
-            byte b = y >= h - 1 ? surfaceBlock : (y >= h - 3 ? DIRT : STONE);
+            byte b = y >= h - 1 ? surfaceBlock : (y >= h - dirtDepth ? DIRT : STONE);
             setRaw(x, y, z, b);
           }
         }
@@ -200,9 +212,9 @@ public class VoxelWorld implements java.io.Serializable {
   public void carveSphere(double wx, double wyWorld, double wz, double radius, Set<Long> touchedColumns) {
     int cxBlock = (int) Math.round(wx * FINE);
     int czBlock = (int) Math.round(wz * FINE);
-    int cyBlock = (int) Math.round(wyWorld) + Y_OFFSET;
+    int cyBlock = (int) Math.round(wyWorld * FINE) + Y_OFFSET;
     int rFine = (int) Math.ceil(radius * FINE);
-    int rY = (int) Math.ceil(radius);
+    int rY = (int) Math.ceil(radius * FINE);
     for (int dz = -rFine; dz <= rFine; dz++) {
       int z = czBlock + dz;
       if (z < 0 || z >= rows) continue;
@@ -215,7 +227,7 @@ public class VoxelWorld implements java.io.Serializable {
         for (int dy = -rY; dy <= rY; dy++) {
           int y = cyBlock + dy;
           if (y < 0 || y >= MAX_Y) continue;
-          double d = Math.sqrt(horizD * horizD + dy * dy);
+          double d = Math.sqrt(horizD * horizD + (dy / (double) FINE) * (dy / (double) FINE));
           if (d > radius) continue;
           if (get(x, y, z) == WATER || get(x, y, z) == AIR) continue;
           set(x, y, z, AIR);
