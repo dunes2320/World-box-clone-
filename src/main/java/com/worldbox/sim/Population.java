@@ -39,6 +39,28 @@ public class Population {
     return grid.terrain[grid.idx(gx, gz)] != Config.WATER;
   }
 
+  /** Nearest dry cell to (x, z), searched as expanding square rings - used
+   * to give someone who's ended up standing in water (see the water check
+   * in update()) an actual place to swim to, not just a random direction.
+   * Square rings rather than a true Euclidean expanding circle since it's
+   * cheap and "nearest" only needs to be approximately right here, not
+   * exact. */
+  private static int[] findNearestLand(WorldGrid grid, double x, double z) {
+    int cx = (int) Math.floor(x), cz = (int) Math.floor(z);
+    if (grid.inBounds(cx, cz) && grid.terrain[grid.idx(cx, cz)] != Config.WATER) return new int[]{cx, cz};
+    for (int r = 1; r <= 60; r++) {
+      for (int dz = -r; dz <= r; dz++) {
+        for (int dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue; // only this ring's own edge
+          int nx = cx + dx, nz = cz + dz;
+          if (!grid.inBounds(nx, nz)) continue;
+          if (grid.terrain[grid.idx(nx, nz)] != Config.WATER) return new int[]{nx, nz};
+        }
+      }
+    }
+    return null;
+  }
+
   private static void pickWanderTarget(WorldGrid grid, Human h) {
     for (int i = 0; i < 5; i++) {
       double nx = h.x + (Math.random() * 2 - 1) * 5;
@@ -310,6 +332,14 @@ public class Population {
    * here, so the wobble shows up as actual footpath curvature, not just
    * a cosmetic shimmy layered on top of straight-line movement. */
   private static double moveToward(WorldGrid grid, Human h, double speed) {
+    return moveToward(grid, h, speed, false);
+  }
+
+  // ignoreWater lets someone already standing in water (see the swim
+  // recovery block in update()) actually cross it to reach the shore -
+  // the normal passable() check would otherwise refuse every step and
+  // strand them exactly where they are.
+  private static double moveToward(WorldGrid grid, Human h, double speed, boolean ignoreWater) {
     double dx = h.targetX - h.x, dz = h.targetZ - h.z;
     double dist = Math.hypot(dx, dz);
     if (dist < 0.05) return dist;
@@ -329,7 +359,7 @@ public class Population {
     double step = Math.min(dist, speed);
     double nx = h.x + Math.sin(moveAngle) * step;
     double nz = h.z + Math.cos(moveAngle) * step;
-    if (passable(grid, nx, nz)) { h.x = nx; h.z = nz; }
+    if (ignoreWater || passable(grid, nx, nz)) { h.x = nx; h.z = nz; }
     else pickWanderTarget(grid, h);
     return dist;
   }
@@ -502,6 +532,27 @@ public class Population {
       if (h.nationId >= 0) applyLivingCost(state, h);
 
       int ci = grid.idx(clampCoord((int) Math.floor(h.x), grid.cols), clampCoord((int) Math.floor(h.z), grid.rows));
+
+      // ordinary movement (see moveToward's passable() check) already
+      // refuses to step INTO water, but that's not the only way someone
+      // can end up standing in it - a dig/terraform edit can flood the
+      // very ground they're standing on out from under them (see
+      // VoxelWorld.flowWaterInto), or they could be dropped there by
+      // some other one-off effect. Whatever the cause, once actually in
+      // water they don't just stand there or resume whatever they were
+      // doing - they swim for the nearest dry land, overriding every
+      // other behavior until they actually reach it.
+      if (grid.terrain[ci] == Config.WATER) {
+        if (!"swim".equals(h.state)) {
+          h.state = "swim";
+          int[] land = findNearestLand(grid, h.x, h.z);
+          if (land != null) { h.targetX = land[0] + 0.5; h.targetZ = land[1] + 0.5; }
+        }
+        moveToward(grid, h, SPEED * 0.75, true);
+        next.add(h);
+        continue;
+      }
+
       if (grid.burning[ci] && Math.random() < 0.35) { DeathStats.burn++; continue; } // burned to death
 
       if (grid.burning[ci] || nearbyFire(grid, h.x, h.z)) {
@@ -676,7 +727,8 @@ public class Population {
     if (h.isolationTicks > ISOLATION_THRESHOLD && trulyIsolated && Math.random() < 0.03
         && state.nations.size() < Config.MAX_NATIONS) {
       int gx = (int) Math.floor(h.x), gz = (int) Math.floor(h.z);
-      boolean spotOk = grid.inBounds(gx, gz) && grid.isBuildable(grid.idx(gx, gz))
+      boolean spotOk = grid.inBounds(gx, gz) && !com.worldbox.world.WorldGen.tooCloseToWorldEdge(grid, gx, gz)
+          && grid.isBuildable(grid.idx(gx, gz))
           && grid.slopeAt(gx, gz) < 1.4 && grid.settlementAt[grid.idx(gx, gz)] < 0;
       if (!spotOk) {
         com.worldbox.world.WorldGen.Spot spot = com.worldbox.world.WorldGen.findLandSpot(grid, h.x, h.z, 4, state.rng);

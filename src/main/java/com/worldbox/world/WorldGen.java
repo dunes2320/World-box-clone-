@@ -284,6 +284,21 @@ public class WorldGen {
 
   public static class Spot { public final int x, y; public Spot(int x, int y) { this.x = x; this.y = y; } }
 
+  /** A settlement's suburb spiral, claimed-territory radius and roads all
+   * grow outward from its center - founding one within this many cells of
+   * the actual world edge left its far side permanently cut off against
+   * the map boundary (empty void where the ocean/world just stops), and
+   * read as "a village built at the edge of the world" rather than a real
+   * settlement in the middle of usable land. A world border, in effect:
+   * no settlement (new nation, or a colony/expansion) ever founds this
+   * close to the edge in the first place. */
+  private static final int WORLD_EDGE_MARGIN = 20;
+
+  public static boolean tooCloseToWorldEdge(WorldGrid grid, int x, int y) {
+    return x < WORLD_EDGE_MARGIN || y < WORLD_EDGE_MARGIN
+        || x >= grid.cols - WORLD_EDGE_MARGIN || y >= grid.rows - WORLD_EDGE_MARGIN;
+  }
+
   /** Finds a reasonable buildable land spot within `radius` cells of
    * (cx, cy) that also has enough nearby grass to actually farm - used for
    * settlement founding and colonization. Without the farmland check a
@@ -293,7 +308,7 @@ public class WorldGen {
     for (int tries = 0; tries < 40; tries++) {
       int x = (int) Math.round(cx + (rng.next() * 2 - 1) * radius);
       int y = (int) Math.round(cy + (rng.next() * 2 - 1) * radius);
-      if (!grid.inBounds(x, y)) continue;
+      if (!grid.inBounds(x, y) || tooCloseToWorldEdge(grid, x, y)) continue;
       int i = grid.idx(x, y);
       if (grid.isBuildable(i) && grid.slopeAt(x, y) < 1.2 && hasNearbyGrass(grid, x, y, 4, 6)) return new Spot(x, y);
     }
