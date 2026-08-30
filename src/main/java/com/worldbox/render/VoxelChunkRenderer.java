@@ -117,16 +117,14 @@ public class VoxelChunkRenderer {
     waterMat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
     // a real (if cheap - see TerrainTextures.buildSkyCubeMap) sky
     // reflection instead of water just being lit with no reflection at
-    // all. bias/scale/power (0.85 scale at power 2) first tried here
-    // washed the whole surface out to near-white - this camera looks
-    // down at the world from a fairly shallow angle most of the time, so
-    // "grazing angle" was most of what's actually on screen, not a rare
-    // edge case. A much smaller scale and a steeper power curve keeps the
-    // reflection concentrated at genuinely near-grazing angles, reading
-    // as a subtle sky sheen rather than overpowering the water's own
-    // blue color.
+    // all - but a subtle glossy sheen, not a mirror. 0.85 scale at power 2
+    // washed the whole surface white; 0.22 at power 4.5 still read as a
+    // clear mirrored sky image rather than a soft gloss. Scale down again
+    // to where the reflection only shows as a faint brightening/sky tint
+    // at real grazing angles - the same way a glossy (not mirror-finish)
+    // surface behaves - rather than a legible reflected image.
     waterMat.setTexture("EnvMap", TerrainTextures.buildSkyCubeMap());
-    waterMat.setVector3("FresnelParams", new com.jme3.math.Vector3f(0.02f, 0.22f, 4.5f));
+    waterMat.setVector3("FresnelParams", new com.jme3.math.Vector3f(0.01f, 0.09f, 5.5f));
 
     for (int ci = 0; ci < n; ci++) {
       Geometry sg = new Geometry("chunk_solid_" + ci, new Mesh());
