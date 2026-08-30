@@ -662,21 +662,68 @@ public class Nation implements java.io.Serializable {
     drawRoad(grid, cx, cz, fx, cz);
   }
 
+  /** A deterministic perpendicular bend offset for one road endpoint pair -
+   * the same "hash off fixed inputs" trick Settlement.borderNoise already
+   * uses for organic-looking territory borders, so the same world always
+   * grows the exact same road shape. */
+  private static double roadBend(int x0, int z0, int x1, int z1) {
+    int h = x0 * 374761393 + z0 * 668265263 + x1 * 2147483647 + z1 * 1274126177;
+    h = (h ^ (h >>> 13)) * 668265263;
+    h = h ^ (h >>> 16);
+    return (h & 0xFFFF) / 65535.0 - 0.5;
+  }
+
+  /** A single perfectly straight Bresenham line reads as a rigid staircase
+   * on anything but a pure 45-degree/axis-aligned run (Bresenham steps
+   * whole cells at a time, which shows as a jagged zigzag on an in-between
+   * angle) - real roads curve. Recursively bends a long road through a
+   * deterministically offset midpoint (see roadBend) into up to 4 shorter,
+   * gently angled segments instead of one long rigid diagonal; a short
+   * spur (already close to its target, or a deep recursion leaf) stays a
+   * plain straight segment, since there's no room for a curve to read on
+   * a run that short anyway. */
   private static void drawRoad(WorldGrid grid, int x0, int z0, int x1, int z1) {
+    drawRoad(grid, x0, z0, x1, z1, 2);
+  }
+
+  private static void drawRoad(WorldGrid grid, int x0, int z0, int x1, int z1, int bendsLeft) {
+    double dist = Math.hypot(x1 - x0, z1 - z0);
+    if (bendsLeft > 0 && dist > 7) {
+      double mx = (x0 + x1) / 2.0, mz = (z0 + z1) / 2.0;
+      double px = -(z1 - z0) / dist, pz = (x1 - x0) / dist; // unit perpendicular
+      double bend = roadBend(x0, z0, x1, z1) * Math.min(dist * 0.3, 5.0);
+      int bx = (int) Math.round(mx + px * bend), bz = (int) Math.round(mz + pz * bend);
+      drawRoad(grid, x0, z0, bx, bz, bendsLeft - 1);
+      drawRoad(grid, bx, bz, x1, z1, bendsLeft - 1);
+      return;
+    }
+    drawRoadSegment(grid, x0, z0, x1, z1);
+  }
+
+  private static void drawRoadSegment(WorldGrid grid, int x0, int z0, int x1, int z1) {
     int dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
     int sx = x0 < x1 ? 1 : -1, sz = z0 < z1 ? 1 : -1;
+    // widened to 2 cells (the dominant axis of travel gets a neighbor
+    // marked alongside it) - a single-cell-wide line makes Bresenham's
+    // stairstep turns read as sharp jagged pixel steps; a real 2-wide
+    // swath reads as a laid path even where the line has to step
+    boolean wideOnZ = dx >= dz;
     int err = dx - dz;
     int x = x0, z = z0;
     while (true) {
-      if (grid.inBounds(x, z)) {
-        int i = grid.idx(x, z);
-        if (grid.terrain[i] != Config.WATER) grid.roadPlanned[i] = true;
-      }
+      markRoadCell(grid, x, z);
+      markRoadCell(grid, wideOnZ ? x : x + 1, wideOnZ ? z + 1 : z);
       if (x == x1 && z == z1) break;
       int e2 = 2 * err;
       if (e2 > -dz) { err -= dz; x += sx; }
       if (e2 < dx) { err += dx; z += sz; }
     }
+  }
+
+  private static void markRoadCell(WorldGrid grid, int x, int z) {
+    if (!grid.inBounds(x, z)) return;
+    int i = grid.idx(x, z);
+    if (grid.terrain[i] != Config.WATER) grid.roadPlanned[i] = true;
   }
 
   public static void transferSettlement(GameState state, Settlement settlement, int newNationId) {

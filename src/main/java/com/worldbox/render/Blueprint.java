@@ -27,11 +27,13 @@ import java.util.Set;
  * prefix of the list and get a sensible "still rising" partial structure
  * - see buildStageMesh, and Building.progress/integrity in the sim layer. */
 public class Blueprint {
-  /** WALL/ROOF/FOUNDATION/TRIM are rendered as separate meshes, each with
-   * its own material (see EntityRenderer) - FOUNDATION is the cobblestone
-   * plinth + chimney stack, TRIM is the corner posts and window/door
-   * framing (log on a house, quartz on a civic building). */
-  public enum Block { WALL, ROOF, FOUNDATION, TRIM }
+  /** Each is rendered as its own separate mesh with its own material (see
+   * EntityRenderer) - FOUNDATION is the cobblestone plinth + chimney
+   * stack, TRIM is the corner posts and window/door framing (log on a
+   * house, quartz on a civic building), DOOR is a real paneled door block
+   * filling the doorway, and WINDOW is real (transparent) glass filling a
+   * window opening - not bare gaps either one used to be. */
+  public enum Block { WALL, ROOF, FOUNDATION, TRIM, DOOR, WINDOW }
 
   /** World-unit size of one block cube - matches VoxelWorld.FINE's terrain
    * block size (1/FINE) so a building's own blocks read as the same
@@ -66,6 +68,32 @@ public class Blueprint {
    * @param corners        a single tower block poking up at each of the 4
    *                       corners, above the roof peak - a civic/grand cue
    */
+  /** Evenly spaced interior positions along a wall of this length, never
+   * right in a corner (that's where TRIM's own corner post already goes),
+   * one in the middle plus more every 3 cells outward as the wall gets
+   * long enough to fit them - a short wall gets exactly one window, a long
+   * one gets several real repeating windows instead of a single opening
+   * lost in a lot of blank wall. */
+  private static Set<Integer> windowPositions(int length) {
+    Set<Integer> pos = new java.util.LinkedHashSet<>();
+    int lo = 1, hi = length - 2;
+    if (lo > hi) return pos;
+    int mid = (lo + hi) / 2;
+    pos.add(mid);
+    for (int d = 3; mid - d >= lo; d += 3) pos.add(mid - d);
+    for (int d = 3; mid + d <= hi; d += 3) pos.add(mid + d);
+    return pos;
+  }
+
+  /** Same as windowPositions, but drops anything within excludeRadius of
+   * excludeCenter - used for the door wall so a window never lands on top
+   * of (or immediately beside) the doorway itself. */
+  private static Set<Integer> windowPositionsExcluding(int length, int excludeCenter, int excludeRadius) {
+    Set<Integer> pos = windowPositions(length);
+    pos.removeIf(x -> Math.abs(x - excludeCenter) <= excludeRadius);
+    return pos;
+  }
+
   public static Blueprint building(int width, int depth, int wallHeight, boolean corners) {
     List<Cell> cells = new ArrayList<>();
     int doorX = width / 2;
@@ -79,12 +107,25 @@ public class Blueprint {
       for (int x = -1; x <= width; x++) cells.add(new Cell(x, 0, z, Block.FOUNDATION));
     }
 
-    // a real house needs to actually look like one at a glance - windows
-    // (small gaps in the two side walls, not the door wall) break up an
-    // otherwise solid plank/brick box the same way a door does, and both
-    // openings get a TRIM "frame" cell instead of just a bare gap
+    // a real house needs to actually look like one at a glance, not one
+    // lone window per side - real windows repeat along a wall's length,
+    // and a genuinely two-story building (a tall wallHeight) has a
+    // separate row for each floor, not one row jammed up under the eave.
+    // windowPositions spaces them out along whichever wall they sit on,
+    // symmetric and never right in a corner; door/back/front walls each
+    // get their own set so the door wall's windows never land on top of
+    // the doorway itself. Both openings are real blocks now (Block.DOOR/
+    // Block.WINDOW), not bare gaps - see EntityRenderer for their own
+    // dedicated door/glass textures and materials.
     boolean windows = wallHeight >= 2 && depth >= 3;
-    int windowY = wallHeight, windowZ = depth / 2;
+    Set<Integer> windowYs = new java.util.LinkedHashSet<>();
+    if (windows) {
+      windowYs.add(wallHeight);
+      if (wallHeight >= 6) windowYs.add(Math.max(3, wallHeight / 2)); // a real second-floor row on taller builds
+    }
+    Set<Integer> sideWinZ = windows ? windowPositions(depth) : java.util.Collections.emptySet();
+    Set<Integer> frontWinX = windows ? windowPositionsExcluding(width, doorX, 1) : java.util.Collections.emptySet();
+    Set<Integer> backWinX = windows ? windowPositions(width) : java.util.Collections.emptySet();
     for (int y = 1; y <= wallHeight; y++) {
       for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
@@ -93,9 +134,16 @@ public class Blueprint {
           boolean corner = (x == 0 || x == width - 1) && (z == 0 || z == depth - 1);
           boolean isDoor = y == 1 && z == depth - 1 && x == doorX;
           boolean isDoorFrame = z == depth - 1 && !corner && (x == doorX - 1 || x == doorX + 1);
-          boolean isWindow = windows && y == windowY && z == windowZ && (x == 0 || x == width - 1);
-          boolean isWindowFrame = windows && y == windowY - 1 && z == windowZ && (x == 0 || x == width - 1);
-          if (isDoor || isWindow) continue; // the actual openings
+          boolean isSideWindow = windowYs.contains(y) && (x == 0 || x == width - 1) && sideWinZ.contains(z);
+          boolean isSideWindowFrame = windowYs.contains(y + 1) && (x == 0 || x == width - 1) && sideWinZ.contains(z);
+          boolean isFrontWindow = windowYs.contains(y) && z == depth - 1 && frontWinX.contains(x);
+          boolean isFrontWindowFrame = windowYs.contains(y + 1) && z == depth - 1 && frontWinX.contains(x);
+          boolean isBackWindow = windowYs.contains(y) && z == 0 && backWinX.contains(x);
+          boolean isBackWindowFrame = windowYs.contains(y + 1) && z == 0 && backWinX.contains(x);
+          boolean isWindow = isSideWindow || isFrontWindow || isBackWindow;
+          boolean isWindowFrame = isSideWindowFrame || isFrontWindowFrame || isBackWindowFrame;
+          if (isDoor) { cells.add(new Cell(x, y, z, Block.DOOR)); continue; }
+          if (isWindow) { cells.add(new Cell(x, y, z, Block.WINDOW)); continue; }
           // corner posts (like real log corner framing) and the trim
           // bordering each opening read as a deliberate frame rather than
           // one flat wall material everywhere

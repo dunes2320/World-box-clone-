@@ -556,6 +556,11 @@ public class EntityRenderer {
     // wall+roof box
     com.jme3.texture.Texture2D cobbleTex = TerrainTextures.buildCobbleTexture();
     com.jme3.texture.Texture2D logTex = TerrainTextures.buildLogTexture();
+    // a real paneled door and real (transparent) window glass, filling
+    // what used to be bare gaps in the wall - see Blueprint.Block's own
+    // comment
+    com.jme3.texture.Texture2D doorTex = TerrainTextures.buildDoorTexture();
+    com.jme3.texture.Texture2D glassTex = TerrainTextures.buildGlassTexture();
 
     // real houses/mansions: one Geometry per (type, material, construction
     // stage) - see the STAGE_COUNT/MATERIAL_COUNT fields' own comment. The
@@ -575,10 +580,18 @@ public class EntityRenderer {
         com.jme3.texture.Texture2D tex = bt == Blueprint.Block.ROOF ? roofTex
             : bt == Blueprint.Block.FOUNDATION ? cobbleTex
             : bt == Blueprint.Block.TRIM ? logTex
+            : bt == Blueprint.Block.DOOR ? doorTex
+            : bt == Blueprint.Block.WINDOW ? glassTex
             : buildingWallTex[t];
+        // window glass is the one building material that's actually
+        // see-through - everything else stays the normal opaque textured
+        // material every other block already used
+        Material mat = bt == Blueprint.Block.WINDOW ? texturedTransparentVertexColorMaterial(tex)
+            : texturedVertexColorMaterial(tex);
         for (int s = 0; s < STAGE_COUNT; s++) {
           Geometry g = new Geometry("Building" + t + "_" + bt + "_" + s, buildingStage[t][bt.ordinal()][s]);
-          g.setMaterial(texturedVertexColorMaterial(tex));
+          g.setMaterial(mat);
+          if (bt == Blueprint.Block.WINDOW) g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
           g.setCullHint(Spatial.CullHint.Always);
           root.attachChild(g);
           buildingGeom[t][bt.ordinal()][s] = g;
@@ -955,6 +968,21 @@ public class EntityRenderer {
     return mat;
   }
 
+  /** Same idea as texturedVertexColorMaterial, but alpha-blended and drawn
+   * from both sides - real window glass (see Blueprint.Block.WINDOW/
+   * TerrainTextures.buildGlassTexture), the only building material that's
+   * actually meant to be see-through. Same transparency setup the water
+   * material already uses (VoxelChunkRenderer), just as its own small
+   * per-building material instead of one shared across the whole terrain
+   * mesh. */
+  private Material texturedTransparentVertexColorMaterial(com.jme3.texture.Texture2D tex) {
+    Material mat = texturedVertexColorMaterial(tex);
+    mat.setTransparent(true);
+    mat.getAdditionalRenderState().setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+    mat.getAdditionalRenderState().setFaceCullMode(com.jme3.material.RenderState.FaceCullMode.Off);
+    return mat;
+  }
+
   private Material soloColorMaterial(ColorRGBA c) {
     Material mat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     mat.setBoolean("UseMaterialColors", true);
@@ -1225,6 +1253,13 @@ public class EntityRenderer {
             .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
       }
       placements[typeIdx][Blueprint.Block.TRIM.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      // door and window glass are real blocks now too (see Blueprint.
+      // Block's own comment) - each reads truest lit by its own dedicated
+      // door/glass texture, same as the roof/foundation/trim above
+      placements[typeIdx][Blueprint.Block.DOOR.ordinal()][stage]
+          .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
+      placements[typeIdx][Blueprint.Block.WINDOW.ordinal()][stage]
           .add(new PropBatcher.Placement((float) b.x, hh, (float) b.z, angle, 1f, ColorRGBA.White));
       rendered++;
     }

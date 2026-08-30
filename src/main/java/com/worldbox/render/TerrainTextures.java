@@ -192,6 +192,53 @@ public final class TerrainTextures {
     return toTexture(img);
   }
 
+  /** A standalone door texture - a darker, richer wood tone than the wall
+   * planks around it (so a doorway reads as an actual closed door instead
+   * of just another wall panel), with two raised-look inset rectangles
+   * (real doors are paneled, not one flat slab) and a small bright
+   * doorknob dot. */
+  public static Texture2D buildDoorTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int base = 0x5A3A22, dark = 0x432A18, light = 0x6B4A2E, panel = 0x4E301C;
+    for (int y = 0; y < TILE; y++) {
+      for (int x = 0; x < TILE; x++) {
+        float t = noise01(x, y, 0xA31);
+        int c = t < 0.5f ? mix(base, dark, base, t * 2f) : mix(base, base, light, (t - 0.5f) * 2f);
+        // two inset panels (upper/lower), each with a dark border - the
+        // "raised frame" look of a real paneled door
+        boolean upperPanel = x >= 3 && x <= 12 && y >= 2 && y <= 6;
+        boolean lowerPanel = x >= 3 && x <= 12 && y >= 9 && y <= 13;
+        boolean panelBorder = (upperPanel && (x == 3 || x == 12 || y == 2 || y == 6))
+            || (lowerPanel && (x == 3 || x == 12 || y == 9 || y == 13));
+        if (panelBorder) c = dark;
+        else if (upperPanel || lowerPanel) c = panel;
+        img.setRGB(x, y, c);
+      }
+    }
+    // doorknob
+    img.setRGB(11, 8, 0xD9C25A);
+    return toTexture(img);
+  }
+
+  /** A standalone window-glass texture - pale translucent blue-white panes
+   * split by a dark wooden cross mullion, like a real four-pane window.
+   * Meant to be used on a transparent material (see EntityRenderer), so
+   * alpha here actually matters, not just RGB. */
+  public static Texture2D buildGlassTexture() {
+    BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
+    int pane = 0xBFE0EE, paneLight = 0xD8EEF6, mullion = 0x5A3A22;
+    int alpha = 210;
+    for (int y = 0; y < TILE; y++) {
+      for (int x = 0; x < TILE; x++) {
+        boolean crossbar = x == 7 || x == 8 || y == 7 || y == 8;
+        int rgb = crossbar ? mullion : (noise01(x, y, 0xA41) < 0.5f ? pane : paneLight);
+        int a = crossbar ? 255 : alpha;
+        img.setRGB(x, y, (a << 24) | rgb);
+      }
+    }
+    return toTexture(img);
+  }
+
   private static Texture2D toTexture(BufferedImage img) {
     Image jmeImage = new AWTLoader().load(img, false);
     Texture2D tex = new Texture2D(jmeImage);

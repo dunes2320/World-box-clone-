@@ -189,15 +189,21 @@ public class Settlement implements java.io.Serializable {
    * a house (unlike a settlement's abstract claimed territory, which
    * simply skips water cells entirely) used to get placed with no terrain
    * check at all, so a coastal town's spiral could - and did - plant
-   * houses out on open water. Gives up after a generous number of rings
-   * (a settlement boxed in by water on every side at every ring tried is
-   * a real, if rare, possibility) rather than looping forever. */
+   * houses out on open water. Mountains (terrain==STONE) are excluded the
+   * same way water is - not just because a house sitting on bare rock
+   * looks wrong, but because terraformFootprint forcing a flat pad at a
+   * mountainside anchor's height bulldozes an artificial stone plateau/
+   * column straight out of the slope, which is exactly what was reading
+   * as a "random pillar" jutting out of a hillside. Gives up after a
+   * generous number of rings (a settlement boxed in by water/mountains on
+   * every side at every ring tried is a real, if rare, possibility)
+   * rather than looping forever. */
   private static double[] findBuildingSpot(GameState state, Settlement s) {
     WorldGrid grid = state.grid;
     for (int attempts = 0; attempts < 60; attempts++) {
       double[] spot = housePosition(s, s.houseSpiralIndex++);
       int gx = (int) Math.floor(spot[0]), gz = (int) Math.floor(spot[1]);
-      if (!grid.inBounds(gx, gz) || grid.terrain[grid.idx(gx, gz)] != Config.WATER) return spot;
+      if (!grid.inBounds(gx, gz) || grid.isBuildable(grid.idx(gx, gz))) return spot;
     }
     return null;
   }
@@ -269,7 +275,12 @@ public class Settlement implements java.io.Serializable {
         int x = anchorX + dx, z = anchorZ + dz;
         if (!grid.inBounds(x, z)) continue;
         int i = grid.idx(x, z);
-        if (grid.terrain[i] == Config.WATER) continue;
+        // mountains are never terraformed, same as water - forcing a flat
+        // pad at the anchor's height across a real slope would bulldoze an
+        // artificial stone plateau/column straight out of the mountainside
+        // (see findBuildingSpot's own comment - this is what was reading
+        // as a "random pillar" jutting out of a hillside)
+        if (!grid.isBuildable(i)) continue;
         byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
         for (int fdz = 0; fdz < VoxelWorld.FINE; fdz++) {
           for (int fdx = 0; fdx < VoxelWorld.FINE; fdx++) {
@@ -315,7 +326,11 @@ public class Settlement implements java.io.Serializable {
         int x = settlement.x + dx;
         if (x < 0 || x >= grid.cols || Math.hypot(dx, dz) > radius) continue;
         int i = grid.idx(x, z);
-        if (grid.ownerNation[i] != settlement.nationId || grid.terrain[i] == Config.WATER) continue;
+        // mountains stay wild even inside a nation's own borders - a
+        // nation can own a mountain (territory claiming is unrelated to
+        // buildability), it just never gets graded/decluttered like the
+        // rest of its land does
+        if (grid.ownerNation[i] != settlement.nationId || !grid.isBuildable(i)) continue;
         int targetTop = Math.round(grid.height[i] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
         byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
         boolean changed = false;
