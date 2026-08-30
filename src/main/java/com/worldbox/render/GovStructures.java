@@ -23,4 +23,19 @@ public final class GovStructures {
     for (Blueprint bp : BLUEPRINTS) m = Math.max(m, bp.footprintHalfExtent());
     return m;
   }
+
+  /** Union of every tier's real footprint columns (see Blueprint.
+   * footprintColumns) - covers whatever the settlement's marker could
+   * ever grow into, but still hugs each tier's actual shape instead of a
+   * single circle sized off the largest tier's furthest point. */
+  public static java.util.List<float[]> maxFootprintColumns() {
+    java.util.Map<Long, float[]> merged = new java.util.LinkedHashMap<>();
+    for (Blueprint bp : BLUEPRINTS) {
+      for (float[] col : bp.footprintColumns()) {
+        long key = ((long) Math.round(col[0] * 100) << 32) | (Math.round(col[1] * 100) & 0xFFFFFFFFL);
+        merged.putIfAbsent(key, col);
+      }
+    }
+    return new java.util.ArrayList<>(merged.values());
+  }
 }

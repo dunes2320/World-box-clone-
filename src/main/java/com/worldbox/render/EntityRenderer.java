@@ -320,17 +320,19 @@ public class EntityRenderer {
     // under 1 - none of it read as one consistent world. A person is now
     // a believable ~0.8 of a block tall, and every other prop is scaled
     // relative to that, not to its own disconnected old number.
-    // a cluster of offset cubes, not two smoothly tapered boxes - the
-    // player explicitly asked for trees that read as voxel/block
-    // construction the way Minecraft's own blocky leaf clusters do,
-    // rather than a rounded canopy silhouette
+    // a symmetric 3-layer stepped pyramid centered on the trunk - a real
+    // Minecraft oak canopy is a wide, square-ish blocky mass (much wider
+    // than the trunk it sits on) that steps in slightly at each layer
+    // going up, not an irregular cluster of small boxes scattered off to
+    // one side. The previous version - four asymmetric, oddly-offset
+    // boxes - read as a lumpy organic blob rather than that unmistakable
+    // blocky silhouette. No branch geometry - the canopy shape alone is
+    // what needs to read as "Minecraft tree" at a glance.
     treeCanopyTemplate = MeshUtil.mergeMeshes(
         MeshUtil.mergeMeshes(
-            MeshUtil.translatedCopy(new Box(0.42f, 0.36f, 0.42f), 0, 0.36f, 0),
-            MeshUtil.translatedCopy(new Box(0.24f, 0.22f, 0.24f), 0.18f, 0.62f, 0.1f)),
-        MeshUtil.mergeMeshes(
-            MeshUtil.translatedCopy(new Box(0.22f, 0.2f, 0.22f), -0.16f, 0.58f, -0.14f),
-            MeshUtil.translatedCopy(new Box(0.28f, 0.2f, 0.28f), 0, 0.82f, 0)));
+            MeshUtil.translatedCopy(new Box(0.50f, 0.22f, 0.50f), 0, 0.10f, 0),
+            MeshUtil.translatedCopy(new Box(0.40f, 0.20f, 0.40f), 0, 0.52f, 0)),
+        MeshUtil.translatedCopy(new Box(0.26f, 0.16f, 0.26f), 0, 0.88f, 0));
     treeTrunkTemplate = new Box(0.15f, 0.42f, 0.15f);
     // iron/gold ore used to be a single smooth bipyramid "gem" - reads as
     // a polished blob rather than raw mineral. An angular jutting crystal

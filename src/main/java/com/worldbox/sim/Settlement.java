@@ -100,8 +100,8 @@ public class Settlement implements java.io.Serializable {
     for (int i = 0; i < startPop; i++) {
       if (state.humans.size() >= Config.MAX_HUMANS) break;
       double ang = (i / (double) startPop) * Math.PI * 2;
-      double hx = x + 0.5 + Math.cos(ang) * 1.5;
-      double hz = z + 0.5 + Math.sin(ang) * 1.5;
+      double hx = x + 0.5 + Math.cos(ang) * 2.4;
+      double hz = z + 0.5 + Math.sin(ang) * 2.4;
       Human founder = Population.createAdult(hx, hz, nationId, settlement.id);
       // a fresh settlement's starting housingStock (5 houses, 20 capacity)
       // comfortably covers its 5 founders - they move into real houses on
@@ -118,7 +118,7 @@ public class Settlement implements java.io.Serializable {
     // would land on ground that was only ever leveled for the small
     // starting hut, reading as the exact same floating/clipping bug a
     // house's own lot grading fixes.
-    terraformFootprint(state, x + 0.5, z + 0.5, GovStructures.maxFootprintHalfExtent());
+    terraformFootprint(state, x + 0.5, z + 0.5, GovStructures.maxFootprintColumns());
 
     // a fresh settlement's starting houses each rise from bare foundation
     // the same visible, block-by-block way organic growth does (see
@@ -237,7 +237,7 @@ public class Settlement implements java.io.Serializable {
     // free-standing chimney, which sits well outside the wall footprint
     // proper and used to be left standing on unleveled ground, reading as
     // a small detached pillar next to an otherwise flush house.
-    b.hasFoundation = terraformFootprint(state, spot[0], spot[1], HouseVariants.blueprintFor(type).footprintHalfExtent());
+    b.hasFoundation = terraformFootprint(state, spot[0], spot[1], HouseVariants.blueprintFor(type).footprintColumns());
   }
 
   /** How many extra coarse cells past the flat core taper back down/up to
@@ -248,46 +248,61 @@ public class Settlement implements java.io.Serializable {
    * taken out of the land". */
   private static final int TERRAFORM_TAPER = 3;
 
-  /** Flattens the ground under a new building's footprint (its real,
-   * per-variant bounding box - see HouseVariants/Blueprint.
-   * footprintHalfExtent, which covers the free-standing chimney and any
-   * corner towers, not just the wall footprint) to the elevation at its
-   * own anchor cell - genuinely flat, every real FINE sub-column set to
-   * the exact same target height (see VoxelWorld.levelColumn), not just
+  /** Flattens the ground under a new building's real footprint - the
+   * actual set of (x, z) columns its blueprint occupies (see Blueprint.
+   * footprintColumns: the foundation slab and the chimney's own separate
+   * column), not a circle sized off whichever single point sits furthest
+   * from center. A circle that size (almost always driven by the
+   * chimney, several world units out) wastefully flattened a lot of
+   * empty ground on the side of the building away from the chimney too -
+   * a much bigger, unnaturally flat area than the building actually
+   * needs, which is what read as an oversized "chunk taken out of the
+   * land" around every house. Hugging the real shape instead means the
+   * flattened area is basically just the building's own footprint plus a
+   * small margin.
+   *
+   * Every real FINE sub-column under the true footprint gets set to the
+   * exact same target height (see VoxelWorld.levelColumn), not just
    * shifted by a uniform delta from wherever it already happened to be
    * (which - since generation's per-fine-column jitter means neighboring
    * columns don't necessarily start at the same height - left the
    * "leveled" site with the same bumps it started with, just at a
    * different average elevation, which is what was still reading as
-   * buildings floating/clipping into the ground). Only the core under the
-   * building itself is forced dead flat, though - beyond that, a TAPER
-   * ring (see TERRAFORM_TAPER) blends the target height back down/up to
-   * each cell's own natural height the further out it sits, so the pad
-   * reads as a graded lot with a gentle slope at its edge instead of a
-   * flat-topped block dropped onto the landscape. Not a fake cosmetic
+   * buildings floating/clipping into the ground). Beyond that core, a
+   * TAPER ring (see TERRAFORM_TAPER) blends the target height back down/
+   * up to each cell's own natural height the further out it sits, so the
+   * pad reads as a graded lot with a gentle slope at its edge instead of
+   * a flat-topped block dropped onto the landscape. Not a fake cosmetic
    * flourish - a real change to the voxel terrain the building then sits
-   * flush on. Never touches a cell that was already water (findBuildingSpot
-   * only ever picks a dry anchor, but a low-lying neighbor could still be
-   * a real pond that shouldn't get paved over).
+   * flush on. Never touches a cell that was already water or a mountain
+   * (findBuildingSpot only ever picks a dry, buildable anchor, but a
+   * low-lying/mountainous neighbor could still be real terrain that
+   * shouldn't get paved over - see isBuildable below).
    *
    * @return true if any column actually needed to move to reach the
    * target height - ground that was already flat here needs no
    * cobblestone plinth poured around the building (see Building.
    * hasFoundation/EntityRenderer.updateHouses), same as a real house built
    * on already-level ground getting no raised curb. */
-  private static boolean terraformFootprint(GameState state, double cx, double cz, double halfExtentWorld) {
+  private static boolean terraformFootprint(GameState state, double cx, double cz, List<float[]> footprintColumns) {
     WorldGrid grid = state.grid;
     VoxelWorld voxels = state.voxels;
     int anchorX = (int) Math.floor(cx), anchorZ = (int) Math.floor(cz);
     if (!grid.inBounds(anchorX, anchorZ)) return true;
     int targetTop = Math.round(grid.height[grid.idx(anchorX, anchorZ)] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
-    int coreHalf = (int) Math.ceil(halfExtentWorld) + 1;
-    int half = coreHalf + TERRAFORM_TAPER;
+
+    float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+    for (float[] col : footprintColumns) {
+      minX = Math.min(minX, col[0]); maxX = Math.max(maxX, col[0]);
+      minZ = Math.min(minZ, col[1]); maxZ = Math.max(maxZ, col[1]);
+    }
+    int margin = 1 + TERRAFORM_TAPER;
+    int loDx = (int) Math.floor(minX) - margin, hiDx = (int) Math.ceil(maxX) + margin;
+    int loDz = (int) Math.floor(minZ) - margin, hiDz = (int) Math.ceil(maxZ) + margin;
+
     boolean graded = false;
-    for (int dz = -half; dz <= half; dz++) {
-      for (int dx = -half; dx <= half; dx++) {
-        double dist = Math.hypot(dx, dz);
-        if (dist > half) continue; // a round pad, not a square one - a real graded lot isn't a sharp-cornered box either
+    for (int dz = loDz; dz <= hiDz; dz++) {
+      for (int dx = loDx; dx <= hiDx; dx++) {
         int x = anchorX + dx, z = anchorZ + dz;
         if (!grid.inBounds(x, z)) continue;
         int i = grid.idx(x, z);
@@ -297,20 +312,31 @@ public class Settlement implements java.io.Serializable {
         // (see findBuildingSpot's own comment - this is what was reading
         // as a "random pillar" jutting out of a hillside)
         if (!grid.isBuildable(i)) continue;
+
+        // distance from this cell's own center to the NEAREST real
+        // footprint column - not from the building's overall center -
+        // so the flattened area hugs the building's actual silhouette
+        double cellX = dx + 0.5, cellZ = dz + 0.5;
+        double nearest = Double.MAX_VALUE;
+        for (float[] col : footprintColumns) {
+          double d = Math.hypot(cellX - col[0], cellZ - col[1]);
+          if (d < nearest) nearest = d;
+        }
+        if (nearest > 1.0 + TERRAFORM_TAPER) continue; // fully natural out here - leave it alone
+
         byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
-        double taperDist = dist - coreHalf;
-        // taperDist <= 0: still inside the flat core, dead flush with
-        // targetTop, same as before. Beyond that, blend toward this
-        // cell's OWN natural height (read before this cell is touched) -
-        // 100% target right at the core's edge, fading to 0% (fully
-        // natural, untouched) by the outer taper ring.
         int cellTarget;
-        if (taperDist <= 0) {
+        if (nearest <= 1.0) {
+          // right under (or one cell from) some real part of the
+          // building - dead flush with targetTop, same as before
           cellTarget = targetTop;
           if (voxels.columnTopY(x * VoxelWorld.FINE, z * VoxelWorld.FINE) != targetTop) graded = true;
         } else {
-          double t = Math.max(0, 1.0 - taperDist / TERRAFORM_TAPER);
-          if (t <= 0) continue; // fully natural out here - leave it alone
+          // beyond that: blend toward this cell's OWN natural height
+          // (read before this cell is touched) - 100% target right at
+          // the core's edge, fading to 0% (fully natural) by the outer
+          // taper ring
+          double t = Math.max(0, 1.0 - (nearest - 1.0) / TERRAFORM_TAPER);
           int naturalTop = Math.round(grid.height[i] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
           cellTarget = naturalTop + (int) Math.round((targetTop - naturalTop) * t);
         }

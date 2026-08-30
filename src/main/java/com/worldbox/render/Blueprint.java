@@ -177,16 +177,17 @@ public class Blueprint {
       for (int cx : new int[]{0, width - 1}) for (int cz : new int[]{0, depth - 1}) cells.add(new Cell(cx, y, cz, Block.TRIM));
     }
 
-    // a free-standing chimney stack, offset a full block clear of the
-    // foundation/eave footprint so it never overlaps the roof cells above
-    // (that would double up faces at the same coordinate) - it reads as
-    // built onto the house's exterior wall rather than floating apart
-    // from it since it sits immediately against that footprint's edge
+    // a chimney stack flush against the foundation's own outer edge - one
+    // column further out than the eave/foundation footprint (-1) so it
+    // never overlaps the roof cells above (that would double up faces at
+    // the same coordinate), but no further: touching, not floating a gap
+    // away from the wall. A real chimney is built directly onto an
+    // exterior wall; sitting several blocks clear of the house (the old
+    // -4, a leftover from when this scale was doubled without re-checking
+    // the actual gap it left) read as a small detached pillar standing
+    // apart from the building instead of part of it.
     if (depth >= 2) {
-      // -2 in the old 1-world-unit-per-block scale; blocks are now half
-      // that size, so -4 keeps the chimney the same real-world distance
-      // clear of the foundation/eave footprint
-      int chimX = -4, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
+      int chimX = -2, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
       int chimTop = roofBaseY + lastRoofLayer + 1;
       for (int y = 1; y <= chimTop; y++) cells.add(new Cell(chimX, y, chimZ, Block.FOUNDATION));
     }
@@ -216,6 +217,29 @@ public class Blueprint {
       maxR = Math.max(maxR, Math.abs(c.z - oz));
     }
     return maxR * SCALE + SCALE;
+  }
+
+  /** Every distinct (x, z) column, as a world-space offset from this
+   * blueprint's own center, that any of its cells actually occupies - the
+   * foundation slab and the chimney's own separate column, each a real
+   * spot on the ground something is actually built on. Lets a caller (see
+   * Settlement.terraformFootprint) flatten ground that hugs the building's
+   * true silhouette instead of footprintHalfExtent's single circle sized
+   * off whichever one point (almost always the chimney) sits furthest
+   * from center - a circle that size wastefully flattens a lot of empty
+   * ground on the side of the building away from the chimney too, which
+   * is what was reading as an oversized, unnaturally flat "chunk taken
+   * out of the land" around every house. */
+  public java.util.List<float[]> footprintColumns() {
+    float ox = width / 2f, oz = depth / 2f;
+    Set<Long> seen = new HashSet<>();
+    List<float[]> out = new ArrayList<>();
+    for (Cell c : cells) {
+      long k = key(c.x, 0, c.z);
+      if (!seen.add(k)) continue;
+      out.add(new float[]{(c.x - ox) * SCALE, (c.z - oz) * SCALE});
+    }
+    return out;
   }
 
   private static long key(int x, int y, int z) { return ((long) (x + 32) << 20) | ((long) (y + 32) << 10) | (z + 32); }
