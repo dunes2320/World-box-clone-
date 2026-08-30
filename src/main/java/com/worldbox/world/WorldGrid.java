@@ -40,7 +40,16 @@ public class WorldGrid implements java.io.Serializable {
    * road cells (recomputed alongside territory) - purely a rendering
    * overlay, blended into the terrain's top-face color. */
   public final boolean[] isFarmland = new boolean[n];
+  /** isRoad is the FINAL, fully-built state (tinted + a real PATH surface
+   * block, not just a color wash - see Nation.advanceRoadConstruction);
+   * roadPlanned is the current target network (recomputed from scratch
+   * every updateRoads cycle) and roadProgress (0..1) is how much of that
+   * one cell's construction has actually happened yet - so a road visibly
+   * gets built outward from the settlement over real time instead of the
+   * whole network popping in instantly the moment it's planned. */
   public final boolean[] isRoad = new boolean[n];
+  public final boolean[] roadPlanned = new boolean[n];
+  public final float[] roadProgress = new float[n];
   /** The "claim strength" (population + treasury + military, see
    * Settlement.claimTerritory) that most recently won each cell - lets two
    * overlapping settlements' claims be resolved by which one is actually

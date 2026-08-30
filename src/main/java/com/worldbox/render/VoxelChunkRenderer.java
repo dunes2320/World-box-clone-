@@ -28,6 +28,11 @@ public class VoxelChunkRenderer {
     BLOCK_COLOR.put(VoxelWorld.DIRT, new ColorRGBA(0.478f, 0.357f, 0.227f, 1f));
     BLOCK_COLOR.put(VoxelWorld.SAND, new ColorRGBA(0.851f, 0.773f, 0.541f, 1f));
     BLOCK_COLOR.put(VoxelWorld.STONE, new ColorRGBA(0.545f, 0.561f, 0.588f, 1f));
+    // a built path/road cell - a warm gravel tone (was the old ROAD_TINT
+    // color-wash applied over whatever terrain happened to be there) on
+    // the same fractured-rock stone tile, so a real path visibly reads
+    // as "laid gravel", not just grass painted a different color
+    BLOCK_COLOR.put(VoxelWorld.PATH, new ColorRGBA(0.68f, 0.63f, 0.53f, 1f));
   }
   private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.098f, 0.310f, 0.560f, 0.92f);
   // sky is a pale blue (~0.56, 0.78, 0.91) - the old foam color was close
@@ -47,17 +52,6 @@ public class VoxelChunkRenderer {
   // their tallest, so the snow line has to sit well below that or it
   // would never render on any peak
   private static final int SNOW_LINE = VoxelWorld.Y_OFFSET + 6;
-
-  // How many smaller coplanar quads each visible block face is split into
-  // per side (see MeshBuilder.face) - purely a mesh-generation-time
-  // subdivision, not a change to the underlying sim/VoxelWorld block
-  // grid (which stays at its existing resolution - a prior test found
-  // just 1.5x the grid dimensions collapsing the simulation tick rate).
-  // This is what makes the world actually read as built from many small
-  // blocks instead of big flat 1-unit tiles, at a cost that only scales
-  // with visible surface area (not the full 3D volume), so it's safe to
-  // turn up higher than a literal finer voxel grid would ever be.
-  private static final int SUBDIV = 2;
 
   // Gentler now that real dynamic sun lighting also shades faces by
   // direction - this only needs to add a light baked-AO hint underneath.
@@ -153,15 +147,40 @@ public class VoxelChunkRenderer {
     // in WorldGrid.dirty - fold those into the chunk-dirty set too.
     if (!grid.dirty.isEmpty()) {
       for (int i : grid.dirty) {
-        int x = i % world.cols, z = i / world.cols;
-        world.dirtyChunks.add((z / VoxelWorld.CHUNK_SIZE) * world.chunksX + (x / VoxelWorld.CHUNK_SIZE));
+        // grid.dirty holds COARSE WorldGrid indices - each one covers a
+        // FINE x FINE patch of real fine columns (see VoxelWorld's class
+        // comment), which - since CHUNK_SIZE is a multiple of FINE - can
+        // only ever fall in one or two chunks, so mark both corners.
+        int gx = i % grid.cols, gz = i / grid.cols;
+        int fx0 = gx * VoxelWorld.FINE, fz0 = gz * VoxelWorld.FINE;
+        int fx1 = fx0 + VoxelWorld.FINE - 1, fz1 = fz0 + VoxelWorld.FINE - 1;
+        world.dirtyChunks.add((fz0 / VoxelWorld.CHUNK_SIZE) * world.chunksX + (fx0 / VoxelWorld.CHUNK_SIZE));
+        world.dirtyChunks.add((fz1 / VoxelWorld.CHUNK_SIZE) * world.chunksX + (fx1 / VoxelWorld.CHUNK_SIZE));
       }
       grid.dirty.clear();
     }
     if (world.dirtyChunks.isEmpty()) return;
-    for (int ci : world.dirtyChunks) rebuildChunk(ci);
-    world.dirtyChunks.clear();
+    // rebuilding a chunk got noticeably heavier once each one covers
+    // FINE x FINE as many real blocks (see VoxelWorld's class comment) -
+    // a single frame that happens to dirty a big batch of chunks at once
+    // (a wide dig-tool stroke, a territory shift after a battle, a whole
+    // settlement's worth of new construction) used to rebuild every one
+    // of them synchronously in that one frame, reading as a stutter/hang.
+    // Capping how many rebuild per call spreads that same total work
+    // across the next several frames instead - each one still gets
+    // rebuilt (nothing is ever silently skipped, see the iterator below),
+    // just not all in the same frame. Ordinary single-chunk edits (one
+    // dig, one build) are already well under this cap, so normal play
+    // resolves in the very next frame exactly as before.
+    java.util.Iterator<Integer> it = world.dirtyChunks.iterator();
+    int budget = MAX_CHUNK_REBUILDS_PER_FRAME;
+    while (it.hasNext() && budget-- > 0) {
+      rebuildChunk(it.next());
+      it.remove();
+    }
   }
+
+  private static final int MAX_CHUNK_REBUILDS_PER_FRAME = 24;
 
   public void rebuildAll() {
     for (int ci = 0; ci < solidChunks.length; ci++) rebuildChunk(ci);
@@ -215,8 +234,25 @@ public class VoxelChunkRenderer {
 
     for (int z = z0; z < z1; z++) {
       for (int x = x0; x < x1; x++) {
+        // most of a column's height is fully buried - solid on every
+        // side, above, and below - and can never contribute a visible
+        // face, which got a lot more expensive to keep scanning past
+        // once every WorldGrid cell became FINE x FINE real columns (4x
+        // the columns, each still walking the full MAX_Y range). A real
+        // cliff's exposed side faces never reach deeper than the LOWEST
+        // of this column's own top and its 4 orthogonal neighbors' tops,
+        // so anything further down is guaranteed hidden on every side -
+        // safe to start the scan there instead of from bedrock. Clamped
+        // to never skip past the water line, since columnTopY treats
+        // water as non-solid (a water column's "top" is its seabed), so
+        // this can't accidentally cut a shoreline/underwater column off
+        // before its own water blocks.
+        int loTop = Math.min(world.columnTopY(x, z), Math.min(
+            Math.min(world.columnTopY(x - 1, z), world.columnTopY(x + 1, z)),
+            Math.min(world.columnTopY(x, z - 1), world.columnTopY(x, z + 1))));
+        int scanFrom = Math.max(0, Math.min(loTop - 1, VoxelWorld.WATER_LEVEL - 2));
         boolean shoreline = false;
-        for (int y = 0; y < VoxelWorld.MAX_Y; y++) {
+        for (int y = scanFrom; y < VoxelWorld.MAX_Y; y++) {
           byte b = world.get(x, y, z);
           if (b == VoxelWorld.AIR) continue;
           MeshBuilder mb = b == VoxelWorld.WATER ? water : solid;
@@ -326,6 +362,7 @@ public class VoxelChunkRenderer {
       case VoxelWorld.DIRT: return TerrainTextures.DIRT;
       case VoxelWorld.SAND: return TerrainTextures.SAND;
       case VoxelWorld.STONE: return TerrainTextures.STONE;
+      case VoxelWorld.PATH: return TerrainTextures.STONE;
       default: return TerrainTextures.WATER;
     }
   }
@@ -353,7 +390,10 @@ public class VoxelChunkRenderer {
    * including at the map edge - gets a strong accent (a brightened tint of
    * the nation's own color) so borders are actually visible from a normal
    * play camera distance instead of needing to zoom in to spot them. */
-  private ColorRGBA topColor(int x, int z, ColorRGBA base) {
+  private ColorRGBA topColor(int fx, int fz, ColorRGBA base) {
+    // territory/road/farmland/fire are all COARSE WorldGrid data - a fine
+    // column's tint always comes from whichever coarse cell it sits in
+    int x = fx / VoxelWorld.FINE, z = fz / VoxelWorld.FINE;
     int i = grid.idx(x, z);
     if (!grid.burning[i] && grid.ownerNation[i] < 0 && !grid.isRoad[i] && !grid.isFarmland[i]) return base;
     ColorRGBA c = base.clone();
@@ -444,82 +484,45 @@ public class VoxelChunkRenderer {
     final FloatArr norm = new FloatArr();
     final FloatArr uv = new FloatArr();
     final IntArr idx = new IntArr();
-    // scratch space for the 4 subdivided corners each face-loop iteration
-    // bilerps into - reused across every call instead of allocating 4
-    // new float[3]s per subquad (SUBDIV^2 of those per face, millions
-    // across a full-map rebuild)
-    private final float[] p00 = new float[3], p10 = new float[3], p11 = new float[3], p01 = new float[3];
 
+    /** bx/bz are fine-column coordinates - each one is really only
+     * 1/VoxelWorld.FINE world units wide (that's the actual "smaller
+     * blocks" this whole class exists to deliver now - see VoxelWorld's
+     * class comment), so the quad this emits is scaled down accordingly.
+     * Y stays unscaled - only the horizontal axes are subdivided. */
     void face(int bx, int by, int bz, Face f, ColorRGBA c, float shade, int tile) {
-      float x = bx, y = by - VoxelWorld.Y_OFFSET, z = bz;
+      float s = 1f / VoxelWorld.FINE;
+      float x = bx * s, y = by - VoxelWorld.Y_OFFSET, z = bz * s;
       float[][] verts;
       float nx, ny, nz;
       switch (f) {
-        case TOP: verts = new float[][]{{x, y + 1, z}, {x, y + 1, z + 1}, {x + 1, y + 1, z + 1}, {x + 1, y + 1, z}}; nx = 0; ny = 1; nz = 0; break;
-        case BOTTOM: verts = new float[][]{{x, y, z + 1}, {x, y, z}, {x + 1, y, z}, {x + 1, y, z + 1}}; nx = 0; ny = -1; nz = 0; break;
-        case NORTH: verts = new float[][]{{x + 1, y, z}, {x, y, z}, {x, y + 1, z}, {x + 1, y + 1, z}}; nx = 0; ny = 0; nz = -1; break;
-        case SOUTH: verts = new float[][]{{x, y, z + 1}, {x + 1, y, z + 1}, {x + 1, y + 1, z + 1}, {x, y + 1, z + 1}}; nx = 0; ny = 0; nz = 1; break;
-        case EAST: verts = new float[][]{{x + 1, y, z + 1}, {x + 1, y, z}, {x + 1, y + 1, z}, {x + 1, y + 1, z + 1}}; nx = 1; ny = 0; nz = 0; break;
-        default: verts = new float[][]{{x, y, z}, {x, y, z + 1}, {x, y + 1, z + 1}, {x, y + 1, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
+        case TOP: verts = new float[][]{{x, y + 1, z}, {x, y + 1, z + s}, {x + s, y + 1, z + s}, {x + s, y + 1, z}}; nx = 0; ny = 1; nz = 0; break;
+        case BOTTOM: verts = new float[][]{{x, y, z + s}, {x, y, z}, {x + s, y, z}, {x + s, y, z + s}}; nx = 0; ny = -1; nz = 0; break;
+        case NORTH: verts = new float[][]{{x + s, y, z}, {x, y, z}, {x, y + 1, z}, {x + s, y + 1, z}}; nx = 0; ny = 0; nz = -1; break;
+        case SOUTH: verts = new float[][]{{x, y, z + s}, {x + s, y, z + s}, {x + s, y + 1, z + s}, {x, y + 1, z + s}}; nx = 0; ny = 0; nz = 1; break;
+        case EAST: verts = new float[][]{{x + s, y, z + s}, {x + s, y, z}, {x + s, y + 1, z}, {x + s, y + 1, z + s}}; nx = 1; ny = 0; nz = 0; break;
+        default: verts = new float[][]{{x, y, z}, {x, y, z + s}, {x, y + 1, z + s}, {x, y + 1, z}}; nx = -1; ny = 0; nz = 0; break; // WEST
+      }
+      int base = pos.size() / 3;
+      for (float[] v : verts) { pos.add(v[0]); pos.add(v[1]); pos.add(v[2]); }
+      // a mild baked-AO tint layered under the real dynamic sun lighting -
+      // keeps cliffs/undersides readable even when the sun angle alone
+      // wouldn't shade them
+      float r = c.r * shade, g = c.g * shade, b2 = c.b * shade;
+      for (int i = 0; i < 4; i++) {
+        col.add(r); col.add(g); col.add(b2); col.add(c.a);
+        norm.add(nx); norm.add(ny); norm.add(nz);
       }
       // each quad's own corner maps 0,0 / 1,0 / 1,1 / 0,1 (matching the
       // vertex winding above), scaled into just this block type's slice of
-      // the shared terrain atlas (see TerrainTextures) - every subquad
-      // below reuses this same full tile range, so the texture reads as
-      // repeating at a finer scale rather than being sliced up
+      // the shared terrain atlas (see TerrainTextures)
       float u0 = TerrainTextures.u0(tile), u1 = TerrainTextures.u1(tile);
-      // subdivide this one block-sized face into SUBDIV x SUBDIV smaller
-      // coplanar quads via bilinear interpolation of the 4 known-correct
-      // block corners above - a "block" then reads as a cluster of
-      // several smaller ones, with a bit of per-subquad color grain for a
-      // weathered look, instead of one big flat tile. Bilinear
-      // interpolation of an exact axis-aligned rectangle's own corners is
-      // itself exact (no bulge/distortion), so every subquad stays
-      // perfectly coplanar with the original face - no seam or gap risk
-      // versus the old single full-size quad, and neighboring blocks'
-      // faces still butt up against this one exactly as before.
-      for (int a = 0; a < SUBDIV; a++) {
-        float a0 = a / (float) SUBDIV, a1 = (a + 1) / (float) SUBDIV;
-        for (int b = 0; b < SUBDIV; b++) {
-          float b0 = b / (float) SUBDIV, b1 = (b + 1) / (float) SUBDIV;
-          bilerp(verts, a0, b0, p00);
-          bilerp(verts, a1, b0, p10);
-          bilerp(verts, a1, b1, p11);
-          bilerp(verts, a0, b1, p01);
-          int base = pos.size() / 3;
-          for (float[] p : new float[][]{p00, p10, p11, p01}) { pos.add(p[0]); pos.add(p[1]); pos.add(p[2]); }
-          // a mild baked-AO shade tint layered under the real dynamic sun
-          // lighting (keeps cliffs/undersides readable even when the sun
-          // angle alone wouldn't shade them), plus a small deterministic
-          // per-subquad grain offset so a weathered surface doesn't read
-          // as flatly uniform even within one block
-          float grain = (grainHash(bx * SUBDIV + a, by, bz * SUBDIV + b) - 0.5f) * 0.12f;
-          float r = clamp01(c.r * shade + grain), g = clamp01(c.g * shade + grain), b2 = clamp01(c.b * shade + grain);
-          for (int i = 0; i < 4; i++) {
-            col.add(r); col.add(g); col.add(b2); col.add(c.a);
-            norm.add(nx); norm.add(ny); norm.add(nz);
-          }
-          uv.add(u0); uv.add(0f);
-          uv.add(u1); uv.add(0f);
-          uv.add(u1); uv.add(1f);
-          uv.add(u0); uv.add(1f);
-          idx.add(base); idx.add(base + 1); idx.add(base + 2);
-          idx.add(base); idx.add(base + 2); idx.add(base + 3);
-        }
-      }
-    }
-
-    private static void bilerp(float[][] v, float a, float b, float[] out) {
-      for (int k = 0; k < 3; k++) {
-        out[k] = (1 - a) * (1 - b) * v[0][k] + a * (1 - b) * v[1][k] + a * b * v[2][k] + (1 - a) * b * v[3][k];
-      }
-    }
-
-    private static float grainHash(int x, int y, int z) {
-      int h = x * 374761393 + y * 668265263 + z * 2147483647;
-      h = (h ^ (h >>> 13)) * 1274126177;
-      h = h ^ (h >>> 16);
-      return (h & 0xFFFF) / 65535f;
+      uv.add(u0); uv.add(0f);
+      uv.add(u1); uv.add(0f);
+      uv.add(u1); uv.add(1f);
+      uv.add(u0); uv.add(1f);
+      idx.add(base); idx.add(base + 1); idx.add(base + 2);
+      idx.add(base); idx.add(base + 2); idx.add(base + 3);
     }
 
     Mesh build() {

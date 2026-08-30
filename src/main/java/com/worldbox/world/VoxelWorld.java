@@ -9,6 +9,21 @@ import java.util.Set;
  * data and independently destructible - meteors, digging, earthquakes etc.
  * carve actual blocks out rather than just editing a height number.
  *
+ * Horizontally this is genuinely higher-resolution than the 2D WorldGrid it's
+ * built from: each WorldGrid cell becomes a real FINE x FINE block of
+ * independently-editable columns (not a cosmetic render-time subdivision -
+ * every one of those columns is its own byte in the block array, diggable
+ * and buildable on its own), so the world actually reads as built from
+ * smaller blocks instead of one shader trick over the same coarse data.
+ * The WorldGrid's own resolution never changes - a prior test found just
+ * 1.5x its dimensions collapsing the simulation tick rate (fire spread,
+ * grass regrowth, territory, pathing all scan it every tick), so all of
+ * that stays cheap. Every public method below except get/set/columnTopY/
+ * heightWorld takes the SAME coarse WorldGrid-cell coordinates every
+ * existing caller (GodTools, Events, Settlement, Picking) already uses -
+ * they just now affect a FINE x FINE patch of real columns under the hood,
+ * so none of those callers needed to change at all.
+ *
  * The 2D WorldGrid stays the authoritative layer for simulation (pathing,
  * settlement placement, resource yields, territory); after every voxel
  * edit the affected column's WorldGrid.height is resynced from the
@@ -22,22 +37,37 @@ public class VoxelWorld implements java.io.Serializable {
   public static final byte SAND = 3;
   public static final byte STONE = 4;
   public static final byte WATER = 5;
+  public static final byte PATH = 6;
 
   /** World-space height 0 sits at this block layer, so negative terrain
    * heights (seabeds, valleys) still have a valid non-negative index. */
   public static final int Y_OFFSET = 9;
   public static final int MAX_Y = 30;
   public static final int WATER_LEVEL = Y_OFFSET - 1;
-  public static final int CHUNK_SIZE = 16;
 
+  /** How many real fine columns each WorldGrid cell becomes, per
+   * horizontal axis - the actual "smaller blocks" knob. Only the
+   * horizontal axes are subdivided; vertical stays 1-world-unit steps
+   * (heights are already integer-quantized there, and subdividing that
+   * too wouldn't add much while doubling memory/mesh cost again). */
+  public static final int FINE = 2;
+  public static final int CHUNK_SIZE = 16 * FINE;
+
+  /** The WorldGrid's own (coarse) dimensions - what every sim-facing
+   * method below takes its x/z parameters in. */
+  public final int coarseCols, coarseRows;
+  /** Real block-grid extent, in fine columns - what get/set/columnTopY/
+   * heightWorld and the renderer operate in. */
   public final int cols, rows;
   public final int chunksX, chunksZ;
   private final byte[] blocks;
   public final Set<Integer> dirtyChunks = new LinkedHashSet<>();
 
   public VoxelWorld(WorldGrid grid) {
-    this.cols = grid.cols;
-    this.rows = grid.rows;
+    this.coarseCols = grid.cols;
+    this.coarseRows = grid.rows;
+    this.cols = grid.cols * FINE;
+    this.rows = grid.rows * FINE;
     this.chunksX = (cols + CHUNK_SIZE - 1) / CHUNK_SIZE;
     this.chunksZ = (rows + CHUNK_SIZE - 1) / CHUNK_SIZE;
     this.blocks = new byte[cols * rows * MAX_Y];
@@ -46,11 +76,13 @@ public class VoxelWorld implements java.io.Serializable {
 
   private int index(int x, int y, int z) { return (z * cols + x) * MAX_Y + y; }
 
+  /** Fine-column coordinates (0..cols-1, 0..rows-1). */
   public byte get(int x, int y, int z) {
     if (x < 0 || z < 0 || x >= cols || z >= rows || y < 0 || y >= MAX_Y) return AIR;
     return blocks[index(x, y, z)];
   }
 
+  /** Fine-column coordinates (0..cols-1, 0..rows-1). */
   public void set(int x, int y, int z, byte type) {
     if (x < 0 || z < 0 || x >= cols || z >= rows || y < 0 || y >= MAX_Y) return;
     blocks[index(x, y, z)] = type;
@@ -73,7 +105,8 @@ public class VoxelWorld implements java.io.Serializable {
     if (z % CHUNK_SIZE == CHUNK_SIZE - 1 && cz < chunksZ - 1) dirtyChunks.add((cz + 1) * chunksX + cx);
   }
 
-  /** Topmost solid (non-air, non-water) block in a column, or 0 if none. */
+  /** Topmost solid (non-air, non-water) block in a column, or 0 if none.
+   * Fine-column coordinates. */
   public int columnTopY(int x, int z) {
     for (int y = MAX_Y - 1; y >= 0; y--) {
       byte b = get(x, y, z);
@@ -83,7 +116,8 @@ public class VoxelWorld implements java.io.Serializable {
   }
 
   /** World-space Y of the top face of a column's surface - what the old
-   * smooth WorldGrid.height used to mean, now quantized to whole blocks. */
+   * smooth WorldGrid.height used to mean, now quantized to whole blocks.
+   * Fine-column coordinates. */
   public float heightWorld(int x, int z) {
     return columnTopY(x, z) + 1 - Y_OFFSET;
   }
@@ -91,9 +125,22 @@ public class VoxelWorld implements java.io.Serializable {
   private void generate(WorldGrid grid) {
     for (int z = 0; z < rows; z++) {
       for (int x = 0; x < cols; x++) {
-        int i = grid.idx(x, z);
+        int gx = x / FINE, gz = z / FINE;
+        int i = grid.idx(gx, gz);
         byte terrain = grid.terrain[i];
         int h = Math.round(grid.height[i]) + Y_OFFSET;
+        // a sparse, deterministic +-1 jitter per fine column (not every
+        // one - most stay flush with their coarse cell) so upsampling to
+        // real smaller blocks actually shows new bumps/weathering at the
+        // finer scale instead of just re-tiling the exact same flat
+        // surface at a higher block count. Never touches water or the
+        // outermost 2 columns of a cell (keeps shorelines/cliffs reading
+        // as clean edges rather than fuzzy noise).
+        if (terrain != Config.WATER) {
+          int jitter = fineHash(x, z);
+          if (jitter == 0) h -= 1;
+          else if (jitter == 1) h += 1;
+        }
         h = Math.max(1, Math.min(MAX_Y - 2, h));
         if (terrain == Config.WATER) {
           int seabed = Math.min(h, WATER_LEVEL - 1);
@@ -110,6 +157,19 @@ public class VoxelWorld implements java.io.Serializable {
     }
   }
 
+  /** Deterministic per-fine-column roll: ~12% chance of -1, ~12% of +1,
+   * rest flat (0 meaning "no jitter" isn't itself a valid return other
+   * than falling through both checks above). */
+  private static int fineHash(int x, int z) {
+    int h = x * 374761393 + z * 668265263;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    int bucket = Math.floorMod(h, 100);
+    if (bucket < 12) return 0;
+    if (bucket < 24) return 1;
+    return -1;
+  }
+
   public static byte blockForTerrain(byte terrain) {
     if (terrain == Config.SAND) return SAND;
     if (terrain == Config.STONE) return STONE;
@@ -120,28 +180,39 @@ public class VoxelWorld implements java.io.Serializable {
   /** WorldGrid.height used to mean "the smooth surface elevation"; after a
    * voxel edit, callers resync it from the block data so pathing,
    * buildability, and every entity that stands "on the ground" keep
-   * working against the new blocky surface. */
+   * working against the new blocky surface. Coarse (WorldGrid) x/z -
+   * averages the FINE x FINE sub-columns under this cell so gameplay
+   * reads one representative height even once fine edits (or the
+   * generation-time jitter above) have made them diverge slightly. */
   public void resyncHeight(WorldGrid grid, int x, int z) {
-    grid.height[grid.idx(x, z)] = heightWorld(x, z);
+    double sum = 0;
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) sum += heightWorld(x * FINE + dx, z * FINE + dz);
+    }
+    grid.height[grid.idx(x, z)] = (float) (sum / (FINE * FINE));
   }
 
-  /** Removes (sets to air) every non-water block within `radius` blocks of
-   * a world-space point - meteors, nukes, earthquakes, the dig tool. */
+  /** Removes (sets to air) every non-water block within `radius` WORLD
+   * UNITS of a world-space point - meteors, nukes, earthquakes, the dig
+   * tool. `touchedColumns` still comes back as packed COARSE (x,z) - see
+   * Events.earthquake/crater for the unpack + resyncHeight loop this
+   * feeds, unchanged by the finer grid underneath. */
   public void carveSphere(double wx, double wyWorld, double wz, double radius, Set<Long> touchedColumns) {
-    int cxBlock = (int) Math.round(wx);
-    int czBlock = (int) Math.round(wz);
+    int cxBlock = (int) Math.round(wx * FINE);
+    int czBlock = (int) Math.round(wz * FINE);
     int cyBlock = (int) Math.round(wyWorld) + Y_OFFSET;
-    int r = (int) Math.ceil(radius);
-    for (int dz = -r; dz <= r; dz++) {
+    int rFine = (int) Math.ceil(radius * FINE);
+    int rY = (int) Math.ceil(radius);
+    for (int dz = -rFine; dz <= rFine; dz++) {
       int z = czBlock + dz;
       if (z < 0 || z >= rows) continue;
-      for (int dx = -r; dx <= r; dx++) {
+      for (int dx = -rFine; dx <= rFine; dx++) {
         int x = cxBlock + dx;
         if (x < 0 || x >= cols) continue;
-        double horizD = Math.hypot(dx, dz);
+        double horizD = Math.hypot(dx / (double) FINE, dz / (double) FINE);
         if (horizD > radius) continue;
         boolean touched = false;
-        for (int dy = -r; dy <= r; dy++) {
+        for (int dy = -rY; dy <= rY; dy++) {
           int y = cyBlock + dy;
           if (y < 0 || y >= MAX_Y) continue;
           double d = Math.sqrt(horizD * horizD + dy * dy);
@@ -150,54 +221,87 @@ public class VoxelWorld implements java.io.Serializable {
           set(x, y, z, AIR);
           touched = true;
         }
-        if (touched && touchedColumns != null) touchedColumns.add((long) z * cols + x);
+        if (touched && touchedColumns != null) touchedColumns.add((long) (z / FINE) * coarseCols + (x / FINE));
       }
     }
   }
 
-  /** Digs straight down one block from the current surface of a column. */
+  /** Digs straight down one block from the current surface of every fine
+   * sub-column under this coarse cell. Coarse (WorldGrid) x/z. Returns
+   * the block type removed from the first sub-column actually touched
+   * (existing callers only check it against AIR to mean "nothing dug"). */
   public byte digColumn(int x, int z) {
-    int top = columnTopY(x, z);
-    if (top <= 1) return AIR;
-    byte removed = get(x, top, z);
-    set(x, top, z, AIR);
+    byte removed = AIR;
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        int top = columnTopY(fx, fz);
+        if (top <= 1) continue;
+        byte r = get(fx, top, fz);
+        set(fx, top, fz, AIR);
+        if (removed == AIR) removed = r;
+      }
+    }
     return removed;
   }
 
-  /** Places one block on top of the current surface. */
+  /** Places one block on top of the current surface of every fine
+   * sub-column under this coarse cell. Coarse (WorldGrid) x/z. */
   public void buildColumn(int x, int z, byte type) {
-    int top = columnTopY(x, z);
-    if (top + 1 >= MAX_Y) return;
-    set(x, top + 1, z, type);
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        int top = columnTopY(fx, fz);
+        if (top + 1 >= MAX_Y) continue;
+        set(fx, top + 1, fz, type);
+      }
+    }
   }
 
-  /** Repaints a column's surface block - used by the terrain-paint tools
-   * (grass/sand/dirt/stone) so they still visibly change the ground. */
+  /** Repaints every fine sub-column's surface block under this coarse
+   * cell - used by the terrain-paint tools (grass/sand/dirt/stone) so
+   * they still visibly change the ground. Coarse (WorldGrid) x/z. */
   public void paintColumnSurface(int x, int z, byte type) {
-    int top = columnTopY(x, z);
-    set(x, top, z, type);
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        set(fx, columnTopY(fx, fz), fz, type);
+      }
+    }
   }
 
-  /** Turns a column into a small lake: clears anything above sea level and
-   * fills down to it with water. */
+  /** Turns a coarse cell into a small lake: clears anything above sea
+   * level and fills down to it with water, across every fine sub-column.
+   * Coarse (WorldGrid) x/z. */
   public void paintWaterColumn(int x, int z) {
-    int seabed = Math.max(0, Math.min(columnTopY(x, z), WATER_LEVEL - 1));
-    for (int y = 0; y <= seabed; y++) {
-      if (get(x, y, z) == AIR) set(x, y, z, y >= seabed - 1 ? SAND : STONE);
-    }
-    for (int y = seabed + 1; y <= WATER_LEVEL; y++) set(x, y, z, WATER);
-    for (int y = WATER_LEVEL + 1; y < MAX_Y; y++) {
-      if (get(x, y, z) != AIR) set(x, y, z, AIR);
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        int seabed = Math.max(0, Math.min(columnTopY(fx, fz), WATER_LEVEL - 1));
+        for (int y = 0; y <= seabed; y++) {
+          if (get(fx, y, fz) == AIR) set(fx, y, fz, y >= seabed - 1 ? SAND : STONE);
+        }
+        for (int y = seabed + 1; y <= WATER_LEVEL; y++) set(fx, y, fz, WATER);
+        for (int y = WATER_LEVEL + 1; y < MAX_Y; y++) {
+          if (get(fx, y, fz) != AIR) set(fx, y, fz, AIR);
+        }
+      }
     }
   }
 
-  /** Turns a water column back into solid land up to sea level - used when
-   * a terrain-paint tool draws over what used to be water. */
+  /** Turns a water coarse cell back into solid land up to sea level -
+   * used when a terrain-paint tool draws over what used to be water.
+   * Coarse (WorldGrid) x/z. */
   public void fillColumnSolid(int x, int z, byte surfaceType) {
-    int top = WATER_LEVEL;
-    for (int y = 0; y <= top; y++) set(x, y, z, y == top ? surfaceType : (y >= top - 2 ? DIRT : STONE));
-    for (int y = top + 1; y < MAX_Y; y++) {
-      if (get(x, y, z) != AIR) set(x, y, z, AIR);
+    for (int dz = 0; dz < FINE; dz++) {
+      for (int dx = 0; dx < FINE; dx++) {
+        int fx = x * FINE + dx, fz = z * FINE + dz;
+        int top = WATER_LEVEL;
+        for (int y = 0; y <= top; y++) set(fx, y, fz, y == top ? surfaceType : (y >= top - 2 ? DIRT : STONE));
+        for (int y = top + 1; y < MAX_Y; y++) {
+          if (get(fx, y, fz) != AIR) set(fx, y, fz, AIR);
+        }
+      }
     }
   }
 }

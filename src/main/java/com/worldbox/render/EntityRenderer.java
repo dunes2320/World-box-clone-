@@ -48,6 +48,13 @@ public class EntityRenderer {
   // rotating it swings from the shoulder, not some arbitrary point.
   private static final float SHOULDER_X = 0.23f;
   private static final float SHOULDER_Y = 0.40f;
+  // Terrain blocks are now half their old size (see Blueprint.SCALE /
+  // VoxelWorld.FINE) - a human built at the old body proportions would
+  // read as a giant standing on Lego next to them. Applied as a uniform
+  // Geometry scale (see the humanPool/crowd creation below) rather than
+  // touching every box dimension in the mesh templates, so it's one
+  // number instead of a dozen.
+  private static final float HUMAN_SCALE = 0.55f;
   private static final float ARM_SWING_AMPLITUDE = 0.55f; // radians
   // a civilian with no living nation (a wanderer, or one whose nation
   // just fell) reads as this neutral gray - was allocated fresh as a
@@ -394,13 +401,17 @@ public class EntityRenderer {
     humanArmRWeaponTemplates = weaponArmTemplates;
 
     // real block-by-block buildings (see Blueprint's own class comment) -
-    // a house/mansion is built from unit blocks the same size as a
-    // terrain block, one merged mesh per material (wall/roof/foundation/
-    // trim), with STAGE_COUNT precomputed partial-construction snapshots
-    // so a building's live progress/integrity can pick "how much of it is
-    // actually standing" - see updateHouses.
-    buildingBlueprint[0] = Blueprint.building(3, 3, 2, false); // house
-    buildingBlueprint[1] = Blueprint.building(5, 5, 3, false); // mansion
+    // a house/mansion is built from unit blocks the same (smaller) size
+    // as a terrain block (Blueprint.SCALE == 1/VoxelWorld.FINE), one
+    // merged mesh per material (wall/roof/foundation/trim), with
+    // STAGE_COUNT precomputed partial-construction snapshots so a
+    // building's live progress/integrity can pick "how much of it is
+    // actually standing" - see updateHouses. Dimensions are doubled from
+    // the old 1-unit-block versions (3x3x2, 5x5x3) so the building's
+    // actual physical footprint stays about the same now that each block
+    // is half the size - more, smaller blocks, not a smaller house.
+    buildingBlueprint[0] = Blueprint.building(6, 6, 4, false); // house
+    buildingBlueprint[1] = Blueprint.building(10, 10, 6, false); // mansion
     Blueprint.Block[] blockTypes = Blueprint.Block.values();
     for (int t = 0; t < 2; t++) {
       Blueprint bp = buildingBlueprint[t];
@@ -418,8 +429,8 @@ public class EntityRenderer {
     // stays its own shingle-textured mesh, so it reads as a real building
     // with a plinth/roofline instead of one flat brick box.
     Blueprint govSmallBp = buildingBlueprint[0];
-    Blueprint govMedBp = Blueprint.building(5, 4, 3, false);
-    Blueprint govLargeBp = Blueprint.building(5, 5, 4, true);
+    Blueprint govMedBp = Blueprint.building(10, 8, 6, false);
+    Blueprint govLargeBp = Blueprint.building(10, 10, 8, true);
     Blueprint[] govBp = {govSmallBp, govMedBp, govLargeBp};
     for (int tier = 0; tier < 3; tier++) {
       Blueprint bp = govBp[tier];
@@ -583,24 +594,28 @@ public class EntityRenderer {
       Geometry g = new Geometry("Human" + i, humanTemplate);
       g.setMaterial(soloColorMaterial(ColorRGBA.White));
       g.setCullHint(Spatial.CullHint.Always);
+      g.setLocalScale(HUMAN_SCALE);
       humansNode.attachChild(g);
       humanPool[i] = g;
 
       Geometry skin = new Geometry("HumanSkin" + i, humanSkinTemplate);
       skin.setMaterial(soloColorMaterial(SKIN_TONE_A));
       skin.setCullHint(Spatial.CullHint.Always);
+      skin.setLocalScale(HUMAN_SCALE);
       humansNode.attachChild(skin);
       humanSkinPool[i] = skin;
 
       Geometry armL = new Geometry("HumanArmL" + i, humanArmLTemplate);
       armL.setMaterial(soloColorMaterial(ColorRGBA.White));
       armL.setCullHint(Spatial.CullHint.Always);
+      armL.setLocalScale(HUMAN_SCALE);
       humansNode.attachChild(armL);
       humanArmLPool[i] = armL;
 
       Geometry armR = new Geometry("HumanArmR" + i, humanArmRTemplate);
       armR.setMaterial(soloColorMaterial(ColorRGBA.White));
       armR.setCullHint(Spatial.CullHint.Always);
+      armR.setLocalScale(HUMAN_SCALE);
       humansNode.attachChild(armR);
       humanArmRPool[i] = armR;
     }
@@ -1629,7 +1644,7 @@ public class EntityRenderer {
           ColorRGBA cc = crowdZombie ? ZOMBIE_COLOR : nationOrFallback(h.nationId, HUMAN_FALLBACK_COLOR);
           float cyaw = (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5)
               ? (float) Math.atan2(dx, dz) : hash01(h.id, 444, 5) * 6.28f;
-          crowdCandidates.add(new PropBatcher.Placement((float) x, chgt + 0.5f, (float) z, cyaw, 1f, cc));
+          crowdCandidates.add(new PropBatcher.Placement((float) x, chgt + 0.5f * HUMAN_SCALE, (float) z, cyaw, HUMAN_SCALE, cc));
         }
         continue;
       }
@@ -1642,8 +1657,8 @@ public class EntityRenderer {
       // real-time animation (animTime, same continuous clock as fire/
       // rain/clouds), not a per-tick snap, with each person's own phase
       // offset (their id) so a crowd doesn't bob in lockstep
-      float bob = moving ? (float) Math.abs(Math.sin(animTime * 9.0 + h.id * 0.9)) * 0.05f : 0f;
-      g.setLocalTranslation((float) x, hgt + 0.5f + bob, (float) z);
+      float bob = moving ? (float) Math.abs(Math.sin(animTime * 9.0 + h.id * 0.9)) * 0.05f * HUMAN_SCALE : 0f;
+      g.setLocalTranslation((float) x, hgt + 0.5f * HUMAN_SCALE + bob, (float) z);
       if (moving) {
         float yaw = (float) Math.atan2(dx, dz);
         g.setLocalRotation(scratchYaw.fromAngleAxis(yaw, Vector3f.UNIT_Y));
@@ -1681,7 +1696,7 @@ public class EntityRenderer {
       float swing = moving ? (float) Math.sin(swingPhase) * ARM_SWING_AMPLITUDE : 0f;
       Geometry armL = humanArmLPool[i];
       Geometry armR = humanArmRPool[i];
-      float armY = hgt + 0.5f + bob + SHOULDER_Y;
+      float armY = hgt + 0.5f * HUMAN_SCALE + bob + SHOULDER_Y * HUMAN_SCALE;
       armL.setLocalTranslation((float) x, armY, (float) z);
       armR.setLocalTranslation((float) x, armY, (float) z);
       armL.setLocalRotation(bodyRot.mult(scratchSwing.fromAngleAxis(swing, Vector3f.UNIT_X), scratchArmRot));

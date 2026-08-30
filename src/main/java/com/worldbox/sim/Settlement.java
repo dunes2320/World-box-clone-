@@ -126,15 +126,55 @@ public class Settlement implements java.io.Serializable {
    * out to them) so the streets actually reach the houses instead of the
    * two computing independent, uncoordinated patterns. */
   public static double[] housePosition(Settlement s, int i) {
+    // 3 genuinely different village shapes, picked deterministically per
+    // settlement id (not per-instance random, so a save/load or a
+    // rebuild always lands on the exact same layout) - previously every
+    // settlement used the same spiral formula just rotated, so a whole
+    // world of villages read as one repeated shape. Spacing throughout
+    // is sized for real block-built houses (a 3x3-to-5x5-block footprint
+    // in the old 1-unit-block scale - see EntityRenderer's Blueprint
+    // set), not the old decorative ~1-unit-wide box props.
+    switch (Math.floorMod(s.id, 3)) {
+      case 0: return spiralHousePosition(s, i);
+      case 1: return gridHousePosition(s, i);
+      default: return ringHousePosition(s, i);
+    }
+  }
+
+  private static double[] spiralHousePosition(Settlement s, int i) {
     float angle = i * 2.4f + s.id * 0.7f;
-    // spacing sized for real block-built houses (a 3x3-to-5x5 block
-    // footprint - see EntityRenderer's Blueprint set), not the old
-    // decorative ~1-unit-wide box props this used to space out - was
-    // 2.4 + ring*0.75 + lap*1.0, tight enough that actual multi-block
+    // was 2.4 + ring*0.75 + lap*1.0, tight enough that actual multi-block
     // buildings would have sat on top of each other. Snug rather than
     // spread out - a real village's houses sit close with just a path
     // between them, not scattered far apart across an empty field.
     float radius = 3f + (i % 6) * 2.1f + (i / 6) * 2.4f;
+    return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
+  }
+
+  /** A real street-grid town: houses in evenly spaced rows/columns out
+   * from the town center, the whole grid rotated a quarter-turn per
+   * settlement id so neighboring grid-layout towns don't all line up
+   * identically with the world axes. */
+  private static double[] gridHousePosition(Settlement s, int i) {
+    int cols = 6;
+    int row = i / cols, col = i % cols;
+    double spacing = 3.6;
+    double ox = (col - (cols - 1) / 2.0) * spacing;
+    double oz = row * spacing + 3.2;
+    double rot = Math.floorMod(s.id, 4) * (Math.PI / 2);
+    double rx = ox * Math.cos(rot) - oz * Math.sin(rot);
+    double rz = ox * Math.sin(rot) + oz * Math.cos(rot);
+    return new double[]{s.x + 0.5 + rx, s.z + 0.5 + rz};
+  }
+
+  /** Concentric rings around the town center, each ring wider than the
+   * last - a real radial village shape (like a wheel), distinct from
+   * the spiral's continuous outward curl. */
+  private static double[] ringHousePosition(Settlement s, int i) {
+    int ring = 0, count = 6, idx = i;
+    while (idx >= count) { idx -= count; ring++; count += 4; }
+    double radius = 3.2 + ring * 2.6;
+    double angle = (idx / (double) count) * Math.PI * 2 + s.id * 0.9;
     return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
   }
 
@@ -169,12 +209,14 @@ public class Settlement implements java.io.Serializable {
     Building b = new Building(s.id, s.nationId, mansion ? "mansion" : "house", spot[0], spot[1]);
     b.progress = startProgress;
     state.buildings.put(b.id, b);
-    // a house that's actually being built now (not one of the settlement's
-    // pre-existing starting homes) gets its site leveled first, the same
-    // way a real crew grades a lot before framing goes up - otherwise the
-    // building's single flat blueprint mesh would sit clipped into (or
-    // floating over) whatever slope happened to already be there
-    if (startProgress < 1.0) terraformFootprint(state, spot[0], spot[1], mansion ? MANSION_FOOTPRINT : HOUSE_FOOTPRINT);
+    // every new building's site gets leveled first, the same way a real
+    // crew grades a lot before framing goes up - including a
+    // settlement's own pre-built starting homes (startProgress == 1.0),
+    // not just later organic growth - otherwise the building's single
+    // flat blueprint mesh would sit clipped into (or floating over)
+    // whatever slope happened to already be there right from the very
+    // first time a settlement is founded
+    terraformFootprint(state, spot[0], spot[1], mansion ? MANSION_FOOTPRINT : HOUSE_FOOTPRINT);
   }
 
   // must match the footprint (width, depth - both squares, so rotation
@@ -356,10 +398,12 @@ public class Settlement implements java.io.Serializable {
   public static final double PEOPLE_PER_HOUSE = 4.0;
   private static final double HOUSE_WOOD_COST = 12.0;
 
-  /** A house rises from bare foundation to fully built over roughly a
-   * month of game time - slow enough to actually watch happen, not an
-   * instant pop-in, not so slow it reads as never finishing. */
-  private static final double CONSTRUCTION_RATE = 1.0 / 30.0;
+  /** A house rises from bare foundation to fully built over roughly 3
+   * months of game time - slow enough to actually watch happen in real
+   * play (30 ticks/1 month completed in well under 10 real seconds even
+   * at the default game speed, which read as an instant pop-in rather
+   * than construction), not so slow it reads as never finishing. */
+  private static final double CONSTRUCTION_RATE = 1.0 / 90.0;
 
   public static void update(GameState state) {
     // real, individually-placed buildings actually rising - see

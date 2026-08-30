@@ -33,6 +33,15 @@ public class Blueprint {
    * framing (log on a house, quartz on a civic building). */
   public enum Block { WALL, ROOF, FOUNDATION, TRIM }
 
+  /** World-unit size of one block cube - matches VoxelWorld.FINE's terrain
+   * block size (1/FINE) so a building's own blocks read as the same
+   * "small block" unit as the ground it stands on, instead of looking
+   * like it's built from chunkier Lego next to finer terrain. Callers
+   * double their width/depth/wallHeight arguments (see EntityRenderer)
+   * to keep a building's overall physical footprint the same as before -
+   * more, smaller blocks, not a smaller building. */
+  public static final float SCALE = 1f / com.worldbox.world.VoxelWorld.FINE;
+
   private static final class Cell {
     final int x, y, z;
     final Block type;
@@ -126,7 +135,10 @@ public class Blueprint {
     // built onto the house's exterior wall rather than floating apart
     // from it since it sits immediately against that footprint's edge
     if (depth >= 2) {
-      int chimX = -2, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
+      // -2 in the old 1-world-unit-per-block scale; blocks are now half
+      // that size, so -4 keeps the chimney the same real-world distance
+      // clear of the foundation/eave footprint
+      int chimX = -4, chimZ = Math.min(depth - 1, Math.max(1, depth / 2));
       int chimTop = roofBaseY + lastRoofLayer + 1;
       for (int y = 1; y <= chimTop; y++) cells.add(new Cell(chimX, y, chimZ, Block.FOUNDATION));
     }
@@ -159,7 +171,7 @@ public class Blueprint {
     for (int i = 0; i < upTo; i++) {
       Cell c = cells.get(i);
       if (c.type != type) continue;
-      float x = c.x - ox, y = c.y, z = c.z - oz;
+      float x = (c.x - ox) * SCALE, y = c.y * SCALE, z = (c.z - oz) * SCALE;
       if (!present.contains(key(c.x, c.y + 1, c.z))) face(pos, norm, uv, idx, x, y, z, 0, 1, 0);
       if (!present.contains(key(c.x, c.y - 1, c.z))) face(pos, norm, uv, idx, x, y, z, 0, -1, 0);
       if (!present.contains(key(c.x + 1, c.y, c.z))) face(pos, norm, uv, idx, x, y, z, 1, 0, 0);
@@ -196,18 +208,20 @@ public class Blueprint {
     return m;
   }
 
-  /** One unit-cube face, one block wide/tall, full 0..1 UV - a blueprint's
-   * wall/roof texture is its own standalone image (see TerrainTextures),
-   * not an atlas slice, so no UV offset math is needed here. */
+  /** One cube face, SCALE wide/tall (x/y/z already came in pre-scaled from
+   * buildStageMesh), full 0..1 UV - a blueprint's wall/roof texture is its
+   * own standalone image (see TerrainTextures), not an atlas slice, so no
+   * UV offset math is needed here. */
   private static void face(List<Float> pos, List<Float> norm, List<Float> uv, List<Integer> idx,
       float x, float y, float z, int nx, int ny, int nz) {
+    float s = SCALE;
     float[][] v;
-    if (ny == 1) v = new float[][]{{x, y + 1, z}, {x, y + 1, z + 1}, {x + 1, y + 1, z + 1}, {x + 1, y + 1, z}};
-    else if (ny == -1) v = new float[][]{{x, y, z + 1}, {x, y, z}, {x + 1, y, z}, {x + 1, y, z + 1}};
-    else if (nz == -1) v = new float[][]{{x + 1, y, z}, {x, y, z}, {x, y + 1, z}, {x + 1, y + 1, z}};
-    else if (nz == 1) v = new float[][]{{x, y, z + 1}, {x + 1, y, z + 1}, {x + 1, y + 1, z + 1}, {x, y + 1, z + 1}};
-    else if (nx == 1) v = new float[][]{{x + 1, y, z + 1}, {x + 1, y, z}, {x + 1, y + 1, z}, {x + 1, y + 1, z + 1}};
-    else v = new float[][]{{x, y, z}, {x, y, z + 1}, {x, y + 1, z + 1}, {x, y + 1, z}};
+    if (ny == 1) v = new float[][]{{x, y + s, z}, {x, y + s, z + s}, {x + s, y + s, z + s}, {x + s, y + s, z}};
+    else if (ny == -1) v = new float[][]{{x, y, z + s}, {x, y, z}, {x + s, y, z}, {x + s, y, z + s}};
+    else if (nz == -1) v = new float[][]{{x + s, y, z}, {x, y, z}, {x, y + s, z}, {x + s, y + s, z}};
+    else if (nz == 1) v = new float[][]{{x, y, z + s}, {x + s, y, z + s}, {x + s, y + s, z + s}, {x, y + s, z + s}};
+    else if (nx == 1) v = new float[][]{{x + s, y, z + s}, {x + s, y, z}, {x + s, y + s, z}, {x + s, y + s, z + s}};
+    else v = new float[][]{{x, y, z}, {x, y, z + s}, {x, y + s, z + s}, {x, y + s, z}};
 
     int base = pos.size() / 3;
     for (float[] p : v) { pos.add(p[0]); pos.add(p[1]); pos.add(p[2]); }

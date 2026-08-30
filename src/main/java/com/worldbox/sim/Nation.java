@@ -433,6 +433,7 @@ public class Nation implements java.io.Serializable {
 
   public static void update(GameState state) {
     if (state.tick % 30 == 0) updateRoads(state);
+    if (state.tick % 5 == 0) advanceRoadConstruction(state);
     if (state.tick % 150 == 0) { fillTerritoryGaps(state); smoothBorders(state); }
 
     for (Nation nation : new ArrayList<>(state.nations.values())) {
@@ -580,14 +581,17 @@ public class Nation implements java.io.Serializable {
     EventLog.log(state, "nation", nation.name + " has fallen");
   }
 
-  /** Redraws every nation's road network from scratch each cycle - a
+  /** Recomputes the TARGET road network from scratch each cycle - a
    * straight line from each settlement to its nation's capital, skipping
-   * water. Simple, but gives every nation visible, purposeful
-   * infrastructure connecting it together instead of isolated dots. */
+   * water - gives every nation visible, purposeful infrastructure
+   * connecting it together instead of isolated dots. This only plans
+   * which cells SHOULD eventually be a road; it doesn't build any of
+   * them itself (that would make the whole network pop in instantly the
+   * moment it's planned) - see advanceRoadConstruction for the part that
+   * actually lays them down over time. */
   private static void updateRoads(GameState state) {
     WorldGrid grid = state.grid;
-    boolean[] before = grid.isRoad.clone();
-    java.util.Arrays.fill(grid.isRoad, false);
+    java.util.Arrays.fill(grid.roadPlanned, false);
     for (Nation nation : state.nations.values()) {
       if (!nation.alive) continue;
       Settlement capital = state.settlements.get(nation.capitalSettlementId);
@@ -600,10 +604,32 @@ public class Nation implements java.io.Serializable {
         drawRoad(grid, capital.x, capital.z, s.x, s.z);
       }
     }
-    // only re-mesh chunks whose road status actually changed, not the
-    // whole map, since this redraws from scratch every cycle
-    for (int i = 0; i < grid.isRoad.length; i++) {
-      if (grid.isRoad[i] != before[i]) grid.markDirtyIdx(i);
+  }
+
+  private static final float ROAD_BUILD_RATE = 1f / 12f;
+
+  /** Builders actually lay a real gravel/stone path down, one cell's
+   * worth of progress at a time, instead of the target network from
+   * updateRoads just appearing - a road visibly grows out from the
+   * settlement over real time. Once a cell's progress reaches 1 it
+   * becomes a genuine PATH surface block (see VoxelWorld.PATH), not just
+   * a color tint, the same "humans are actually building this" idea as
+   * a house's own staged construction. Cells that fall out of the
+   * planned network (a nation lost the settlement it led to, say) simply
+   * stop advancing rather than un-building - roads essentially never
+   * need to disappear in practice, and tearing one up for that rare case
+   * isn't worth the extra bookkeeping. */
+  private static void advanceRoadConstruction(GameState state) {
+    WorldGrid grid = state.grid;
+    for (int i = 0; i < grid.roadPlanned.length; i++) {
+      if (!grid.roadPlanned[i] || grid.isRoad[i]) continue;
+      grid.roadProgress[i] += ROAD_BUILD_RATE;
+      if (grid.roadProgress[i] < 1f) continue;
+      grid.isRoad[i] = true;
+      int x = i % grid.cols, z = i / grid.cols;
+      state.voxels.paintColumnSurface(x, z, com.worldbox.world.VoxelWorld.PATH);
+      state.voxels.resyncHeight(grid, x, z);
+      grid.markDirtyIdx(i);
     }
   }
 
@@ -644,7 +670,7 @@ public class Nation implements java.io.Serializable {
     while (true) {
       if (grid.inBounds(x, z)) {
         int i = grid.idx(x, z);
-        if (grid.terrain[i] != Config.WATER) grid.isRoad[i] = true;
+        if (grid.terrain[i] != Config.WATER) grid.roadPlanned[i] = true;
       }
       if (x == x1 && z == z1) break;
       int e2 = 2 * err;
