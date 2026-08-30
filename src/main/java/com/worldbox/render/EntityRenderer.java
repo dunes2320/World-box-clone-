@@ -1375,12 +1375,11 @@ public class EntityRenderer {
 
   private void updateBusinesses(GameState state) {
     int i = 0;
-    // a business's placement used to depend only on its own global id, at
-    // a fixed radius (1.4) that overlapped the first couple of houses'
-    // spiral (which starts at radius 1.0) almost every time. Businesses
-    // now get their own outward spiral on a per-settlement local index,
-    // starting past where the house spiral's radius tops out (see
-    // updateHouses' houseCount<=32 spiral, max radius ~5.0).
+    // businesses cluster in the settlement's own downtown - the same
+    // exact-center clearing Settlement.housePosition's suburb grid
+    // deliberately leaves empty (see DOWNTOWN_CLEARANCE) - each on its
+    // own per-settlement local-index spiral, kept well inside that
+    // clearing so it never spills into the residential lots beyond it.
     Map<Integer, Integer> localIndex = new HashMap<>();
     for (Business b : state.businesses.values()) {
       if (i >= BUSINESS_CAP) break;
@@ -1390,7 +1389,7 @@ public class EntityRenderer {
       float h = grid.height[grid.idx(s.x, s.z)];
       int local = localIndex.merge(b.settlementId, 1, Integer::sum) - 1;
       float angle = local * 1.9f + s.id * 0.7f;
-      float radius = 6.4f + (local % 3) * 1.1f;
+      float radius = 2.6f + (local % 3) * 1.1f;
       float ox = (float) Math.cos(angle) * radius, oz = (float) Math.sin(angle) * radius;
       float scale = (float) (0.7 + Math.min(1.5, b.capital / 60.0));
       // farmTemplate is already ground-anchored at construction; market's

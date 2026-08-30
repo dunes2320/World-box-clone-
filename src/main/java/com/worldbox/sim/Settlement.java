@@ -125,57 +125,33 @@ public class Settlement implements java.io.Serializable {
    * EntityRenderer (drawing the houses) and Nation (routing road spurs
    * out to them) so the streets actually reach the houses instead of the
    * two computing independent, uncoordinated patterns. */
+  /** Real lots on a real street grid - a suburb, not a scattered cluster.
+   * Every house/mansion is a physical object with real interior volume
+   * (see Blueprint) that must never overlap another one, and a fixed
+   * grid of non-overlapping lots is what guarantees that by construction:
+   * index i always maps to exactly one (row, col) lot, so no two houses
+   * in the same settlement can ever land on the same spot, no per-pair
+   * distance checks needed. LOT_SPACING is sized wider than even a
+   * mansion's own footprint (see MANSION_FOOTPRINT) plus a real street's
+   * width between rows. The whole grid starts DOWNTOWN_CLEARANCE units
+   * out from the town center and only grows in the +Z direction (rotated
+   * a quarter-turn per settlement id, so neighboring towns don't all
+   * line up identically) - the center itself stays clear for downtown
+   * (see EntityRenderer.updateBusinesses/updateBanks/hutTemplate's own
+   * exact-center placement), the same way a real town's commercial core
+   * sits apart from its residential blocks. */
+  private static final double LOT_SPACING = 6.0;
+  private static final double DOWNTOWN_CLEARANCE = 7.0;
+  private static final int LOTS_PER_ROW = 7;
+
   public static double[] housePosition(Settlement s, int i) {
-    // 3 genuinely different village shapes, picked deterministically per
-    // settlement id (not per-instance random, so a save/load or a
-    // rebuild always lands on the exact same layout) - previously every
-    // settlement used the same spiral formula just rotated, so a whole
-    // world of villages read as one repeated shape. Spacing throughout
-    // is sized for real block-built houses (a 3x3-to-5x5-block footprint
-    // in the old 1-unit-block scale - see EntityRenderer's Blueprint
-    // set), not the old decorative ~1-unit-wide box props.
-    switch (Math.floorMod(s.id, 3)) {
-      case 0: return spiralHousePosition(s, i);
-      case 1: return gridHousePosition(s, i);
-      default: return ringHousePosition(s, i);
-    }
-  }
-
-  private static double[] spiralHousePosition(Settlement s, int i) {
-    float angle = i * 2.4f + s.id * 0.7f;
-    // was 2.4 + ring*0.75 + lap*1.0, tight enough that actual multi-block
-    // buildings would have sat on top of each other. Snug rather than
-    // spread out - a real village's houses sit close with just a path
-    // between them, not scattered far apart across an empty field.
-    float radius = 3f + (i % 6) * 2.1f + (i / 6) * 2.4f;
-    return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
-  }
-
-  /** A real street-grid town: houses in evenly spaced rows/columns out
-   * from the town center, the whole grid rotated a quarter-turn per
-   * settlement id so neighboring grid-layout towns don't all line up
-   * identically with the world axes. */
-  private static double[] gridHousePosition(Settlement s, int i) {
-    int cols = 6;
-    int row = i / cols, col = i % cols;
-    double spacing = 3.6;
-    double ox = (col - (cols - 1) / 2.0) * spacing;
-    double oz = row * spacing + 3.2;
+    int row = i / LOTS_PER_ROW, col = i % LOTS_PER_ROW;
+    double ox = (col - (LOTS_PER_ROW - 1) / 2.0) * LOT_SPACING;
+    double oz = DOWNTOWN_CLEARANCE + row * LOT_SPACING;
     double rot = Math.floorMod(s.id, 4) * (Math.PI / 2);
     double rx = ox * Math.cos(rot) - oz * Math.sin(rot);
     double rz = ox * Math.sin(rot) + oz * Math.cos(rot);
     return new double[]{s.x + 0.5 + rx, s.z + 0.5 + rz};
-  }
-
-  /** Concentric rings around the town center, each ring wider than the
-   * last - a real radial village shape (like a wheel), distinct from
-   * the spiral's continuous outward curl. */
-  private static double[] ringHousePosition(Settlement s, int i) {
-    int ring = 0, count = 6, idx = i;
-    while (idx >= count) { idx -= count; ring++; count += 4; }
-    double radius = 3.2 + ring * 2.6;
-    double angle = (idx / (double) count) * Math.PI * 2 + s.id * 0.9;
-    return new double[]{s.x + 0.5 + Math.cos(angle) * radius, s.z + 0.5 + Math.sin(angle) * radius};
   }
 
   /** The next free spiral ring position that actually lands on dry land -
