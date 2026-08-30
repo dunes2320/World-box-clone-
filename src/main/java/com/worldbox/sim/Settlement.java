@@ -240,6 +240,14 @@ public class Settlement implements java.io.Serializable {
     b.hasFoundation = terraformFootprint(state, spot[0], spot[1], HouseVariants.blueprintFor(type).footprintHalfExtent());
   }
 
+  /** How many extra coarse cells past the flat core taper back down/up to
+   * the land's own natural height - a real building pad doesn't end in a
+   * sheer cliff at the property line, it grades out into a gentle slope
+   * over a few yards. Without this, terraformFootprint's flat pad met
+   * undisturbed ground in a hard vertical step - exactly "like a chunk was
+   * taken out of the land". */
+  private static final int TERRAFORM_TAPER = 3;
+
   /** Flattens the ground under a new building's footprint (its real,
    * per-variant bounding box - see HouseVariants/Blueprint.
    * footprintHalfExtent, which covers the free-standing chimney and any
@@ -251,7 +259,12 @@ public class Settlement implements java.io.Serializable {
    * columns don't necessarily start at the same height - left the
    * "leveled" site with the same bumps it started with, just at a
    * different average elevation, which is what was still reading as
-   * buildings floating/clipping into the ground). Not a fake cosmetic
+   * buildings floating/clipping into the ground). Only the core under the
+   * building itself is forced dead flat, though - beyond that, a TAPER
+   * ring (see TERRAFORM_TAPER) blends the target height back down/up to
+   * each cell's own natural height the further out it sits, so the pad
+   * reads as a graded lot with a gentle slope at its edge instead of a
+   * flat-topped block dropped onto the landscape. Not a fake cosmetic
    * flourish - a real change to the voxel terrain the building then sits
    * flush on. Never touches a cell that was already water (findBuildingSpot
    * only ever picks a dry anchor, but a low-lying neighbor could still be
@@ -268,10 +281,13 @@ public class Settlement implements java.io.Serializable {
     int anchorX = (int) Math.floor(cx), anchorZ = (int) Math.floor(cz);
     if (!grid.inBounds(anchorX, anchorZ)) return true;
     int targetTop = Math.round(grid.height[grid.idx(anchorX, anchorZ)] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
-    int half = (int) Math.ceil(halfExtentWorld) + 1;
+    int coreHalf = (int) Math.ceil(halfExtentWorld) + 1;
+    int half = coreHalf + TERRAFORM_TAPER;
     boolean graded = false;
     for (int dz = -half; dz <= half; dz++) {
       for (int dx = -half; dx <= half; dx++) {
+        double dist = Math.hypot(dx, dz);
+        if (dist > half) continue; // a round pad, not a square one - a real graded lot isn't a sharp-cornered box either
         int x = anchorX + dx, z = anchorZ + dz;
         if (!grid.inBounds(x, z)) continue;
         int i = grid.idx(x, z);
@@ -282,11 +298,26 @@ public class Settlement implements java.io.Serializable {
         // as a "random pillar" jutting out of a hillside)
         if (!grid.isBuildable(i)) continue;
         byte fillType = VoxelWorld.blockForTerrain(grid.terrain[i]);
+        double taperDist = dist - coreHalf;
+        // taperDist <= 0: still inside the flat core, dead flush with
+        // targetTop, same as before. Beyond that, blend toward this
+        // cell's OWN natural height (read before this cell is touched) -
+        // 100% target right at the core's edge, fading to 0% (fully
+        // natural, untouched) by the outer taper ring.
+        int cellTarget;
+        if (taperDist <= 0) {
+          cellTarget = targetTop;
+          if (voxels.columnTopY(x * VoxelWorld.FINE, z * VoxelWorld.FINE) != targetTop) graded = true;
+        } else {
+          double t = Math.max(0, 1.0 - taperDist / TERRAFORM_TAPER);
+          if (t <= 0) continue; // fully natural out here - leave it alone
+          int naturalTop = Math.round(grid.height[i] * VoxelWorld.FINE) + VoxelWorld.Y_OFFSET - 1;
+          cellTarget = naturalTop + (int) Math.round((targetTop - naturalTop) * t);
+        }
         for (int fdz = 0; fdz < VoxelWorld.FINE; fdz++) {
           for (int fdx = 0; fdx < VoxelWorld.FINE; fdx++) {
             int fx = x * VoxelWorld.FINE + fdx, fz = z * VoxelWorld.FINE + fdz;
-            if (voxels.columnTopY(fx, fz) != targetTop) graded = true;
-            voxels.levelColumn(fx, fz, targetTop, fillType);
+            voxels.levelColumn(fx, fz, cellTarget, fillType);
           }
         }
         voxels.resyncHeight(grid, x, z);
