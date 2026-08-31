@@ -35,11 +35,6 @@ public class VoxelChunkRenderer {
     BLOCK_COLOR.put(VoxelWorld.PATH, new ColorRGBA(0.68f, 0.63f, 0.53f, 1f));
   }
   private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.098f, 0.310f, 0.560f, 0.92f);
-  // sky is a pale blue (~0.56, 0.78, 0.91) - the old foam color was close
-  // enough to it that a shoreline blended almost invisibly into open sky,
-  // which read as a gap where the water should visibly meet the sand.
-  // This one is bright, opaque, and clearly whiter than the sky.
-  private static final ColorRGBA FOAM_COLOR = new ColorRGBA(0.92f, 0.97f, 0.98f, 0.97f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
   private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.62f, 0.48f, 0.26f, 1f);
   private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.68f, 0.63f, 0.53f, 1f);
@@ -74,10 +69,6 @@ public class VoxelChunkRenderer {
   private static final float WAR_FLASH_INTERVAL = 0.35f;
   private final Geometry[] solidChunks;
   private final Geometry[] waterChunks;
-  /** Pre-wave vertex positions per water chunk, captured at mesh-build
-   * time so the per-frame animation always displaces from a stable base
-   * instead of compounding drift onto itself. */
-  private final Map<Integer, float[]> waterBasePositions = new HashMap<>();
 
   public VoxelChunkRenderer(VoxelWorld world, WorldGrid grid, AssetManager assets, NationColorLookup nationColor) {
     this.world = world;
@@ -261,35 +252,18 @@ public class VoxelChunkRenderer {
             Math.min(world.columnTopY(x - 1, z), world.columnTopY(x + 1, z)),
             Math.min(world.columnTopY(x, z - 1), world.columnTopY(x, z + 1))));
         int scanFrom = Math.max(0, Math.min(loTop - 1, VoxelWorld.WATER_LEVEL - 2));
-        boolean shoreline = false;
         for (int y = scanFrom; y < VoxelWorld.MAX_Y; y++) {
           byte b = world.get(x, y, z);
           if (b == VoxelWorld.AIR) continue;
           MeshBuilder mb = b == VoxelWorld.WATER ? water : solid;
-          ColorRGBA color;
-          if (b == VoxelWorld.WATER) {
-            if (y == VoxelWorld.WATER_LEVEL) shoreline = isShoreline(x, z);
-            color = shoreline ? FOAM_COLOR : WATER_COLOR;
-          } else {
-            color = mottle(BLOCK_COLOR.get(b), x, y, z);
-          }
+          ColorRGBA color = b == VoxelWorld.WATER ? WATER_COLOR : mottle(BLOCK_COLOR.get(b), x, y, z);
           addVisibleFaces(mb, x, y, z, b, color);
         }
       }
     }
 
     solidChunks[ci].setMesh(solid.build());
-    Mesh waterMesh = water.build();
-    waterChunks[ci].setMesh(waterMesh);
-    if (waterMesh.getVertexCount() > 0) {
-      java.nio.FloatBuffer wpos = waterMesh.getFloatBuffer(VertexBuffer.Type.Position);
-      float[] base = new float[wpos.limit()];
-      wpos.rewind();
-      wpos.get(base);
-      waterBasePositions.put(ci, base);
-    } else {
-      waterBasePositions.remove(ci);
-    }
+    waterChunks[ci].setMesh(water.build());
   }
 
   /** No texture atlas/UV mapping in this renderer, so every block of a
@@ -311,46 +285,6 @@ public class VoxelChunkRenderer {
   }
 
   private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
-
-  /** A water column counts as shoreline if any orthogonal neighbor is dry
-   * land near the waterline - used to tint a light foam ring around
-   * coasts instead of one flat color for the whole ocean. */
-  private boolean isShoreline(int x, int z) {
-    return isLandNear(x + 1, z) || isLandNear(x - 1, z) || isLandNear(x, z + 1) || isLandNear(x, z - 1);
-  }
-
-  private boolean isLandNear(int x, int z) {
-    if (x < 0 || z < 0 || x >= world.cols || z >= world.rows) return false;
-    return world.get(x, VoxelWorld.WATER_LEVEL, z) != VoxelWorld.WATER
-        && world.columnTopY(x, z) >= VoxelWorld.WATER_LEVEL - 1;
-  }
-
-  /** Nudges every water chunk's vertices with a couple of overlapping sine
-   * waves each frame - a cheap CPU-side ripple instead of a flat static
-   * plane, since Unshaded/Lighting materials have no time-based shader
-   * uniform to animate this on the GPU side. */
-  public void updateWaterAnimation(float time) {
-    for (Map.Entry<Integer, float[]> e : waterBasePositions.entrySet()) {
-      Geometry g = waterChunks[e.getKey()];
-      Mesh mesh = g.getMesh();
-      float[] base = e.getValue();
-      float[] out = new float[base.length];
-      for (int i = 0; i < base.length; i += 3) {
-        float x = base[i], y = base[i + 1], z = base[i + 2];
-        float wave = (float) (Math.sin((x + z) * 0.6 + time * 1.3) * 0.075
-            + Math.sin((x - z) * 0.9 + time * 0.8) * 0.045);
-        out[i] = x;
-        out[i + 1] = y + wave;
-        out[i + 2] = z;
-      }
-      java.nio.FloatBuffer buf = mesh.getFloatBuffer(VertexBuffer.Type.Position);
-      buf.rewind();
-      buf.put(out);
-      buf.rewind();
-      mesh.getBuffer(VertexBuffer.Type.Position).updateData(buf);
-      mesh.updateBound();
-    }
-  }
 
   /** True if a face between a block of `selfType` and a neighbor of
    * `neighborType` should be skipped (fully occluded). */

@@ -474,7 +474,6 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
 
     updateWarHoverFlash(tpf);
     voxelRenderer.flushDirty();
-    voxelRenderer.updateWaterAnimation((float) animClock);
     float alpha = speed > 0 ? (float) Math.min(1.0, (simTime - lastTickTime) / (Config.TICK_MS / 1000.0 / speed)) : 1f;
     entityRenderer.update(state, alpha, (float) animClock, camTarget);
     updateSelectionRing();
