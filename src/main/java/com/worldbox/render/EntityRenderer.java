@@ -80,9 +80,13 @@ public class EntityRenderer {
     DEPOSIT_COLORS.put(Config.RES_IRON, new ColorRGBA(0.690f, 0.416f, 0.290f, 1f));
     DEPOSIT_COLORS.put(Config.RES_GOLD, new ColorRGBA(0.902f, 0.773f, 0.247f, 1f));
   }
-  private static final ColorRGBA TREE_COLOR = new ColorRGBA(0.137f, 0.361f, 0.157f, 1f);
-  private static final ColorRGBA TRUNK_COLOR = new ColorRGBA(0.365f, 0.259f, 0.157f, 1f);
-  private static final ColorRGBA FOLIAGE_COLOR = new ColorRGBA(0.29f, 0.52f, 0.22f, 1f);
+  // Brightened along with the rest of the cartoon palette (see
+  // VoxelChunkRenderer/TerrainTextures) - these used to be muted enough
+  // that trees/ground foliage read visibly flatter and duller than the
+  // vivid grass now under them.
+  private static final ColorRGBA TREE_COLOR = new ColorRGBA(0.31f, 0.71f, 0.24f, 1f);
+  private static final ColorRGBA TRUNK_COLOR = new ColorRGBA(0.54f, 0.35f, 0.20f, 1f);
+  private static final ColorRGBA FOLIAGE_COLOR = new ColorRGBA(0.35f, 0.72f, 0.28f, 1f);
   private static final ColorRGBA[] FLOWER_COLORS = {
       new ColorRGBA(0.95f, 0.85f, 0.25f, 1f), // yellow
       new ColorRGBA(0.92f, 0.35f, 0.4f, 1f),  // red-pink
@@ -1101,7 +1105,7 @@ public class EntityRenderer {
         if (res == Config.RES_FOREST) forestCount++;
         else if (res == Config.RES_STONE) stoneResCount++;
         else if (res != Config.RES_NONE) mineralCount++;
-        else if (grid.terrain[i] == Config.GRASS && hash01(x, y, 6) < 0.19f) foliageEligibleCount++;
+        else if (grid.terrain[i] == Config.GRASS && hash01(x, y, 6) < 0.30f) foliageEligibleCount++;
       }
     }
     float forestKeep = forestCount > TREE_CAP_SAMPLE ? TREE_CAP_SAMPLE / (float) forestCount : 1f;
@@ -1142,7 +1146,7 @@ public class EntityRenderer {
           float jz = y + 0.5f + jitterAxis(x, y, 4);
           deposits.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, 1f, c));
         } else if (grid.terrain[i] == Config.GRASS && res == Config.RES_NONE
-            && hash01(x, y, 6) < 0.19f && hash01(x, y, 24) < foliageKeep) {
+            && hash01(x, y, 6) < 0.30f && hash01(x, y, 24) < foliageKeep) {
           // patchy coverage rather than every single grass block - real
           // ground cover grows in clumps, not a uniform carpet, and a
           // literal every-cell carpet would blow well past a sane vertex
@@ -1154,7 +1158,7 @@ public class EntityRenderer {
           float scale = 0.7f + hash01(x, y, 10) * 0.7f;
           ColorRGBA tuftColor = FOLIAGE_COLOR.clone().interpolateLocal(TREE_COLOR, hash01(x, y, 11) * 0.4f);
           foliage.add(new PropBatcher.Placement(jx, grid.height[i], jz, rotY, scale, tuftColor));
-          if (hash01(x, y, 12) < 0.16f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
+          if (hash01(x, y, 12) < 0.22f && flowers.size() < FOLIAGE_CAP_SAMPLE) {
             ColorRGBA fc = FLOWER_COLORS[(int) (hash01(x, y, 13) * FLOWER_COLORS.length) % FLOWER_COLORS.length];
             flowers.add(new PropBatcher.Placement(jx, grid.height[i] + 0.32f * scale, jz, rotY, scale, fc));
           }
