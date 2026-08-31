@@ -101,8 +101,15 @@ public class VoxelChunkRenderer {
     Material waterMat = new Material(assets, "Common/MatDefs/Light/Lighting.j3md");
     waterMat.setBoolean("UseVertexColor", true);
     waterMat.setTexture("DiffuseMap", atlas);
-    waterMat.setColor("Specular", new ColorRGBA(0.85f, 0.89f, 0.93f, 1f));
-    waterMat.setFloat("Shininess", 80f);
+    // was 0.85-0.93 (near-white) at Shininess 80 - a tight, bright
+    // highlight plus a still, unrippled surface (see the wave-animation
+    // removal above) read as a sheet of glass/a mirror rather than water.
+    // Dimmer, less saturated specular and a much lower shininess spread
+    // the same sun-glint out into a broad, soft sheen instead of a hard
+    // point highlight, which is what actually reads as "water" at a
+    // glance rather than "polished floor".
+    waterMat.setColor("Specular", new ColorRGBA(0.45f, 0.5f, 0.55f, 1f));
+    waterMat.setFloat("Shininess", 18f);
     waterMat.setTransparent(true);
     waterMat.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
     waterMat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
@@ -110,12 +117,14 @@ public class VoxelChunkRenderer {
     // reflection instead of water just being lit with no reflection at
     // all - but a subtle glossy sheen, not a mirror. 0.85 scale at power 2
     // washed the whole surface white; 0.22 at power 4.5 still read as a
-    // clear mirrored sky image rather than a soft gloss. Scale down again
-    // to where the reflection only shows as a faint brightening/sky tint
-    // at real grazing angles - the same way a glossy (not mirror-finish)
-    // surface behaves - rather than a legible reflected image.
+    // clear mirrored sky image rather than a soft gloss; 0.09 at 5.5 was
+    // still legible enough as an actual sky reflection (combined with the
+    // brighter specular above) to read as a mirror rather than water.
+    // Cut once more so it only shows as a faint brightening/sky tint at
+    // real grazing angles - the same way a glossy (not mirror-finish)
+    // surface behaves - rather than anything resembling a reflected image.
     waterMat.setTexture("EnvMap", TerrainTextures.buildSkyCubeMap());
-    waterMat.setVector3("FresnelParams", new com.jme3.math.Vector3f(0.01f, 0.09f, 5.5f));
+    waterMat.setVector3("FresnelParams", new com.jme3.math.Vector3f(0.01f, 0.045f, 5.5f));
 
     for (int ci = 0; ci < n; ci++) {
       Geometry sg = new Geometry("chunk_solid_" + ci, new Mesh());
