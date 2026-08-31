@@ -140,19 +140,31 @@ public class VoxelWorld implements java.io.Serializable {
         int gx = x / FINE, gz = z / FINE;
         int i = grid.idx(gx, gz);
         byte terrain = grid.terrain[i];
-        int h = Math.round(grid.height[i] * FINE) + Y_OFFSET;
-        // a sparse, deterministic +-1 FINE-STEP jitter per fine column
-        // (not every one - most stay flush with their coarse cell) so
-        // upsampling to real smaller blocks actually shows new
-        // bumps/weathering at the finer scale instead of just re-tiling
-        // the exact same flat surface at a higher block count. Excludes
-        // water and sand: sand is the shoreline fringe, and jittering it
-        // undoes the rounding above that keeps it flush with the fixed
-        // WATER_LEVEL plane, showing up as a ragged, "sunken" coastline.
-        if (terrain != Config.WATER && terrain != Config.SAND) {
-          int jitter = fineHash(x, z);
-          if (jitter == 0) h -= 1;
-          else if (jitter == 1) h += 1;
+        int h;
+        if (terrain == Config.SAND) {
+          // SAND only ever means "shoreline/riverbank" (see WorldGen) - its
+          // grid.height varies with the same noise field as everything
+          // else, so rounding it independently could still land its top
+          // solid layer above WATER_LEVEL, leaving a solid sand block
+          // sticking up out of the water with nothing for the fluid sim to
+          // fill (that gap is solid ground, not empty space). Pinning it
+          // exactly flush with WATER_LEVEL guarantees a clean shoreline
+          // everywhere, unconditionally, instead of hoping the noise
+          // rounds the right way.
+          h = WATER_LEVEL + 1;
+        } else {
+          h = Math.round(grid.height[i] * FINE) + Y_OFFSET;
+          // a sparse, deterministic +-1 FINE-STEP jitter per fine column
+          // (not every one - most stay flush with their coarse cell) so
+          // upsampling to real smaller blocks actually shows new
+          // bumps/weathering at the finer scale instead of just re-tiling
+          // the exact same flat surface at a higher block count. Excludes
+          // water (handled separately below).
+          if (terrain != Config.WATER) {
+            int jitter = fineHash(x, z);
+            if (jitter == 0) h -= 1;
+            else if (jitter == 1) h += 1;
+          }
         }
         h = Math.max(1, Math.min(MAX_Y - 2, h));
         if (terrain == Config.WATER) {
