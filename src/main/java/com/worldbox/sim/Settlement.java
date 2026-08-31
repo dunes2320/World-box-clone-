@@ -564,17 +564,28 @@ public class Settlement implements java.io.Serializable {
     });
   }
 
+  /** Downtown's own businesses/bank/statue (see EntityRenderer.
+   * updateBusinesses/updateBanks/updateStatues) are placed at up to 4.8
+   * world units from the settlement center - well inside the farm plot's
+   * old 0-4.5 disc, so a business or bank used to render sitting right on
+   * top of the tilled-field tint. Keeping the farm plot a ring that only
+   * starts past this radius (instead of a filled disc from the center)
+   * guarantees the two can never overlap, the same way DOWNTOWN_CLEARANCE
+   * already keeps the residential lot grid out of downtown. */
+  private static final double FARM_INNER_RADIUS = 5.5;
+
   private static int countFarmCells(GameState state, Settlement settlement) {
     WorldGrid grid = state.grid;
-    // the visible farm plot is a smaller ring right around the village
-    // center, distinct from the wider (untilled) territory radius
-    double plotRadius = Math.min(4.5, 2.2 + Math.sqrt(settlement.populationCount) * 0.25);
+    // the visible farm plot is a ring just past downtown, distinct from
+    // the wider (untilled) territory radius
+    double plotWidth = Math.min(4.5, 2.2 + Math.sqrt(settlement.populationCount) * 0.25);
+    double plotOuter = FARM_INNER_RADIUS + plotWidth;
     int[] n = {0};
     grid.forEachInRadius(settlement.x, settlement.z, settlement.radius, (x, y, d) -> {
       int i = grid.idx(x, y);
       boolean owned = grid.terrain[i] == Config.GRASS && grid.ownerNation[i] == settlement.nationId;
       if (owned) n[0]++;
-      boolean plot = owned && d <= plotRadius;
+      boolean plot = owned && d > FARM_INNER_RADIUS && d <= plotOuter;
       if (grid.isFarmland[i] != plot) { grid.isFarmland[i] = plot; grid.markDirtyIdx(i); }
     });
     return n[0];
