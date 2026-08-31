@@ -48,6 +48,30 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
    * synthesized as "far away, opposite the sun's direction, relative to
    * wherever the camera currently is." */
   private com.jme3.post.filters.LightScatteringFilter lightScatteringFilter;
+  /** The visible sun disc - repositioned the same way every frame (see
+   * simpleUpdate), just at a closer, fixed distance so it stays clear of
+   * FogFilter's falloff instead of fading into the fog color like the sky
+   * dome itself does out at the far plane. Uses its own, much shallower
+   * direction rather than sun.getDirection() itself: the real light sits
+   * ~46 degrees above the horizon (a deliberately steep angle for long
+   * dramatic shadows - see its own comment), but camPitch is clamped to
+   * never look more than ~22 degrees above the horizon at its flattest,
+   * so a sprite placed along the real light direction would sit outside
+   * the camera's achievable view the vast majority of the time - visually
+   * present but never actually seen. This only changes where the DISC is
+   * drawn, not the light or its shadows. Even a full 22.5 degrees (half
+   * this camera's 45-degree vertical FOV) above the view direction only
+   * clears the horizon at all once pitch is down near its 0.15 rad
+   * (8.6 degree) floor: camPitch IS the camera's own downward look angle,
+   * so a point at elevation E above the horizon sits (pitch + E) above
+   * the view center - the highest that can be and still land in frame is
+   * 22.5deg, and the HUD bar alone already eats several more degrees off
+   * the top of the actual visible viewport on top of that. ~8 degrees
+   * keeps real margin at the pitch floor instead of a sun that's still
+   * clipped (or hidden right under the HUD) there. */
+  private static final Vector3f SUN_VISUAL_DIR = new Vector3f(-0.77f, -0.14f, -0.63f).normalizeLocal();
+  private com.jme3.scene.Geometry sunSprite;
+  private static final float SUN_DISTANCE = 110f;
 
   private String tool = "select";
   private int brushSize = 3;
@@ -129,6 +153,35 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     sun.setDirection(new Vector3f(-0.55f, -0.72f, -0.45f).normalizeLocal());
     sun.setColor(new ColorRGBA(0.95f, 0.86f, 0.68f, 1f));
     rootNode.addLight(sun);
+
+    // A real skybox - the SAME procedural cubemap water already uses as
+    // its EnvMap (see VoxelChunkRenderer/TerrainTextures.buildSkyCubeMap) -
+    // instead of just a flat clear color. Water's reflection used to point
+    // at a sky the player could never actually see anywhere in the scene,
+    // which is exactly why it read as reflecting nothing in particular;
+    // this gives it something real and consistent to bounce back.
+    // an explicit, generously large scale - the map itself spans a couple
+    // hundred units and the camera can zoom out to 140 units past that, so
+    // the default (much smaller) sky size left the camera outside it
+    // entirely, which is exactly why the "sky" was actually still just
+    // showing through to the flat clear color underneath.
+    rootNode.attachChild(com.jme3.util.SkyFactory.createSky(
+        assetManager, com.worldbox.render.TerrainTextures.buildSkyCubeMap(),
+        new Vector3f(700f, 700f, 700f), com.jme3.util.SkyFactory.EnvMapType.CubeMap));
+
+    // A simple glowing sun disc, positioned every frame straight out along
+    // the light's own direction (see the identical trick already used for
+    // lightScatteringFilter's fake position below) - so the specular
+    // highlight water picks up from the sun actually corresponds to
+    // something visible in the sky, not a bare directional light with no
+    // on-screen source at all. Unshaded and bright enough to clear
+    // Bloom's exposure cutoff, so it picks up a soft glow for free.
+    com.jme3.material.Material sunMat = new com.jme3.material.Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+    sunMat.setColor("Color", new ColorRGBA(1f, 0.95f, 0.78f, 1f));
+    sunSprite = new com.jme3.scene.Geometry("sun", new com.jme3.scene.shape.Sphere(12, 12, 9f));
+    sunSprite.setMaterial(sunMat);
+    sunSprite.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
+    rootNode.attachChild(sunSprite);
 
     rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
     // was 2048/3 splits - three full extra scene passes at that resolution
@@ -472,6 +525,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // away opposite the sun's direction, relative to the camera's current
     // spot, so the shafts stay correctly aimed as the camera moves/zooms
     lightScatteringFilter.setLightPosition(cam.getLocation().subtract(sun.getDirection().mult(400f)));
+    sunSprite.setLocalTranslation(cam.getLocation().subtract(SUN_VISUAL_DIR.mult(SUN_DISTANCE)));
 
     if (leftDown && GodTools.CONTINUOUS_TOOLS.contains(tool)) {
       Vector2f cursor = inputManager.getCursorPosition();
