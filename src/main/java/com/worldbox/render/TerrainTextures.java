@@ -288,7 +288,17 @@ public final class TerrainTextures {
   }
 
   private static Texture2D toTexture(BufferedImage img) {
-    Image jmeImage = new AWTLoader().load(img, false);
+    // flipY=true - every texture painted here assumes row 0 (a
+    // BufferedImage's top row) ends up as the TOP of the rendered result
+    // (grass painted at small y, dirt at large y; a door's "upper" panel
+    // at small y). Passing false left every one of them vertically
+    // flipped once actually mapped onto a block face - since face()'s own
+    // UV mapping puts V=0 at the bottom of a side face and an unflipped
+    // AWT image's row 0 lands at V=0 too, whatever was painted at the top
+    // of the image (grass, a door's top panel) rendered at the BOTTOM of
+    // the block instead, most visibly as grass hanging upside-down under
+    // a dirt cap on every grass block's sides.
+    Image jmeImage = new AWTLoader().load(img, true);
     Texture2D tex = new Texture2D(jmeImage);
     tex.setMagFilter(Texture.MagFilter.Nearest);
     tex.setMinFilter(Texture.MinFilter.Trilinear);
