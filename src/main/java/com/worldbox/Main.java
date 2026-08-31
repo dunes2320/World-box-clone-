@@ -26,7 +26,12 @@ public class Main {
     settings.setFullscreen(fullscreen);
     settings.setTitle("World Box 3D");
     settings.setResizable(false);
-    settings.setSamples(4);
+    // was 4x MSAA on top of the FXAA post-filter GameApp already runs -
+    // paying for two antialiasing passes at once, and the hardware MSAA
+    // multiplies the cost of every other pass in the filter stack (SSAO,
+    // shadows, bloom) since they all run against the multisampled buffer.
+    // FXAA alone is enough at this camera's usual distance.
+    settings.setSamples(1);
     settings.setAudioRenderer(null);
     app.setSettings(settings);
     app.setShowSettings(false);

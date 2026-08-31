@@ -131,8 +131,13 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     rootNode.addLight(sun);
 
     rootNode.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
+    // was 2048/3 splits - three full extra scene passes at that resolution
+    // was the single heaviest thing in this filter stack and the main
+    // reason frame rate tanked once a settlement's worth of geometry was
+    // on screen. 1024/2 still reads as real directional shadow at this
+    // camera's usual distance, for close to a quarter of the render cost.
     com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
-        new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 2048, 3);
+        new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 1024, 2);
     shadowRenderer.setLight(sun);
     // was 0.72 - strong enough that a small isolated block (a dug hole's
     // rim, a lone beach mound) facing away from the sun could go solid
@@ -161,17 +166,24 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // block seam/crevice to near-black instead of a soft contact shadow.
     // Bias bumped up too, to soften self-shadowing on flat faces.
     com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 1.4f, 0.2f, 0.15f);
+    // approximates surface normals from the depth buffer instead of
+    // sampling a separate normal buffer - a real cost cut for a filter
+    // that's already the most expensive thing running every frame, at a
+    // softness difference too small to notice at this camera's distance.
+    ssao.setApproximateNormals(true);
     fpp.addFilter(ssao);
 
     // light shafts through the trees/hills toward the sun - the other
     // instantly-recognizable "shader pack" cue alongside long shadows.
-    // Kept modest (low light density, few samples) since this camera
-    // looks down at the world far more than it looks toward the horizon,
-    // so the shafts should read as a soft glow near the sun rather than
-    // a heavy, distracting streak across the whole screen.
+    // Kept modest (low light density, few samples - was 40, halved again
+    // since this is a purely decorative full-screen pass and the extra
+    // samples bought very little visible smoothness over this one) since
+    // this camera looks down at the world far more than it looks toward
+    // the horizon, so the shafts should read as a soft glow near the sun
+    // rather than a heavy, distracting streak across the whole screen.
     lightScatteringFilter = new com.jme3.post.filters.LightScatteringFilter();
     lightScatteringFilter.setLightDensity(0.8f);
-    lightScatteringFilter.setNbSamples(40);
+    lightScatteringFilter.setNbSamples(16);
     lightScatteringFilter.setBlurStart(0.05f);
     lightScatteringFilter.setBlurWidth(0.6f);
     fpp.addFilter(lightScatteringFilter);
