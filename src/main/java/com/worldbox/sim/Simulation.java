@@ -44,8 +44,21 @@ public class Simulation {
     }
   }
 
+  /** How many voxel cells' worth of pending water flow to resolve per
+   * tick (see VoxelWorld.tickWaterFlow) - cheap per cell (a handful of
+   * neighbor lookups), but a huge dug-out area could otherwise queue
+   * tens of thousands of them at once, so this is spread out instead of
+   * drained in a single tick. */
+  private static final int WATER_FLOW_BUDGET = 800;
+
   public static void tick(GameState state) {
     state.tick++;
+    for (long coarseKey : state.voxels.tickWaterFlow(WATER_FLOW_BUDGET)) {
+      int cx = (int) (coarseKey % state.grid.cols);
+      int cz = (int) (coarseKey / state.grid.cols);
+      state.voxels.resyncHeight(state.grid, cx, cz);
+      state.grid.markDirtyIdx(state.grid.idx(cx, cz));
+    }
     Population.update(state);
     Settlement.update(state);
     Nation.update(state);

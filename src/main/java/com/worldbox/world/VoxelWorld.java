@@ -3,10 +3,8 @@ package com.worldbox.world;
 import com.worldbox.config.Config;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 /** A real 3D block grid, generated from the existing 2D heightmap/terrain
@@ -317,72 +315,91 @@ public class VoxelWorld implements java.io.Serializable {
     flowWaterInto(fx, fz);
   }
 
-  /** The actual rule: any AIR block at or below sea level that is directly
-   * touching a WATER block becomes water itself. After digging/terraforming
-   * exposes empty space below WATER_LEVEL, this floods it the way a real
-   * hole dug at the water's edge floods - not stay a dry pit just because
-   * nothing painted it as a lake at worldgen time. And because a
-   * newly-flooded block is now itself water, it can flood ITS OWN air
-   * neighbors in turn - this is a real flood-fill outward from wherever
-   * this edit exposed new air, through every connected air block below sea
-   * level, not just a single column.
-   *
-   * Deliberately does not flood an air pocket that never actually reaches
-   * a real water block: plenty of ordinary dry land (a low beach, a marshy
-   * hollow, a sealed basement dug out below sea level) legitimately sits
-   * below WATER_LEVEL with nothing but open air around it, on purpose -
-   * flooding every low spot unconditionally the moment it's touched would
-   * drown ground that was never meant to be water at all. So this explores
-   * the whole connected air pocket first and only actually fills it with
-   * water if that exploration finds a real water block somewhere in it.
-   * Bounded (FLOOD_BUDGET) so an unusually large connected cavity can't
-   * stall a tick; a fully-flooded column short-circuits back out on any
-   * later call (its air is already water, so there's nothing left to seed
-   * the search with). Fine-column coordinates. */
-  private static final int FLOOD_BUDGET = 4000;
+  /** Pending cells to check for water flow (see tickWaterFlow) - a real,
+   * ongoing fluid simulation instead of a one-shot flood resolved
+   * instantly (and only partially - see below) at the moment of a single
+   * edit. Transient: not worth persisting through a save, a reload just
+   * re-settles from whatever's actually still air, which happens within
+   * a few ticks anyway. */
+  private transient ArrayDeque<Long> waterFrontier;
 
-  public void flowWaterInto(int fx, int fz) {
-    int top = columnTopY(fx, fz);
-    if (top >= WATER_LEVEL) return;
-
-    ArrayDeque<int[]> frontier = new ArrayDeque<>();
-    List<int[]> pocket = new ArrayList<>();
-    Set<Long> visited = new HashSet<>();
-    for (int y = top + 1; y <= WATER_LEVEL; y++) {
-      if (get(fx, y, fz) == AIR) {
-        int[] p = {fx, y, fz};
-        frontier.add(p);
-        pocket.add(p);
-        visited.add(voxelKey(fx, y, fz));
-      }
-    }
-    if (frontier.isEmpty()) return;
-
-    boolean touchesWater = false;
-    int budget = FLOOD_BUDGET;
-    while (!frontier.isEmpty() && budget-- > 0) {
-      int[] p = frontier.poll();
-      int[][] neighbors = {
-          {p[0] + 1, p[1], p[2]}, {p[0] - 1, p[1], p[2]},
-          {p[0], p[1] + 1, p[2]}, {p[0], p[1] - 1, p[2]},
-          {p[0], p[1], p[2] + 1}, {p[0], p[1], p[2] - 1},
-      };
-      for (int[] n : neighbors) {
-        if (n[1] > WATER_LEVEL || n[1] < 0) continue;
-        byte b = get(n[0], n[1], n[2]);
-        if (b == WATER) { touchesWater = true; continue; }
-        if (b != AIR) continue;
-        if (!visited.add(voxelKey(n[0], n[1], n[2]))) continue;
-        frontier.add(n);
-        pocket.add(n);
-      }
-    }
-    if (!touchesWater) return;
-    for (int[] p : pocket) set(p[0], p[1], p[2], WATER);
+  private ArrayDeque<Long> waterFrontier() {
+    if (waterFrontier == null) waterFrontier = new ArrayDeque<>();
+    return waterFrontier;
   }
 
   private long voxelKey(int x, int y, int z) {
     return ((long) z * cols + x) * MAX_Y + y;
+  }
+
+  /** Queues this column's exposed-below-sea-level air to be checked by
+   * tickWaterFlow. After digging/terraforming exposes empty space below
+   * WATER_LEVEL, water needs to actually flow into it the way a real hole
+   * dug at the water's edge floods - not stay a dry pit just because
+   * nothing painted it as a lake at worldgen time. Fine-column
+   * coordinates. */
+  public void flowWaterInto(int fx, int fz) {
+    int top = columnTopY(fx, fz);
+    if (top >= WATER_LEVEL) return;
+    for (int y = top + 1; y <= WATER_LEVEL; y++) {
+      if (get(fx, y, fz) == AIR) waterFrontier().add(voxelKey(fx, y, fz));
+    }
+  }
+
+  private static final int[][] NEIGHBORS_6 = {
+      {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+  };
+
+  /** The actual fluid rule, run incrementally: any AIR block at or below
+   * sea level that's directly touching a WATER block becomes water
+   * itself, and since it's now water, it can flood ITS OWN air neighbors
+   * in turn on a later call - a real flood spreading outward from
+   * wherever an edit exposed new air, through every connected air block
+   * below sea level, not stopping at some arbitrary point partway through
+   * a large connected cavity the way a single bounded pass used to (that
+   * read as an invisible wall - water flooding in for a while and then
+   * just stopping dead with nothing obviously different about the ground
+   * on the other side of it). Spread across ticks (`budget` cells per
+   * call, see Simulation.tick) instead of resolved all at once so a big
+   * flood visibly takes a moment to fill in, the way real water does,
+   * rather than teleporting to its final shape in one frame.
+   *
+   * Still deliberately does not flood an air pocket that never actually
+   * reaches a real water block: plenty of ordinary dry land (a low beach,
+   * a marshy hollow, a sealed basement dug below sea level) legitimately
+   * sits below WATER_LEVEL with nothing around it, on purpose. A cell only
+   * becomes water once ONE of its neighbors already is - a pocket with no
+   * water anywhere in it never gets a first cell to start from, so it
+   * just sits in the frontier queue, gets discarded once checked, and
+   * stays dry, same as before. Returns every COARSE (WorldGrid) cell that
+   * actually changed, so the caller can resync WorldGrid's own terrain/
+   * height classification for them (see resyncHeight). */
+  public Set<Long> tickWaterFlow(int budget) {
+    Set<Long> touchedCoarse = null;
+    ArrayDeque<Long> q = waterFrontier();
+    for (int steps = 0; steps < budget && !q.isEmpty(); steps++) {
+      long key = q.poll();
+      int y = (int) (key % MAX_Y);
+      long rest = key / MAX_Y;
+      int x = (int) (rest % cols);
+      int z = (int) (rest / cols);
+      if (get(x, y, z) != AIR) continue; // already resolved since it was queued
+
+      boolean touchesWater = false;
+      for (int[] d : NEIGHBORS_6) {
+        int nx = x + d[0], ny = y + d[1], nz = z + d[2];
+        if (nx < 0 || nz < 0 || nx >= cols || nz >= rows || ny < 0 || ny > WATER_LEVEL) continue;
+        byte b = get(nx, ny, nz);
+        if (b == WATER) touchesWater = true;
+        else if (b == AIR) q.add(voxelKey(nx, ny, nz));
+      }
+      if (touchesWater) {
+        set(x, y, z, WATER);
+        if (touchedCoarse == null) touchedCoarse = new HashSet<>();
+        touchedCoarse.add((long) (z / FINE) * coarseCols + (x / FINE));
+      }
+    }
+    return touchedCoarse == null ? java.util.Collections.emptySet() : touchedCoarse;
   }
 
   /** Repaints every fine sub-column's surface block under this coarse
