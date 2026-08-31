@@ -109,7 +109,18 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     // 0-1 range for the directional term to actually carve out, so a lit
     // block and a shadowed block read as visibly different instead of
     // both sitting close to the same washed-out ambient-dominated value.
-    rootNode.addLight(new AmbientLight(new ColorRGBA(0.26f, 0.28f, 0.32f, 1f)));
+    //
+    // That went too far the other way for a face with NO direct light at
+    // all (pointing away from the sun): its color is ambient-only to
+    // begin with, and once the cast-shadow modulate and SSAO's occlusion
+    // term both multiply that same already-dim value further, a small
+    // isolated block's away-facing side (a dug hole's rim, a lone beach
+    // mound) crushed all the way to true black - reading as "the water
+    // just isn't there" rather than a shaded face. Splitting the
+    // difference (0.3 -> 0.34) keeps most of that contrast while giving
+    // the darkest, ambient-only faces enough of a floor that stacking
+    // shadow and AO on top of them can no longer reach actual zero.
+    rootNode.addLight(new AmbientLight(new ColorRGBA(0.30f, 0.32f, 0.36f, 1f)));
     sun = new DirectionalLight();
     // a lower, more grazing angle than before (-1 on Y was near-noon
     // overhead) throws longer, more dramatic shadows across the terrain -
@@ -123,7 +134,17 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
         new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 2048, 3);
     shadowRenderer.setLight(sun);
-    shadowRenderer.setShadowIntensity(0.72f);
+    // was 0.72 - strong enough that a small isolated block (a dug hole's
+    // rim, a lone beach mound) facing away from the sun could go solid
+    // black once its own cast shadow stacked on top of already having no
+    // direct light: Blend Modulate multiplies the existing color by
+    // (1 - intensity), so at 0.72 even a lit neighboring face's spill
+    // barely survived, and a face with none to begin with crushed to
+    // near-zero. That read as "the water just isn't there" rather than a
+    // shading effect. Lower still reads as real directional shadow
+    // (this scene's whole "shader pack" look leans on long dramatic
+    // shadows on purpose) without being able to push anything to true black.
+    shadowRenderer.setShadowIntensity(0.3f);
     shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
     viewPort.addProcessor(shadowRenderer);
 
