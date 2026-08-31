@@ -394,12 +394,9 @@ public class VoxelChunkRenderer {
   }
 
   /** Blends fire glow, territory-owner tint, and road/farmland overlays
-   * into a top face's color, matching the old smooth terrain's look.
-   * Territory itself gets only a faint wash so it doesn't wash out the
-   * underlying terrain, but the actual border - where ownership changes,
-   * including at the map edge - gets a strong accent (a brightened tint of
-   * the nation's own color) so borders are actually visible from a normal
-   * play camera distance instead of needing to zoom in to spot them. */
+   * into a top face's color, matching the old smooth terrain's look. No
+   * separate border-accent pass anymore (see git history) - just a flat
+   * interior tint for every cell a nation owns. */
   private ColorRGBA topColor(int fx, int fz, ColorRGBA base) {
     // territory/road/farmland/fire are all COARSE WorldGrid data - a fine
     // column's tint always comes from whichever coarse cell it sits in
@@ -414,63 +411,25 @@ public class VoxelChunkRenderer {
     if (owner >= 0 && warFlashOn && warFlashNations.contains(owner)) {
       // hovering over a nation that's at war highlights whoever it's
       // fighting - a hard, unmissable red pulse that overrides the
-      // normal interior/border coloring entirely while it's "on"
+      // normal interior coloring entirely while it's "on"
       c.interpolateLocal(WAR_FLASH_COLOR, 0.75f);
       return c;
     }
     if (owner >= 0 && nationColor != null) {
-      if (isBorderCell(x, z, owner)) {
-        // the border is its own complementary color now (see
-        // Nation.borderColor), not just a brightened version of the
-        // interior - a strong accent so it's actually visible from a
-        // normal play camera distance
-        ColorRGBA bc = nationColor.borderColorFor(owner);
-        if (bc != null) {
-          ColorRGBA accent = new ColorRGBA(
-              Math.min(1f, bc.r * 1.3f + 0.1f), Math.min(1f, bc.g * 1.3f + 0.1f), Math.min(1f, bc.b * 1.3f + 0.1f), 1f);
-          c.interpolateLocal(accent, 0.88f);
-        }
-      } else {
-        ColorRGBA nc = nationColor.colorFor(owner);
-        if (nc != null) {
-          // a genuinely darker interior, not just a faint wash of the
-          // full-brightness color - reads as "this ground belongs to
-          // someone" without competing with the border for attention.
-          // The old 0.3 blend of an already-halved color was reading as
-          // "practically invisible" against real terrain/lighting - this
-          // is a clearly visible tint at a normal play camera distance
-          // without fully overpowering the underlying terrain texture.
-          ColorRGBA darker = new ColorRGBA(nc.r * 0.62f, nc.g * 0.62f, nc.b * 0.62f, 1f);
-          c.interpolateLocal(darker, 0.5f);
-        }
+      ColorRGBA nc = nationColor.colorFor(owner);
+      if (nc != null) {
+        // a genuinely darker interior, not just a faint wash of the
+        // full-brightness color - reads as "this ground belongs to
+        // someone" without competing with the border for attention.
+        // The old 0.3 blend of an already-halved color was reading as
+        // "practically invisible" against real terrain/lighting - this
+        // is a clearly visible tint at a normal play camera distance
+        // without fully overpowering the underlying terrain texture.
+        ColorRGBA darker = new ColorRGBA(nc.r * 0.62f, nc.g * 0.62f, nc.b * 0.62f, 1f);
+        c.interpolateLocal(darker, 0.5f);
       }
     }
     return c;
-  }
-
-  private boolean borderNeighborDiffers(int x, int z, int owner) {
-    // the literal edge of the map isn't a real border with anyone - this
-    // used to treat "off the map" as "definitely a different owner",
-    // which painted a bright accent-colored line along the entire outer
-    // edge of the world for any nation whose territory reached it (read
-    // as a stray rendering glitch, not a real border)
-    if (!grid.inBounds(x, z)) return false;
-    return grid.ownerNation[grid.idx(x, z)] != owner;
-  }
-
-  // a border only 1 cell wide (immediate neighbors only) was a near-hairline
-  // stripe at any normal play camera distance - checking a wider
-  // neighborhood makes the border read as an actual visible band instead
-  private static final int BORDER_WIDTH = 2;
-
-  private boolean isBorderCell(int x, int z, int owner) {
-    for (int dz = -BORDER_WIDTH; dz <= BORDER_WIDTH; dz++) {
-      for (int dx = -BORDER_WIDTH; dx <= BORDER_WIDTH; dx++) {
-        if (dx == 0 && dz == 0) continue;
-        if (borderNeighborDiffers(x + dx, z + dz, owner)) return true;
-      }
-    }
-    return false;
   }
 
   private enum Face { TOP, BOTTOM, NORTH, SOUTH, EAST, WEST }
