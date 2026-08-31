@@ -32,9 +32,9 @@ public final class TerrainTextures {
     BufferedImage img = new BufferedImage(TILE * TILE_COUNT, TILE, BufferedImage.TYPE_INT_ARGB);
     paintGrassTop(img, GRASS_TOP * TILE);
     paintGrassSide(img, GRASS_SIDE * TILE);
-    paintSpeckle(img, DIRT * TILE, 0x7A5B3A, 0x5E4529, 0x8C6C46, 0.55f, 0xA11);
+    paintSpeckle(img, DIRT * TILE, 0x9C6A3E, 0x7A4F28, 0xC08A52, 0.55f, 0xA11);
     paintStone(img, STONE * TILE);
-    paintSpeckle(img, SAND * TILE, 0xD9C58A, 0xC7B172, 0xE6D6A0, 0.35f, 0xB22);
+    paintSpeckle(img, SAND * TILE, 0xF2D98A, 0xE0C066, 0xFCEBB4, 0.35f, 0xB22);
     paintWater(img, WATER * TILE);
     return toTexture(img);
   }
@@ -51,7 +51,7 @@ public final class TerrainTextures {
    * (see EntityRenderer), not part of the terrain atlas. */
   public static Texture2D buildLogTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x6B4A2E, dark = 0x543A24, light = 0x7E5A3A;
+    int base = 0x8A5A34, dark = 0x6B4527, light = 0xA47040;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         float t = noise01(x, y, 0xD01);
@@ -70,7 +70,7 @@ public final class TerrainTextures {
    * than a flat green box. */
   public static Texture2D buildLeafTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x3F8A34, dark = 0x2C651F, light = 0x59A648;
+    int base = 0x4FB53E, dark = 0x358A28, light = 0x74D95E;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         float t = noise01(x, y, 0xE01);
@@ -88,7 +88,7 @@ public final class TerrainTextures {
    * building reads as built from timber rather than a solid color box. */
   public static Texture2D buildPlankTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x9C7444, dark = 0x7C5A34, light = 0xB18A56;
+    int base = 0xC08A4E, dark = 0x9C6B38, light = 0xDCAA6C;
     int rowHeight = 4;
     for (int y = 0; y < TILE; y++) {
       boolean seam = y % rowHeight == 0;
@@ -108,7 +108,7 @@ public final class TerrainTextures {
    * for terrain. */
   public static Texture2D buildBrickTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x9A9CA2, mortar = 0x616469;
+    int base = 0xB5B8BF, mortar = 0x74777D;
     int brickH = 4, brickW = 8;
     for (int y = 0; y < TILE; y++) {
       int rowOffset = ((y / brickH) % 2 == 0) ? 0 : brickW / 2;
@@ -116,7 +116,7 @@ public final class TerrainTextures {
       for (int x = 0; x < TILE; x++) {
         boolean vMortar = ((x + rowOffset) % brickW) == 0;
         float t = noise01(x, y, 0xF11);
-        int c = mix(base, base, 0xACAEB3, t);
+        int c = mix(base, base, 0xCBCDD2, t);
         if (hMortar || vMortar) c = mortar;
         img.setRGB(x, y, c);
       }
@@ -133,7 +133,7 @@ public final class TerrainTextures {
    * different material than the walls under it. */
   public static Texture2D buildRoofTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x8B3A2E, dark = 0x6E2C22, light = 0xA34A3A;
+    int base = 0xC94A38, dark = 0x9E3226, light = 0xE86B52;
     int rowHeight = 2;
     for (int y = 0; y < TILE; y++) {
       int rowOffset = ((y / rowHeight) % 2 == 0) ? 0 : 2;
@@ -156,7 +156,7 @@ public final class TerrainTextures {
    * way a real cobblestone plinth does. */
   public static Texture2D buildCobbleTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x7D7F84, dark = 0x55575C, light = 0x93959A;
+    int base = 0x909298, dark = 0x686A70, light = 0xACAEB4;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         // a coarse per-lump id (4x4 cells) so each "stone" gets one
@@ -179,7 +179,7 @@ public final class TerrainTextures {
    * mortared brick tiles. */
   public static Texture2D buildQuartzTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0xE9E4D8, dark = 0xCFC8B6, light = 0xF7F3EA;
+    int base = 0xF0ECE0, dark = 0xDAD2BE, light = 0xFFFCF4;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         float t = noise01(x, y, 0xD71);
@@ -199,7 +199,7 @@ public final class TerrainTextures {
    * doorknob dot. */
   public static Texture2D buildDoorTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int base = 0x5A3A22, dark = 0x432A18, light = 0x6B4A2E, panel = 0x4E301C;
+    int base = 0x714626, dark = 0x54331C, light = 0x8C5C34, panel = 0x63401F;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         float t = noise01(x, y, 0xA31);
@@ -226,7 +226,7 @@ public final class TerrainTextures {
    * alpha here actually matters, not just RGB. */
   public static Texture2D buildGlassTexture() {
     BufferedImage img = new BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB);
-    int pane = 0xBFE0EE, paneLight = 0xD8EEF6, mullion = 0x5A3A22;
+    int pane = 0xCDEBF7, paneLight = 0xE8F7FC, mullion = 0x714626;
     int alpha = 210;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
@@ -251,7 +251,7 @@ public final class TerrainTextures {
    * this" without the cost of a live reflection camera pass. */
   public static com.jme3.texture.TextureCubeMap buildSkyCubeMap() {
     int size = 16;
-    int skyTop = 0x5B93D6, horizon = 0x9DC0DE, ground = 0x596B57;
+    int skyTop = 0x4FA8F0, horizon = 0xB8E0F5, ground = 0x6B8B5A;
     java.util.ArrayList<java.nio.ByteBuffer> faces = new java.util.ArrayList<>();
     faces.add(gradientFace(size, skyTop, horizon)); // +X
     faces.add(gradientFace(size, skyTop, horizon)); // -X
@@ -332,7 +332,7 @@ public final class TerrainTextures {
   }
 
   private static void paintGrassTop(BufferedImage img, int ox) {
-    int base = 0x4E9C3F, dark = 0x3D7E2F, light = 0x64B454;
+    int base = 0x5FCB4A, dark = 0x3E9E31, light = 0x86EA6C;
     paintSpeckle(img, ox, base, dark, light, 0.4f, 0x910);
     // a handful of single-pixel "blade tuft" flecks in a third, brighter
     // green so the top doesn't read as pure uniform speckle
@@ -344,8 +344,8 @@ public final class TerrainTextures {
   }
 
   private static void paintGrassSide(BufferedImage img, int ox) {
-    int dirtBase = 0x7A5B3A, dirtDark = 0x5E4529, dirtLight = 0x8C6C46;
-    int grassBase = 0x4E9C3F, grassDark = 0x3D7E2F, grassLight = 0x64B454;
+    int dirtBase = 0x9C6A3E, dirtDark = 0x7A4F28, dirtLight = 0xC08A52;
+    int grassBase = 0x5FCB4A, grassDark = 0x3E9E31, grassLight = 0x86EA6C;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         // a jagged (not straight) grass/dirt boundary, varying a couple of
@@ -363,7 +363,7 @@ public final class TerrainTextures {
   }
 
   private static void paintStone(BufferedImage img, int ox) {
-    int base = 0x8B8F96, dark = 0x6E7278, light = 0x9EA2A8;
+    int base = 0x9FA6B0, dark = 0x707880, light = 0xC7CDD5;
     paintSpeckle(img, ox, base, dark, light, 0.5f, 0xA33);
     // occasional darker "crack" pixel pairs and a rare lighter mineral
     // glint, both single pixels so they read as texture, not a pattern
@@ -377,7 +377,7 @@ public final class TerrainTextures {
   }
 
   private static void paintWater(BufferedImage img, int ox) {
-    int base = 0x2E63A8, dark = 0x1E4A85, light = 0x4B84C9;
+    int base = 0x2E9CD6, dark = 0x1E74B0, light = 0x64C7EE;
     for (int y = 0; y < TILE; y++) {
       for (int x = 0; x < TILE; x++) {
         // soft diagonal bands read as a ripple pattern even static, and

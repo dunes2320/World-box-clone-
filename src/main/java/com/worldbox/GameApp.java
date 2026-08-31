@@ -123,35 +123,20 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     state = Simulation.createInitialState();
     camTarget.set(Config.COLS / 2f, 0, Config.ROWS / 2f);
 
-    viewPort.setBackgroundColor(new ColorRGBA(0.56f, 0.78f, 0.91f, 1f));
-    // Lighting.j3md just adds ambient+diffuse and clamps at 1.0 with no
-    // tonemapping, so a bright ambient+directional combo saturates every
-    // surface to white regardless of its own color - that headroom is why
-    // this stays modest rather than a naive "just make it brighter". The
-    // actual fix for "lighting reads as flat" is contrast, not brightness:
-    // pulling the ambient floor down (0.4 -> 0.3) leaves much more of the
-    // 0-1 range for the directional term to actually carve out, so a lit
-    // block and a shadowed block read as visibly different instead of
-    // both sitting close to the same washed-out ambient-dominated value.
-    //
-    // That went too far the other way for a face with NO direct light at
-    // all (pointing away from the sun): its color is ambient-only to
-    // begin with, and once the cast-shadow modulate and SSAO's occlusion
-    // term both multiply that same already-dim value further, a small
-    // isolated block's away-facing side (a dug hole's rim, a lone beach
-    // mound) crushed all the way to true black - reading as "the water
-    // just isn't there" rather than a shaded face. Splitting the
-    // difference (0.3 -> 0.34) keeps most of that contrast while giving
-    // the darkest, ambient-only faces enough of a floor that stacking
-    // shadow and AO on top of them can no longer reach actual zero.
-    rootNode.addLight(new AmbientLight(new ColorRGBA(0.30f, 0.32f, 0.36f, 1f)));
+    viewPort.setBackgroundColor(new ColorRGBA(0.45f, 0.76f, 0.96f, 1f));
+    // Moved off the earlier "realistic shader pack" approach (a dim
+    // ambient floor doing most of the contrast work via SSAO/shadow/fog
+    // darkening everything else) toward a bright, flat, cartoon look
+    // instead - a much brighter ambient fill so shadowed faces stay
+    // clearly readable and colorful rather than crushing dark, since
+    // vividness here comes from saturated block colors and light contrast
+    // rather than deep shadow.
+    rootNode.addLight(new AmbientLight(new ColorRGBA(0.58f, 0.60f, 0.64f, 1f)));
     sun = new DirectionalLight();
-    // a lower, more grazing angle than before (-1 on Y was near-noon
-    // overhead) throws longer, more dramatic shadows across the terrain -
-    // the single biggest cue that reads as "a shader pack is on" in every
-    // Minecraft shader screenshot, where the sun is rarely straight up.
     sun.setDirection(new Vector3f(-0.55f, -0.72f, -0.45f).normalizeLocal());
-    sun.setColor(new ColorRGBA(0.95f, 0.86f, 0.68f, 1f));
+    // warm and bright rather than the previous muted late-afternoon tone -
+    // reads as a cheerful, sunny cartoon light instead of moody realism.
+    sun.setColor(new ColorRGBA(1.05f, 0.98f, 0.82f, 1f));
     rootNode.addLight(sun);
 
     // A real skybox - the SAME procedural cubemap water already uses as
@@ -192,48 +177,30 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     com.jme3.shadow.DirectionalLightShadowRenderer shadowRenderer =
         new com.jme3.shadow.DirectionalLightShadowRenderer(assetManager, 1024, 2);
     shadowRenderer.setLight(sun);
-    // was 0.72 - strong enough that a small isolated block (a dug hole's
-    // rim, a lone beach mound) facing away from the sun could go solid
-    // black once its own cast shadow stacked on top of already having no
-    // direct light: Blend Modulate multiplies the existing color by
-    // (1 - intensity), so at 0.72 even a lit neighboring face's spill
-    // barely survived, and a face with none to begin with crushed to
-    // near-zero. That read as "the water just isn't there" rather than a
-    // shading effect. Lower still reads as real directional shadow
-    // (this scene's whole "shader pack" look leans on long dramatic
-    // shadows on purpose) without being able to push anything to true black.
-    shadowRenderer.setShadowIntensity(0.3f);
+    // Cartoon look wants a hint of grounding shadow, not the dramatic,
+    // deep-contact-darkening look this used to lean into - much softer
+    // than before, and there's no more SSAO stacking another darkening
+    // pass on top of it (see below), so this alone stays gentle without
+    // any face crushing toward black.
+    shadowRenderer.setShadowIntensity(0.15f);
     shadowRenderer.setEdgeFilteringMode(com.jme3.shadow.EdgeFilteringMode.Bilinear);
     viewPort.addProcessor(shadowRenderer);
 
-    // Genre peers this style draws from (Townscaper, Kingdoms and Castles,
-    // WorldBox's own newer look) all lean on the same two cheap tricks to
-    // read as "a considered art style" rather than "flat untextured
-    // blocks": soft contact shadows in every crevice (ambient occlusion),
-    // and a gentle glow on the brightest surfaces instead of a hard clip
-    // at white. Neither needs any actual texture work, and both are cheap
-    // screen-space post effects.
+    // Bright/vivid/cartoony over "a considered realistic art style" now -
+    // screen-space ambient occlusion and ground fog both spend their
+    // whole budget dimming and desaturating exactly the things a cartoon
+    // look wants punchy and clear, so neither survives here (also a real
+    // frame-rate win on its own: SSAO was the single heaviest thing in
+    // this filter stack, and fog was a full extra pass on top of it).
+    // Bloom stays - a glowy highlight sheen reads as vivid/cheerful, not
+    // moody, and costs comparatively little.
     com.jme3.post.FilterPostProcessor fpp = new com.jme3.post.FilterPostProcessor(assetManager);
-    // intensity was 8.0 - jME's own SSAOFilter default is ~1.2, so this
-    // was nearly 7x stronger than a normal AO pass and crushed every
-    // block seam/crevice to near-black instead of a soft contact shadow.
-    // Bias bumped up too, to soften self-shadowing on flat faces.
-    com.jme3.post.ssao.SSAOFilter ssao = new com.jme3.post.ssao.SSAOFilter(3.2f, 1.4f, 0.2f, 0.15f);
-    // approximates surface normals from the depth buffer instead of
-    // sampling a separate normal buffer - a real cost cut for a filter
-    // that's already the most expensive thing running every frame, at a
-    // softness difference too small to notice at this camera's distance.
-    ssao.setApproximateNormals(true);
-    fpp.addFilter(ssao);
 
-    // light shafts through the trees/hills toward the sun - the other
-    // instantly-recognizable "shader pack" cue alongside long shadows.
-    // Kept modest (low light density, few samples - was 40, halved again
-    // since this is a purely decorative full-screen pass and the extra
-    // samples bought very little visible smoothness over this one) since
-    // this camera looks down at the world far more than it looks toward
-    // the horizon, so the shafts should read as a soft glow near the sun
-    // rather than a heavy, distracting streak across the whole screen.
+    // light shafts through the trees/hills toward the sun - kept modest
+    // (low light density, few samples) since this camera looks down at
+    // the world far more than it looks toward the horizon, so the shafts
+    // should read as a soft glow near the sun rather than a heavy,
+    // distracting streak across the whole screen.
     lightScatteringFilter = new com.jme3.post.filters.LightScatteringFilter();
     lightScatteringFilter.setLightDensity(0.8f);
     lightScatteringFilter.setNbSamples(16);
@@ -241,29 +208,26 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     lightScatteringFilter.setBlurWidth(0.6f);
     fpp.addFilter(lightScatteringFilter);
 
+    // a bit stronger and triggered a bit earlier than before (was 0.9/
+    // 0.25) - now that nothing else in the stack is darkening the scene,
+    // this is the one thing left doing the "glossy, vivid, cartoon shine"
+    // work on bright surfaces and the sun/water highlights.
     com.jme3.post.filters.BloomFilter bloom = new com.jme3.post.filters.BloomFilter(com.jme3.post.filters.BloomFilter.GlowMode.Scene);
-    bloom.setBloomIntensity(0.9f);
+    bloom.setBloomIntensity(1.15f);
     bloom.setExposurePower(4.2f);
-    bloom.setExposureCutOff(0.25f);
+    bloom.setExposureCutOff(0.2f);
     bloom.setBlurScale(1.1f);
     fpp.addFilter(bloom);
 
-    // a soft, sky-matched haze on distant terrain - real depth instead of
-    // the map's far edge just clipping into flat color, and it also
-    // softens the harder edges of long-distance voxel geometry the same
-    // way a shader pack's volumetric fog does.
-    com.jme3.post.filters.FogFilter fog = new com.jme3.post.filters.FogFilter();
-    fog.setFogColor(new ColorRGBA(0.62f, 0.8f, 0.92f, 1f));
-    fog.setFogDistance(190f);
-    fog.setFogDensity(1.1f);
-    fpp.addFilter(fog);
-
     // filmic highlight rolloff - Lighting.j3md has no tonemapping of its
-    // own (see the ambient-light comment above), so a bright bloom source
-    // still clips hard to flat white right at its core; this rounds that
-    // off into a softer, HDR-glow-like falloff instead.
+    // own, so a bright ambient+directional+bloom combo would otherwise
+    // clip hard to flat white. Raised further (was 11) now that the base
+    // lighting itself runs brighter and there's no more fog/SSAO eating
+    // into headroom from the other side - keeps colors saturated and
+    // punchy further up the brightness range before rounding off, instead
+    // of washing out early.
     com.jme3.post.filters.ToneMapFilter toneMap = new com.jme3.post.filters.ToneMapFilter();
-    toneMap.setWhitePoint(new Vector3f(11f, 11f, 11f));
+    toneMap.setWhitePoint(new Vector3f(15f, 15f, 15f));
     fpp.addFilter(toneMap);
 
     fpp.addFilter(new com.jme3.post.filters.FXAAFilter());

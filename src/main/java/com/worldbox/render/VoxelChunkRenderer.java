@@ -22,22 +22,27 @@ import java.util.Map;
  * direction - a cheap fake-shading trick so the blocky world reads with
  * some depth without needing real lighting. */
 public class VoxelChunkRenderer {
+  // Bright, saturated cartoon palette - was a much muted, earthy set of
+  // tones (part of the earlier "realistic shader pack" look); pushed
+  // toward punchier, more distinct hues so each terrain type reads as a
+  // clear, vivid color rather than a desaturated approximation of a real
+  // material.
   private static final Map<Byte, ColorRGBA> BLOCK_COLOR = new HashMap<>();
   static {
-    BLOCK_COLOR.put(VoxelWorld.GRASS, new ColorRGBA(0.310f, 0.604f, 0.267f, 1f));
-    BLOCK_COLOR.put(VoxelWorld.DIRT, new ColorRGBA(0.478f, 0.357f, 0.227f, 1f));
-    BLOCK_COLOR.put(VoxelWorld.SAND, new ColorRGBA(0.851f, 0.773f, 0.541f, 1f));
-    BLOCK_COLOR.put(VoxelWorld.STONE, new ColorRGBA(0.545f, 0.561f, 0.588f, 1f));
+    BLOCK_COLOR.put(VoxelWorld.GRASS, new ColorRGBA(0.373f, 0.796f, 0.290f, 1f));
+    BLOCK_COLOR.put(VoxelWorld.DIRT, new ColorRGBA(0.612f, 0.416f, 0.243f, 1f));
+    BLOCK_COLOR.put(VoxelWorld.SAND, new ColorRGBA(0.949f, 0.851f, 0.541f, 1f));
+    BLOCK_COLOR.put(VoxelWorld.STONE, new ColorRGBA(0.624f, 0.651f, 0.690f, 1f));
     // a built path/road cell - a warm gravel tone (was the old ROAD_TINT
     // color-wash applied over whatever terrain happened to be there) on
     // the same fractured-rock stone tile, so a real path visibly reads
     // as "laid gravel", not just grass painted a different color
-    BLOCK_COLOR.put(VoxelWorld.PATH, new ColorRGBA(0.68f, 0.63f, 0.53f, 1f));
+    BLOCK_COLOR.put(VoxelWorld.PATH, new ColorRGBA(0.78f, 0.72f, 0.60f, 1f));
   }
-  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.098f, 0.310f, 0.560f, 0.92f);
+  private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.180f, 0.612f, 0.839f, 0.85f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
-  private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.62f, 0.48f, 0.26f, 1f);
-  private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.68f, 0.63f, 0.53f, 1f);
+  private static final ColorRGBA FARMLAND_TINT = new ColorRGBA(0.72f, 0.56f, 0.30f, 1f);
+  private static final ColorRGBA ROAD_TINT = new ColorRGBA(0.78f, 0.72f, 0.60f, 1f);
   private static final ColorRGBA WAR_FLASH_COLOR = new ColorRGBA(0.95f, 0.1f, 0.08f, 1f);
   // purely a rendering-layer touch so the mountain spine reads as a real
   // peak instead of the same flat grey stone all the way up - no new block
