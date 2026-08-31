@@ -145,11 +145,11 @@ public class VoxelWorld implements java.io.Serializable {
         // (not every one - most stay flush with their coarse cell) so
         // upsampling to real smaller blocks actually shows new
         // bumps/weathering at the finer scale instead of just re-tiling
-        // the exact same flat surface at a higher block count. Never
-        // touches water or the outermost 2 columns of a cell (keeps
-        // shorelines/cliffs reading as clean edges rather than fuzzy
-        // noise).
-        if (terrain != Config.WATER) {
+        // the exact same flat surface at a higher block count. Excludes
+        // water and sand: sand is the shoreline fringe, and jittering it
+        // undoes the rounding above that keeps it flush with the fixed
+        // WATER_LEVEL plane, showing up as a ragged, "sunken" coastline.
+        if (terrain != Config.WATER && terrain != Config.SAND) {
           int jitter = fineHash(x, z);
           if (jitter == 0) h -= 1;
           else if (jitter == 1) h += 1;
