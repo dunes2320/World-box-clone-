@@ -15,6 +15,7 @@ public class GameState implements java.io.Serializable {
   public WorldGrid grid;
   public VoxelWorld voxels;
   public List<Human> humans = new ArrayList<>();
+  public List<Animal> animals = new ArrayList<>();
   public Map<Integer, Settlement> settlements = new LinkedHashMap<>();
   public Map<Integer, Nation> nations = new LinkedHashMap<>();
   public Map<Integer, Army> armies = new LinkedHashMap<>();

@@ -25,6 +25,7 @@ public class Simulation {
     }
 
     seedWanderers(state, 30);
+    Wildlife.spawn(state, seed);
     return state;
   }
 
@@ -60,6 +61,7 @@ public class Simulation {
       state.grid.markDirtyIdx(state.grid.idx(cx, cz));
     }
     Population.update(state);
+    Wildlife.update(state);
     Settlement.update(state);
     Nation.update(state);
     Economy.update(state);

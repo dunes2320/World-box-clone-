@@ -118,12 +118,28 @@ public class GodTools {
         return true;
 
       case "human": {
-        int i = grid.idx(cx, cz);
-        if (grid.isLand(i) && state.humans.size() < Config.MAX_HUMANS) {
-          state.humans.add(Population.createHuman(cx + 0.5, cz + 0.5, -1, -1));
-          return true;
+        // brush size 1 still drops exactly one person dead-center (the old
+        // click-once-place-one-wanderer behavior); anything larger scatters
+        // one per eligible land cell in the brush instead of stacking a
+        // whole crowd on a single point, same "one placement per cell"
+        // idea forest/terrain painting already use for a brush.
+        if (brushSize <= 1) {
+          int i = grid.idx(cx, cz);
+          if (grid.isLand(i) && state.humans.size() < Config.MAX_HUMANS) {
+            state.humans.add(Population.createHuman(cx + 0.5, cz + 0.5, -1, -1));
+            return true;
+          }
+          return false;
         }
-        return false;
+        boolean[] spawned = {false};
+        forEachInBrush(grid, cx, cz, brushSize, (x, y) -> {
+          int i = grid.idx(x, y);
+          if (grid.isLand(i) && state.humans.size() < Config.MAX_HUMANS && Math.random() < 0.6) {
+            state.humans.add(Population.createHuman(x + 0.5, y + 0.5, -1, -1));
+            spawned[0] = true;
+          }
+        });
+        return spawned[0];
       }
 
       case "foundNation": {

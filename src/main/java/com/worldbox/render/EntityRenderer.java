@@ -13,6 +13,7 @@ import com.jme3.scene.shape.Box;
 import com.jme3.scene.shape.Cylinder;
 import com.jme3.scene.shape.Torus;
 import com.worldbox.config.Config;
+import com.worldbox.sim.Animal;
 import com.worldbox.sim.Army;
 import com.worldbox.sim.Bank;
 import com.worldbox.sim.Building;
@@ -80,12 +81,40 @@ public class EntityRenderer {
     DEPOSIT_COLORS.put(Config.RES_IRON, new ColorRGBA(0.690f, 0.416f, 0.290f, 1f));
     DEPOSIT_COLORS.put(Config.RES_GOLD, new ColorRGBA(0.902f, 0.773f, 0.247f, 1f));
   }
+  // wildlife body color per species (see Wildlife.speciesFor) - the same
+  // shared quadruped mesh, told apart purely by tint/scale.
+  private static final Map<String, ColorRGBA> SPECIES_COLOR = new HashMap<>();
+  private static final Map<String, Float> SPECIES_SCALE = new HashMap<>();
+  static {
+    SPECIES_COLOR.put("cow", new ColorRGBA(0.90f, 0.87f, 0.80f, 1f));
+    SPECIES_COLOR.put("sheep", new ColorRGBA(0.95f, 0.95f, 0.92f, 1f));
+    SPECIES_COLOR.put("deer", new ColorRGBA(0.63f, 0.44f, 0.27f, 1f));
+    SPECIES_COLOR.put("wolf", new ColorRGBA(0.42f, 0.42f, 0.45f, 1f));
+    SPECIES_COLOR.put("camel", new ColorRGBA(0.80f, 0.66f, 0.42f, 1f));
+    SPECIES_COLOR.put("goat", new ColorRGBA(0.80f, 0.78f, 0.74f, 1f));
+    SPECIES_SCALE.put("cow", 1.15f);
+    SPECIES_SCALE.put("sheep", 0.85f);
+    SPECIES_SCALE.put("deer", 1.0f);
+    SPECIES_SCALE.put("wolf", 0.85f);
+    SPECIES_SCALE.put("camel", 1.3f);
+    SPECIES_SCALE.put("goat", 0.8f);
+  }
   // Brightened along with the rest of the cartoon palette (see
   // VoxelChunkRenderer/TerrainTextures) - these used to be muted enough
   // that trees/ground foliage read visibly flatter and duller than the
   // vivid grass now under them.
   private static final ColorRGBA TREE_COLOR = new ColorRGBA(0.31f, 0.71f, 0.24f, 1f);
   private static final ColorRGBA TRUNK_COLOR = new ColorRGBA(0.54f, 0.35f, 0.20f, 1f);
+  // per-biome canopy tint (see Config.BIOME_*) so a forest, a scrubby
+  // desert copse, a dark tundra pine stand and a wetland treeline each
+  // read as visually distinct, instead of one identical tree everywhere.
+  private static ColorRGBA biomeCanopyColor(byte biome) {
+    if (biome == Config.BIOME_TUNDRA) return new ColorRGBA(0.22f, 0.48f, 0.34f, 1f);
+    if (biome == Config.BIOME_DESERT) return new ColorRGBA(0.55f, 0.62f, 0.30f, 1f);
+    if (biome == Config.BIOME_WETLAND) return new ColorRGBA(0.20f, 0.55f, 0.42f, 1f);
+    if (biome == Config.BIOME_FOREST) return new ColorRGBA(0.24f, 0.66f, 0.20f, 1f);
+    return TREE_COLOR;
+  }
   private static final ColorRGBA FOLIAGE_COLOR = new ColorRGBA(0.35f, 0.72f, 0.28f, 1f);
   private static final ColorRGBA[] FLOWER_COLORS = {
       new ColorRGBA(0.95f, 0.85f, 0.25f, 1f), // yellow
@@ -165,6 +194,7 @@ public class EntityRenderer {
   private WorldGrid grid;
 
   private final Mesh treeCanopyTemplate, treeTrunkTemplate, depositTemplate, stoneDepositTemplate, humanTemplate;
+  private final Mesh animalTemplate;
   /** A civilian's arms are their own separate meshes/geometries, pivoted
    * at the shoulder (mesh-local y=0) so they can actually swing with the
    * walk cycle instead of being rigidly baked into the torso - see
@@ -232,6 +262,10 @@ public class EntityRenderer {
 
   private final Geometry treesGeom, treeTrunksGeom, depositsGeom, stoneDepositsGeom;
   private final Geometry foliageGeom, flowersGeom;
+  private final Geometry animalsGeom;
+  private final List<PropBatcher.Placement> animalCandidates = new ArrayList<>();
+  private int animalFrameCounter = 0;
+  private static final int ANIMAL_REBUILD_INTERVAL = 4;
   // the far-population LOD batch (see NEAR_HUMAN_RADIUS) - one merged mesh
   // of humanTemplate placements, rebuilt on its own throttled cadence
   // inside updateHumans rather than rebuildStatics' tick-based one, since
@@ -518,6 +552,23 @@ public class EntityRenderer {
     foliageTemplate = MeshUtil.buildGrassTuft(0.42f);
     flowerTemplate = MeshUtil.buildGem(0.07f, 0.14f);
 
+    // a simple low-poly quadruped: box body + box head + 4 thin legs,
+    // shared by every species (see Wildlife.speciesFor) and told apart
+    // purely by per-instance color/scale (same "silhouette + tint" trick
+    // used everywhere else in this renderer) rather than a separate mesh
+    // per animal - keeps the wildlife pass cheap on a map that can hold
+    // hundreds of them. Legs bottom out at local y=0 so it sits flush on
+    // the ground; local +z is "forward" to match PropBatcher's rotY.
+    Mesh aBody = MeshUtil.translatedCopy(new Box(0.28f, 0.22f, 0.42f), 0, 0.42f, 0);
+    Mesh aHead = MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.18f), 0, 0.5f, 0.5f);
+    Mesh aLegFL = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), -0.2f, 0.2f, 0.32f);
+    Mesh aLegFR = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), 0.2f, 0.2f, 0.32f);
+    Mesh aLegBL = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), -0.2f, 0.2f, -0.32f);
+    Mesh aLegBR = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), 0.2f, 0.2f, -0.32f);
+    animalTemplate = MeshUtil.mergeMeshes(
+        MeshUtil.mergeMeshes(aBody, aHead),
+        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(aLegFL, aLegFR), MeshUtil.mergeMeshes(aLegBL, aLegBR)));
+
     // leaf/bark textures (see TerrainTextures) on top of the same per-tree
     // vertex-color variation trees already had - trees get their own
     // dedicated textured material instead of the shared flat
@@ -547,6 +598,10 @@ public class EntityRenderer {
     flowersGeom.setMaterial(vertexColorMaterial());
     flowersGeom.setShadowMode(com.jme3.renderer.queue.RenderQueue.ShadowMode.Off);
     root.attachChild(flowersGeom);
+
+    animalsGeom = new Geometry("Animals", animalTemplate.deepClone());
+    animalsGeom.setMaterial(vertexColorMaterial());
+    root.attachChild(animalsGeom);
 
     // timber vs. stone construction, same texture-pack idea as the
     // terrain/tree pass - a modest, wood-framed building (house, hut,
@@ -1128,7 +1183,7 @@ public class EntityRenderer {
           float trunkHalf = 0.42f * scale;
           float trunkTop = grid.height[i] + trunkHalf * 2;
           trunks.add(new PropBatcher.Placement(jx, grid.height[i] + trunkHalf, jz, rotY, scale, TRUNK_COLOR));
-          canopies.add(new PropBatcher.Placement(jx, trunkTop, jz, rotY, scale, TREE_COLOR));
+          canopies.add(new PropBatcher.Placement(jx, trunkTop, jz, rotY, scale, biomeCanopyColor(grid.biome[i])));
         } else if (res == Config.RES_STONE && hash01(x, y, 22) < stoneKeep) {
           float rotY = (float) ((x * 3 + y * 5) % 6.28);
           ColorRGBA c = DEPOSIT_COLORS.getOrDefault(res, ColorRGBA.White);
@@ -1285,6 +1340,7 @@ public class EntityRenderer {
     updateSettlements(state);
     buildSoldierPositions(state);
     updateHumans(state, alpha, animTime, camFocus);
+    updateAnimals(state, animTime);
     updateBusinesses(state);
     updateBanks(state);
     updateStatues(state);
@@ -1816,6 +1872,27 @@ public class EntityRenderer {
       humanArmRPool[i].setCullHint(Spatial.CullHint.Always);
     }
     lastHumanCount = n;
+  }
+
+  /** Ambient wildlife (see sim.Wildlife) - all folded into one batched
+   * mesh, same "distant crowd" trick updateHumans uses for far-off
+   * villagers, rebuilt every ANIMAL_REBUILD_INTERVAL frames rather than
+   * every single frame since a grazing animal a few pixels tall doesn't
+   * need buttery-smooth per-frame repositioning either. */
+  private void updateAnimals(GameState state, float animTime) {
+    if ((animalFrameCounter++ % ANIMAL_REBUILD_INTERVAL) != 0) return;
+    animalCandidates.clear();
+    for (Animal a : state.animals) {
+      if (a.dead) continue;
+      int gx = clampIdx((int) Math.floor(a.x), grid.cols), gz = clampIdx((int) Math.floor(a.z), grid.rows);
+      float hgt = grid.height[grid.idx(gx, gz)];
+      ColorRGBA c = SPECIES_COLOR.getOrDefault(a.species, ColorRGBA.Brown);
+      float scale = SPECIES_SCALE.getOrDefault(a.species, 1f);
+      float bob = (float) Math.abs(Math.sin(animTime * 5.0 + a.id * 0.7)) * 0.04f * scale;
+      animalCandidates.add(new PropBatcher.Placement((float) a.x, hgt + bob, (float) a.z, (float) a.heading, scale, c));
+    }
+    animalsGeom.setMesh(PropBatcher.bake(animalTemplate, animalCandidates));
+    animalsGeom.setCullHint(animalCandidates.isEmpty() ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
   }
 
   private void updateMonster(GameState state) {

@@ -10,6 +10,7 @@ import com.jme3.scene.Mesh;
 import com.jme3.scene.Node;
 import com.jme3.scene.VertexBuffer;
 import com.jme3.texture.Texture2D;
+import com.worldbox.config.Config;
 import com.worldbox.world.VoxelWorld;
 import com.worldbox.world.WorldGrid;
 
@@ -38,6 +39,18 @@ public class VoxelChunkRenderer {
     // the same fractured-rock stone tile, so a real path visibly reads
     // as "laid gravel", not just grass painted a different color
     BLOCK_COLOR.put(VoxelWorld.PATH, new ColorRGBA(0.78f, 0.72f, 0.60f, 1f));
+  }
+  // grass's base color, replaced per-biome so plains/forest/desert/tundra/
+  // wetland each read as a real, distinct region instead of one uniform
+  // green everywhere - mountain/ocean biomes need no entry since their
+  // terrain is already STONE/WATER (colored above), never GRASS.
+  private static final Map<Byte, ColorRGBA> BIOME_GRASS_COLOR = new HashMap<>();
+  static {
+    BIOME_GRASS_COLOR.put(Config.BIOME_PLAINS, BLOCK_COLOR.get(VoxelWorld.GRASS));
+    BIOME_GRASS_COLOR.put(Config.BIOME_FOREST, new ColorRGBA(0.204f, 0.635f, 0.267f, 1f));
+    BIOME_GRASS_COLOR.put(Config.BIOME_DESERT, new ColorRGBA(0.867f, 0.741f, 0.376f, 1f));
+    BIOME_GRASS_COLOR.put(Config.BIOME_TUNDRA, new ColorRGBA(0.831f, 0.878f, 0.851f, 1f));
+    BIOME_GRASS_COLOR.put(Config.BIOME_WETLAND, new ColorRGBA(0.298f, 0.541f, 0.322f, 1f));
   }
   private static final ColorRGBA WATER_COLOR = new ColorRGBA(0.180f, 0.612f, 0.839f, 0.85f);
   private static final ColorRGBA FIRE_TINT = new ColorRGBA(1f, 0.48f, 0.1f, 1f);
@@ -270,7 +283,8 @@ public class VoxelChunkRenderer {
           byte b = world.get(x, y, z);
           if (b == VoxelWorld.AIR) continue;
           MeshBuilder mb = b == VoxelWorld.WATER ? water : solid;
-          ColorRGBA color = b == VoxelWorld.WATER ? WATER_COLOR : mottle(BLOCK_COLOR.get(b), x, y, z);
+          ColorRGBA base = b == VoxelWorld.GRASS ? biomeGrassColor(x, z) : BLOCK_COLOR.get(b);
+          ColorRGBA color = b == VoxelWorld.WATER ? WATER_COLOR : mottle(base, x, y, z);
           addVisibleFaces(mb, x, y, z, b, color);
         }
       }
@@ -299,6 +313,14 @@ public class VoxelChunkRenderer {
   }
 
   private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
+
+  /** Grass's base color for the coarse WorldGrid cell a fine column sits
+   * in, keyed by that cell's biome (see WorldGrid.biome/Config.BIOME_*). */
+  private ColorRGBA biomeGrassColor(int fx, int fz) {
+    int i = grid.idx(fx / VoxelWorld.FINE, fz / VoxelWorld.FINE);
+    ColorRGBA c = BIOME_GRASS_COLOR.get(grid.biome[i]);
+    return c != null ? c : BLOCK_COLOR.get(VoxelWorld.GRASS);
+  }
 
   /** True if a face between a block of `selfType` and a neighbor of
    * `neighborType` should be skipped (fully occluded). */

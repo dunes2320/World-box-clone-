@@ -115,6 +115,10 @@ public class SaveManager {
     for (Human h : state.humans) maxHuman = Math.max(maxHuman, h.id);
     Human.restoreNextId(maxHuman);
 
+    int maxAnimal = 0;
+    for (com.worldbox.sim.Animal a : state.animals) maxAnimal = Math.max(maxAnimal, a.id);
+    com.worldbox.sim.Animal.restoreNextId(maxAnimal);
+
     int maxSettlement = 0;
     for (int id : state.settlements.keySet()) maxSettlement = Math.max(maxSettlement, id);
     Settlement.restoreNextId(maxSettlement);
