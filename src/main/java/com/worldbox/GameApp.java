@@ -259,6 +259,7 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     stateManager.attach(screenshotState);
 
     testMode = "true".equals(System.getProperty("worldbox.testMode"));
+    tourMode = "true".equals(System.getProperty("worldbox.tour"));
   }
 
   private ColorRGBA nationColorFor(int nationId) {
@@ -392,6 +393,55 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
     return state.grid.height[state.grid.idx(gx, gz)];
   }
 
+  /** Tour-mode only: point the camera at the most solidly-<code>biome</code>
+   * stretch of countryside on the map - the cell whose surrounding patch is
+   * the most uniformly that biome - so a screenshot of, say, "desert" shows
+   * open desert rather than a three-cell sliver of it on a coastline.
+   * False if this world happens to have none of that biome at all. */
+  private boolean testFocusBiome(byte biome, float dist, float pitch) {
+    int bestX = -1, bestZ = -1, bestScore = 0;
+    int r = 6, step = 4;
+    for (int y = r; y < state.grid.rows - r; y += step) {
+      for (int x = r; x < state.grid.cols - r; x += step) {
+        int score = 0;
+        for (int dz = -r; dz <= r; dz += 2) {
+          for (int dx = -r; dx <= r; dx += 2) {
+            if (state.grid.biome[state.grid.idx(x + dx, y + dz)] == biome) score++;
+          }
+        }
+        if (score > bestScore) { bestScore = score; bestX = x; bestZ = y; }
+      }
+    }
+    if (bestX < 0) return true; // this world simply has none of that biome - skip the stop, don't end the tour
+    camTarget.set(bestX + 0.5f, state.grid.height[state.grid.idx(bestX, bestZ)], bestZ + 0.5f);
+    camDistance = camDistanceTarget = dist;
+    camPitch = pitch;
+    System.out.println("TOUR_STOP biome=" + biome + " at=" + bestX + "," + bestZ);
+    return true;
+  }
+
+  /** Tour-mode only: frame wherever wildlife is thickest, so the captures
+   * actually show animals instead of whichever empty field happens to sit
+   * under the camera. */
+  private boolean testFocusAnimals(float dist, float pitch) {
+    if (state.animals.isEmpty()) return true;
+    com.worldbox.sim.Animal best = null;
+    int bestNeighbors = -1;
+    for (com.worldbox.sim.Animal a : state.animals) {
+      int neighbors = 0;
+      for (com.worldbox.sim.Animal b : state.animals) {
+        if (Math.abs(a.x - b.x) < 8 && Math.abs(a.z - b.z) < 8) neighbors++;
+      }
+      if (neighbors > bestNeighbors) { bestNeighbors = neighbors; best = a; }
+    }
+    camTarget.set((float) best.x, terrainHeightAt((float) best.x, (float) best.z), (float) best.z);
+    camDistance = camDistanceTarget = dist;
+    camPitch = pitch;
+    System.out.println("TOUR_STOP animals=" + state.animals.size() + " herd=" + bestNeighbors
+        + " species=" + best.species + " at=" + (int) best.x + "," + (int) best.z);
+    return true;
+  }
+
   private void updateCamera(float tpf) {
     camTarget.x = clamp(camTarget.x, -15f, Config.COLS + 15f);
     camTarget.z = clamp(camTarget.z, -15f, Config.ROWS + 15f);
@@ -512,7 +562,52 @@ public class GameApp extends SimpleApplication implements HudContext, ActionList
 
     hud.update(tpf, simTime);
 
-    if (testMode) runTestMode();
+    if (tourMode) runTourMode();
+    else if (testMode) runTestMode();
+  }
+
+  // -Dworldbox.tour=true: a scenery tour for visual verification. The
+  // regular test script keys its steps off wall-clock time, which desyncs
+  // badly under software rendering (a frame can take most of a second, so
+  // several "move camera then shoot" steps collapse into one frame and
+  // every screenshot comes out of the same stale view). This one is driven
+  // by frames instead: hold each viewpoint for a fixed number of rendered
+  // frames, shoot on the last one, then move on - so it captures the same
+  // shots no matter how slow the renderer is.
+  private boolean tourMode;
+  private int tourFrame = 0, tourStop = 0;
+  private static final int TOUR_WARMUP_FRAMES = 25;
+  private static final int TOUR_FRAMES_PER_STOP = 12;
+
+  private void runTourMode() {
+    if (tourFrame++ < TOUR_WARMUP_FRAMES) return; // let terrain/props finish building
+    int held = (tourFrame - TOUR_WARMUP_FRAMES) % TOUR_FRAMES_PER_STOP;
+    if (held == 0) {
+      if (!applyTourStop(tourStop)) { stop(); return; }
+      hud.debugSetPanelMode(null);
+      setSelection(null);
+      tourStop++;
+    } else if (held == TOUR_FRAMES_PER_STOP - 1) {
+      screenshotState.takeScreenshot();
+    }
+  }
+
+  /** Positions the camera for one tour stop; false once the tour is done. */
+  private boolean applyTourStop(int stop) {
+    switch (stop) {
+      case 0: return testFocusBiome(Config.BIOME_PLAINS, 55f, 0.75f);
+      case 1: return testFocusBiome(Config.BIOME_FOREST, 45f, 0.6f);
+      case 2: return testFocusBiome(Config.BIOME_DESERT, 45f, 0.6f);
+      case 3: return testFocusBiome(Config.BIOME_TUNDRA, 45f, 0.6f);
+      case 4: return testFocusBiome(Config.BIOME_WETLAND, 45f, 0.6f);
+      case 5: return testFocusBiome(Config.BIOME_MOUNTAIN, 55f, 0.6f);
+      // steeply angled down rather than near-eye-level: at ground level a
+      // herd is almost always occluded by the next terrain step in front
+      // of it, and a close enough camera ends up inside a hillside
+      case 6: return testFocusAnimals(12f, 0.8f);
+      case 7: return testFocusAnimals(5f, 0.9f);
+      default: return false;
+    }
   }
 
   // Scripted checkpoints for automated verification (no real mouse/keyboard

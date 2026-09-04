@@ -92,12 +92,17 @@ public class EntityRenderer {
     SPECIES_COLOR.put("wolf", new ColorRGBA(0.42f, 0.42f, 0.45f, 1f));
     SPECIES_COLOR.put("camel", new ColorRGBA(0.80f, 0.66f, 0.42f, 1f));
     SPECIES_COLOR.put("goat", new ColorRGBA(0.80f, 0.78f, 0.74f, 1f));
-    SPECIES_SCALE.put("cow", 1.15f);
-    SPECIES_SCALE.put("sheep", 0.85f);
-    SPECIES_SCALE.put("deer", 1.0f);
-    SPECIES_SCALE.put("wolf", 0.85f);
-    SPECIES_SCALE.put("camel", 1.3f);
-    SPECIES_SCALE.put("goat", 0.8f);
+    // sized against HUMAN_SCALE (0.55, on a ~1.6-tall human template): the
+    // animal template stands ~1.0 tall, so these land every species below
+    // eye level on a person, which is what reads as livestock rather than
+    // the previous set - those were scaled off a taller template and left
+    // a "sheep" standing taller than the villagers herding it.
+    SPECIES_SCALE.put("cow", 0.58f);
+    SPECIES_SCALE.put("sheep", 0.44f);
+    SPECIES_SCALE.put("deer", 0.52f);
+    SPECIES_SCALE.put("wolf", 0.46f);
+    SPECIES_SCALE.put("camel", 0.66f);
+    SPECIES_SCALE.put("goat", 0.44f);
   }
   // Brightened along with the rest of the cartoon palette (see
   // VoxelChunkRenderer/TerrainTextures) - these used to be muted enough
@@ -552,21 +557,25 @@ public class EntityRenderer {
     foliageTemplate = MeshUtil.buildGrassTuft(0.42f);
     flowerTemplate = MeshUtil.buildGem(0.07f, 0.14f);
 
-    // a simple low-poly quadruped: box body + box head + 4 thin legs,
-    // shared by every species (see Wildlife.speciesFor) and told apart
-    // purely by per-instance color/scale (same "silhouette + tint" trick
-    // used everywhere else in this renderer) rather than a separate mesh
-    // per animal - keeps the wildlife pass cheap on a map that can hold
-    // hundreds of them. Legs bottom out at local y=0 so it sits flush on
-    // the ground; local +z is "forward" to match PropBatcher's rotY.
-    Mesh aBody = MeshUtil.translatedCopy(new Box(0.28f, 0.22f, 0.42f), 0, 0.42f, 0);
-    Mesh aHead = MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.18f), 0, 0.5f, 0.5f);
-    Mesh aLegFL = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), -0.2f, 0.2f, 0.32f);
-    Mesh aLegFR = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), 0.2f, 0.2f, 0.32f);
-    Mesh aLegBL = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), -0.2f, 0.2f, -0.32f);
-    Mesh aLegBR = MeshUtil.translatedCopy(new Box(0.07f, 0.2f, 0.07f), 0.2f, 0.2f, -0.32f);
+    // a simple low-poly quadruped: slab body on four legs, with a head
+    // carried forward and above the shoulders and a stub tail behind.
+    // Shared by every species (see Wildlife.speciesFor) and told apart
+    // purely by per-instance color/scale (the same "silhouette + tint"
+    // trick used everywhere else here) rather than a separate mesh per
+    // animal - keeps the wildlife pass cheap on a map that holds hundreds.
+    // The body deliberately sits high on visibly separated legs: a fatter
+    // body slung low just merges into one box at any real play distance.
+    // Legs bottom out at local y=0 so it sits flush on the ground, and
+    // local +z is "forward" to match PropBatcher's rotY.
+    Mesh aBody = MeshUtil.translatedCopy(new Box(0.26f, 0.20f, 0.46f), 0, 0.66f, 0);
+    Mesh aHead = MeshUtil.translatedCopy(new Box(0.16f, 0.16f, 0.20f), 0, 0.86f, 0.62f);
+    Mesh aTail = MeshUtil.translatedCopy(new Box(0.04f, 0.12f, 0.04f), 0, 0.74f, -0.5f);
+    Mesh aLegFL = MeshUtil.translatedCopy(new Box(0.06f, 0.24f, 0.06f), -0.19f, 0.24f, 0.34f);
+    Mesh aLegFR = MeshUtil.translatedCopy(new Box(0.06f, 0.24f, 0.06f), 0.19f, 0.24f, 0.34f);
+    Mesh aLegBL = MeshUtil.translatedCopy(new Box(0.06f, 0.24f, 0.06f), -0.19f, 0.24f, -0.34f);
+    Mesh aLegBR = MeshUtil.translatedCopy(new Box(0.06f, 0.24f, 0.06f), 0.19f, 0.24f, -0.34f);
     animalTemplate = MeshUtil.mergeMeshes(
-        MeshUtil.mergeMeshes(aBody, aHead),
+        MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(aBody, aHead), aTail),
         MeshUtil.mergeMeshes(MeshUtil.mergeMeshes(aLegFL, aLegFR), MeshUtil.mergeMeshes(aLegBL, aLegBR)));
 
     // leaf/bark textures (see TerrainTextures) on top of the same per-tree
