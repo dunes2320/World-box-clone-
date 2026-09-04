@@ -23,6 +23,12 @@ public class WorldGen {
     // calibrating against it keeps land/water proportions consistent
     // regardless of seed.
     double[] rawElevation = new double[n];
+    // stored (not just local to the classification loop) so the biome
+    // pass below - which runs after rivers/islands have finished mutating
+    // terrain - can still classify every cell using the same climate
+    // fields the terrain itself was generated from.
+    double[] moistureField = new double[n];
+    double[] temperature = new double[n];
     double sum = 0;
     for (int y = 0; y < rows; y++) {
       for (int x = 0; x < cols; x++) {
@@ -108,6 +114,7 @@ public class WorldGen {
         // never fires, which is why dirt patches weren't actually showing
         // up despite this field existing.
         double moisture = fbm.fbm(x * 0.045 + 400, y * 0.045 + 400, 4, 2, 0.5);
+        moistureField[i] = moisture;
 
         // fertility: its own independent, broad low-frequency field (not
         // derived from moisture/elevation) so real fertile stretches and
@@ -116,6 +123,15 @@ public class WorldGen {
         // Settlement/Economy's farm food production, which reads this at
         // a settlement's own location.
         grid.fertility[i] = (float) fbm.fbm(x * 0.016 + 9000, y * 0.016 + 9000, 4, 2, 0.5);
+
+        // temperature: a broad low-frequency noise field biased by
+        // distance from the map's vertical center, so climate reads as
+        // real cold/warm regions/bands (like real-world latitude) instead
+        // of scattered patches - the noise term keeps the bands irregular
+        // rather than a perfectly straight gradient.
+        double latitude = 1.0 - Math.abs(ny) * 2; // 1 at the equatorial center, 0 at the poles
+        double tempNoise = fbm.fbm(x * 0.02 + 11000, y * 0.02 + 11000, 3, 2, 0.5);
+        temperature[i] = latitude * 0.65 + tempNoise * 0.35;
 
         // VoxelWorld voxelizes a land column's height as
         // round(grid.height[i]) + Y_OFFSET, and water is a *fixed* plane
@@ -144,6 +160,7 @@ public class WorldGen {
 
     scatterIslands(grid, fbm);
     carveRivers(grid, rng);
+    classifyBiomes(grid, temperature, moistureField);
 
     for (int y = 0; y < rows; y++) {
       for (int x = 0; x < cols; x++) {
@@ -153,9 +170,12 @@ public class WorldGen {
 
         if (t == Config.GRASS) {
           // lower frequency than the old 0.12 so forests clump into real
-          // sprawling woods instead of a fine speckle of single trees
+          // sprawling woods instead of a fine speckle of single trees.
+          // Threshold shifts per biome (see forestThresholdFor) so a
+          // wetland reads as dense woodland, a desert as near-treeless,
+          // instead of every grass cell everywhere sharing one flat rate.
           double forestN = fbm.fbm(x * 0.07 + 900, y * 0.07 + 900, 3, 2, 0.5);
-          if (forestN > 0.58 && rng.chance(0.6)) {
+          if (forestN > forestThresholdFor(grid.biome[i]) && rng.chance(0.6)) {
             grid.resource[i] = Config.RES_FOREST;
             grid.resourceAmount[i] = Config.RESOURCE_INFO.get(Config.RES_FOREST).yieldAmt * 8;
           }
@@ -193,6 +213,51 @@ public class WorldGen {
 
     grid.dirty.clear();
     for (int i = 0; i < cols * rows; i++) grid.dirty.add(i);
+  }
+
+  /** Assigns every cell's biome (see Config.BIOME_*) from the same
+   * temperature/moisture fields the terrain itself was generated from.
+   * Runs after rivers/islands so water cells they add get tagged
+   * BIOME_OCEAN too, and after the terrain pass so mountains (already
+   * classified STONE by height) read as BIOME_MOUNTAIN regardless of
+   * their local climate - a snowy peak and a sun-baked one are both
+   * still "mountain", not "tundra"/"desert" with rocks in it. */
+  private static void classifyBiomes(WorldGrid grid, double[] temperature, double[] moisture) {
+    int cols = grid.cols, rows = grid.rows;
+    for (int y = 0; y < rows; y++) {
+      for (int x = 0; x < cols; x++) {
+        int i = grid.idx(x, y);
+        if (grid.terrain[i] == Config.WATER) { grid.biome[i] = Config.BIOME_OCEAN; continue; }
+        if (grid.terrain[i] == Config.STONE) { grid.biome[i] = Config.BIOME_MOUNTAIN; continue; }
+        double temp = temperature[i], moist = moisture[i];
+        byte biome;
+        if (temp < 0.32) {
+          biome = Config.BIOME_TUNDRA;
+        } else if (temp > 0.62 && moist < 0.4) {
+          biome = Config.BIOME_DESERT;
+        } else if (moist > 0.62) {
+          // low-lying and soggy reads as wetland; the same moisture up on
+          // higher ground is just a wet forest, not a swamp
+          biome = grid.height[i] < 1.0f ? Config.BIOME_WETLAND : Config.BIOME_FOREST;
+        } else if (moist > 0.45) {
+          biome = Config.BIOME_FOREST;
+        } else {
+          biome = Config.BIOME_PLAINS;
+        }
+        grid.biome[i] = biome;
+      }
+    }
+  }
+
+  /** How dense forest resource placement is per biome - a flat rate
+   * everywhere read as one uniform world regardless of climate. Lower
+   * threshold = more forest (see the forestN > threshold check above). */
+  private static float forestThresholdFor(byte biome) {
+    if (biome == Config.BIOME_WETLAND) return 0.42f;
+    if (biome == Config.BIOME_FOREST) return 0.48f;
+    if (biome == Config.BIOME_TUNDRA) return 0.68f;
+    if (biome == Config.BIOME_DESERT) return 0.9f;
+    return 0.58f; // plains and anything else - the old flat rate
   }
 
   /** Scatters small offshore islands into open water - a separate,

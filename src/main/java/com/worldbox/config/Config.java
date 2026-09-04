@@ -23,6 +23,21 @@ public final class Config {
   public static final byte DIRT = 3;
   public static final byte STONE = 4;
 
+  // biomes - a per-cell climate/ecology classification layered on top of
+  // terrain (see WorldGrid.biome), driving ground color variety and
+  // vegetation/animal spawn tables. Never changes what's actually
+  // buildable/farmable - that's still purely terrain (see WorldGrid.
+  // isBuildable) - biome is flavor and spawn-table data, not a second
+  // terrain system.
+  public static final byte BIOME_PLAINS = 0;
+  public static final byte BIOME_FOREST = 1;
+  public static final byte BIOME_DESERT = 2;
+  public static final byte BIOME_TUNDRA = 3;
+  public static final byte BIOME_WETLAND = 4;
+  public static final byte BIOME_MOUNTAIN = 5;
+  public static final byte BIOME_OCEAN = 6;
+  public static final int BIOME_COUNT = 7;
+
   // resource deposit types
   public static final byte RES_NONE = 0;
   public static final byte RES_FOREST = 1;

@@ -15,6 +15,11 @@ public class WorldGrid implements java.io.Serializable {
 
   public final float[] height = new float[n];
   public final byte[] terrain = new byte[n];
+  /** Climate/ecology classification (see Config.BIOME_*), set once at
+   * worldgen. Purely additive to terrain - a cell's biome never changes
+   * whether it's buildable/farmable/water, only ground color variety and
+   * what vegetation/animals spawn there (see WorldGen/EntityRenderer). */
+  public final byte[] biome = new byte[n];
   public final byte[] resource = new byte[n];
   public final int[] resourceAmount = new int[n];
   /** 0..1, set once at worldgen (see WorldGen.generate) - how good this
