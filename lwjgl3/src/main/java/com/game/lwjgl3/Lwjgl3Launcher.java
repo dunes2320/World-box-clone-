@@ -36,6 +36,12 @@ public final class Lwjgl3Launcher {
                 if ("--war".equals(arg)) {
                     game.enableForcedWar();
                 }
+                if ("--disasters".equals(arg)) {
+                    game.enableForcedDisasters();
+                }
+                if ("--firestorm".equals(arg)) {
+                    game.enableFirestorm();
+                }
             }
             int stress = parseInt(args, "--stress", 0);
             if (stress > 0) {

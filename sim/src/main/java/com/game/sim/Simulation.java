@@ -20,10 +20,12 @@ public final class Simulation {
     private final Territory territory;
     private final Relations relations;
     private final RelationSystem relationSystem;
+    private final DisasterSystem disasters;
     private final Random random;
 
     private long tickCount;
     private int warCasualties;
+    private int disasterCasualties;
 
     public Simulation(long seed) {
         this.seed = seed;
@@ -38,6 +40,7 @@ public final class Simulation {
         // Draws from that same stream, so a seed also fixes the opening politics.
         this.relations = new Relations(random);
         this.relationSystem = new RelationSystem();
+        this.disasters = new DisasterSystem(world.size, SimConfig.DENSITY_CELL_SIZE);
     }
 
     public Units getUnits() {
@@ -60,9 +63,35 @@ public final class Simulation {
         return relationSystem;
     }
 
+    public DisasterSystem getDisasters() {
+        return disasters;
+    }
+
     /** Units killed in war since the world began. */
     public int getWarCasualties() {
         return warCasualties;
+    }
+
+    /** Units killed outright by the player's disasters, before fire and plague. */
+    public int getDisasterCasualties() {
+        return disasterCasualties;
+    }
+
+    /**
+     * Applies a disaster - the god tools' destructive half.
+     *
+     * <p>Refreshes the ongoing-disaster counts afterwards, because a strike can
+     * light fires or start an infection and {@link DisasterSystem} skips its
+     * whole pass when it believes there is nothing burning or nobody sick.
+     *
+     * @return units killed on the spot; fire and plague go on killing afterwards
+     */
+    public int strike(Disaster kind, int tileX, int tileZ, int radius) {
+        int killed = Disasters.strike(kind, world, units, random, tileX, tileZ, radius);
+        disasterCasualties += killed;
+        disasters.refreshFireCount(world);
+        disasters.refreshInfectedCount(units);
+        return killed;
     }
 
     /**
@@ -107,6 +136,9 @@ public final class Simulation {
         // Combat runs every tick, straight after movement, so fighting resolves
         // where the units actually are. In peacetime it returns immediately.
         warCasualties += CombatSystem.update(world, units, villages, relations, density, random);
+        // Fire and plague advance every tick too, and cost nothing when the
+        // world is neither alight nor sick.
+        disasters.update(world, units, random);
         // Villages move on a slower clock than footsteps: territory does not
         // need recomputing ten times a second, and settling should feel like it
         // takes a while rather than happening the instant a crowd forms.

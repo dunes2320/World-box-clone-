@@ -241,6 +241,69 @@ public final class SimConfig {
      */
     public static final int COMBAT_DAMAGE = 20;
 
+    // ---- disasters ----
+
+    /**
+     * Ticks a forest tile burns before its fuel is gone. Fire terminates
+     * because burning consumes the forest that carries it: a burnt tile becomes
+     * grass, grass is not flammable, and the number of tiles that can ever burn
+     * is finite and strictly decreasing. That is a property of the rules rather
+     * than of these numbers, which is what makes a runaway fire impossible.
+     */
+    public static final int FIRE_DURATION = 26;
+    /** Per-tick chance a burning tile sets light to each flammable neighbour. */
+    public static final double FIRE_SPREAD_CHANCE = 0.055;
+    /** Per-tick damage to a unit standing in the flames. */
+    public static final int FIRE_DAMAGE = 9;
+    /**
+     * Ceiling on ignitions applied in one tick. Spread is collected during the
+     * sweep and applied after it, so a tile lit this tick cannot also burn down
+     * this tick; the cap bounds that buffer. Dropped ignitions are not lost -
+     * the neighbour that would have lit them is still burning next tick.
+     */
+    public static final int MAX_IGNITIONS_PER_TICK = 1024;
+
+    /** How deep a meteor digs at the point of impact, before distance falloff. */
+    public static final float METEOR_DEPTH = 5.5f;
+    /** How high the spoil piles up around the crater lip. */
+    public static final float METEOR_RIM = 1.8f;
+    /** Multiplier on the brush radius for the ring of forest a meteor sets alight. */
+    public static final float METEOR_FIRE_RADIUS = 1.7f;
+
+    /** Lightning is a pinpoint strike: lethal, tiny, and it starts fires. */
+    public static final float LIGHTNING_RADIUS = 1.8f;
+
+    /** How far an earthquake throws the ground up or down at its centre. */
+    public static final float QUAKE_AMPLITUDE = 2.6f;
+    public static final int QUAKE_DAMAGE = 34;
+
+    /** Land below this drowns when the water comes in. */
+    public static final float FLOOD_LEVEL = SEA_LEVEL + 1.3f;
+
+    /**
+     * Ticks an infection runs before the host dies or recovers.
+     *
+     * <p>Must fit in a signed byte, because that is where {@code Units.disease}
+     * keeps it. This was 220 for a while and silently ran as 127: the cast
+     * clamped it and nothing said so, leaving a constant that named one number
+     * while the game played another. {@link DisasterSystem} now refuses to load
+     * if this goes out of range.
+     */
+    public static final int DISEASE_DURATION = 120;
+    /**
+     * Per-tick chance an infection kills its host, which over a full illness
+     * works out at roughly a 40% death rate.
+     *
+     * <p>A roll rather than health attrition. Draining health per tick made
+     * mortality a knife edge: at one damage a tick every single victim died
+     * with room to spare, and any constant that let anyone live at all let
+     * almost everyone live. A death roll moves smoothly with the number, so
+     * "how deadly is the plague" is one legible dial.
+     */
+    public static final double DISEASE_FATALITY = 0.0045;
+    /** Per-tick infection chance, per sick unit sharing a density cell. */
+    public static final double DISEASE_SPREAD_CHANCE = 0.0022;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

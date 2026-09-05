@@ -33,6 +33,12 @@ public final class Units {
     public final byte[] state;
     public final byte[] hunger;
     public final byte[] wanderTimer;
+    /**
+     * Infection state, three meanings in one byte: above zero is the ticks of
+     * illness left, {@link #HEALTHY} is susceptible, {@link #IMMUNE} is a
+     * survivor who cannot catch it again.
+     */
+    public final byte[] disease;
 
     public final short[] health;
     public final short[] age;
@@ -54,6 +60,11 @@ public final class Units {
 
     public static final short NO_VILLAGE = -1;
 
+    /** Susceptible: never been infected. */
+    public static final byte HEALTHY = 0;
+    /** Recovered from an infection and cannot catch it again. */
+    public static final byte IMMUNE = -1;
+
     public Units(int capacity) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive, got " + capacity);
@@ -67,6 +78,7 @@ public final class Units {
         state = new byte[capacity];
         hunger = new byte[capacity];
         wanderTimer = new byte[capacity];
+        disease = new byte[capacity];
         health = new short[capacity];
         age = new short[capacity];
         maxAge = new short[capacity];
@@ -119,6 +131,10 @@ public final class Units {
         state[index] = STATE_WANDER;
         hunger[index] = 0;
         wanderTimer[index] = 0;
+        // Newborns are susceptible, so a plague can return to a population that
+        // has already survived one - once the generation that was immune to it
+        // has died of old age.
+        disease[index] = HEALTHY;
         health[index] = (short) SimConfig.UNIT_MAX_HEALTH;
         age[index] = 0;
         maxAge[index] = (short) lifespan;

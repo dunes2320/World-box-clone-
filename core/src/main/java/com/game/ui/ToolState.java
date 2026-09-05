@@ -1,5 +1,6 @@
 package com.game.ui;
 
+import com.game.sim.Disaster;
 import com.game.sim.Terraform;
 
 /**
@@ -12,28 +13,55 @@ import com.game.sim.Terraform;
  */
 public final class ToolState {
 
-    /** The tools available in phase 2. Spawning and disasters join later. */
+    /**
+     * Every god tool. The first six shape and populate the world and are held
+     * down like a brush; the six disasters are single events and fire once per
+     * click, however long the button is held.
+     */
     public enum Tool {
-        INSPECT("Inspect"),
-        RAISE("Raise"),
-        LOWER("Lower"),
-        WATER("Water"),
-        FOREST("Forest"),
-        SPAWN("Spawn");
+        INSPECT("Inspect", null),
+        RAISE("Raise", null),
+        LOWER("Lower", null),
+        WATER("Water", null),
+        FOREST("Forest", null),
+        SPAWN("Spawn", null),
+        METEOR("Meteor", Disaster.METEOR),
+        LIGHTNING("Lightning", Disaster.LIGHTNING),
+        FIRE("Fire", Disaster.FIRE),
+        QUAKE("Quake", Disaster.EARTHQUAKE),
+        FLOOD("Flood", Disaster.FLOOD),
+        PLAGUE("Plague", Disaster.PLAGUE);
 
         private final String label;
+        private final Disaster disaster;
 
-        Tool(String label) {
+        Tool(String label, Disaster disaster) {
             this.label = label;
+            this.disaster = disaster;
         }
 
         public String label() {
             return label;
         }
 
-        /** True for tools that should keep applying while the mouse is dragged. */
+        /** The disaster this tool unleashes, or null for the shaping tools. */
+        public Disaster disaster() {
+            return disaster;
+        }
+
+        public boolean isDisaster() {
+            return disaster != null;
+        }
+
+        /**
+         * True for tools that keep applying while the mouse is dragged.
+         *
+         * <p>Terraforming is a stroke, so it repeats. Inspect is a single pick.
+         * Disasters repeat only in the sense that holding the button would drop
+         * a meteor every frame, which is not a brush - it is sixty meteors.
+         */
         public boolean isContinuous() {
-            return this != INSPECT;
+            return this != INSPECT && !isDisaster();
         }
     }
 

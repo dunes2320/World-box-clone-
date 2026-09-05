@@ -28,6 +28,8 @@ Optional arguments:
 | `--closeup` | With `--frames`, drop the camera in among the units. |
 | `--stress <n>` | With `--frames`, spawn `n` units to measure render cost. |
 | `--war` | With `--frames`, declare a war and stage a battle to capture. |
+| `--disasters` | With `--frames`, unleash all six disasters on populated ground. |
+| `--firestorm` | With `--frames`, forest the whole island and set light to it. |
 
 ## Controls
 
@@ -39,6 +41,7 @@ Optional arguments:
 | `W` `A` `S` `D` | Pan |
 | Scroll wheel | Zoom |
 | `1`–`6` | Select tool: Inspect, Raise, Lower, Water, Forest, Spawn |
+| `M` `L` `F` `Q` `V` `P` | Meteor, Lightning, Fire, Quake, Flood, Plague |
 | `[` `]` | Shrink / grow the brush |
 | Space | Pause and unpause |
 | Escape | Close the inspector, or quit if nothing is selected |
@@ -47,6 +50,12 @@ Tools start on **Inspect**, which is non-destructive — click any tile to read
 its terrain, elevation, owner and unit count. Four are terraform brushes and
 one spawns units; the radius slider (or the bracket keys) sizes them all.
 Picking a species from the palette arms the spawn tool automatically.
+
+The six disasters sit on their own row above the shaping tools, tinted so a
+meteor is never one absent-minded click away. They fire once per click rather
+than repeating while held — holding a terraform brush is a stroke, but holding
+a meteor would be sixty meteors. They get letter keys because twelve tools do
+not fit on the number row without reaching for keys nobody would guess.
 
 The brief called for left-drag to rotate the camera *and* for god tools to be
 applied by dragging on the world. Those are the same gesture, so the bare left
@@ -99,13 +108,42 @@ collections. There are tests for it.
 
 ## Build status
 
-Phases 1-5 of 6 are complete: terrain generation, chunked meshing, the RTS
-camera, ray picking, all four terraform brushes, the scene2d HUD, living units
-- four species that wander, eat, age, breed, starve and die - the villages they
-found, with territory that grows with population and borders drawn on the
-ground, and the wars they fight over those borders.
+All six phases are complete. Terrain generation, chunked meshing, the RTS
+camera and ray picking; four terraform brushes and a spawn tool behind a
+scene2d HUD; four species that wander, eat, age, breed, starve and die; the
+villages they found, with territory that grows with population and borders
+drawn on the ground; the wars they fight over those borders; and six disasters
+to ruin all of it.
 
-Disasters land in phase 6. See `PLAN.md` for the full build order.
+See `PLAN.md` for the build order this followed.
+
+### Disasters
+
+| | What it does |
+|---|---|
+| Meteor | Digs a crater ringed by its own spoil, sets the surrounding forest alight, kills everything at the bottom |
+| Lightning | Pinpoint and lethal; starts a fire where it lands |
+| Fire | Spreads through forest, burns out, leaves grass behind |
+| Quake | Throws the ground up and down; survivable, so the aftermath is a limping population |
+| Flood | Drowns ground already low enough to drown, so it finds the coast and the valleys by itself |
+| Plague | Infects a crowd, spreads by proximity, kills about 40% and leaves the rest immune |
+
+Two of them keep going after the click, and both are built so that they must
+stop. Fire consumes the forest that carries it, so the fuel on the map only
+ever decreases and a fire cannot cross ground it has already burned. A plague
+leaves its survivors immune, so the pool it can spread into only ever shrinks.
+Neither termination depends on the tuning being generous — they are properties
+of the rules, which is what keeps "the fire burns out" from being a promise
+rather than a guarantee.
+
+Measured by setting light to an entire forested island: 1,300 to 1,650 tiles
+burning at once, out after 71 to 107 ticks, 190 to 250 units lost.
+
+One trap worth recording: infection state lives in a signed byte alongside its
+susceptible and immune sentinels, and the duration constant was 220 for a
+while. The cast clamped it to 127 and nothing said so, so the config named one
+number while the game played another. `DisasterSystem` now refuses to load if
+that constant goes out of range.
 
 ### War and diplomacy
 
@@ -167,4 +205,16 @@ second, in two draw calls.
 
 Combat costs nothing in peacetime - with no war anywhere the whole pass is one
 boolean check - and diplomacy runs once every 60 ticks rather than every tick,
-because a border dispute does not need re-evaluating six times a second.
+because a border dispute does not need re-evaluating six times a second. Fire
+and plague are the same: a world that is neither alight nor sick skips both
+passes on a single comparison.
+
+Flames are their own geometry rather than a tint on the terrain. Colouring
+burning tiles in the terrain mesh would re-mesh whole 16x16 chunks every time
+the fire front moved, which during a spreading fire is most ticks; drawn
+separately, the terrain is only re-meshed once per tile, when it burns down to
+grass.
+
+The worst case the game can be put in - 2,000 units and a full-map fire at the
+same time - costs 1.4 ms of unit geometry and 1.1 ms of flames per simulation
+tick. At ten ticks a second that is about 2.5% of a 60fps frame budget.

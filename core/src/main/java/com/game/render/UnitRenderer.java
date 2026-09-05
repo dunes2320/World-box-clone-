@@ -77,6 +77,15 @@ public final class UnitRenderer implements Disposable {
     private static final float COMBAT_WASH = 0.65f;
     private static final Color COMBAT_HEAD = new Color(0.12f, 0.10f, 0.12f, 1f);
 
+    /**
+     * The sick are dragged toward a sallow green. Unlike the combat marking
+     * this keeps most of the species colour, because being ill is a condition
+     * rather than an event - a plague should show as a discoloured crowd, not
+     * as a crowd that has stopped being orcs.
+     */
+    private static final Color SICK_TINT = new Color(0.42f, 0.62f, 0.28f, 1f);
+    private static final float SICK_MIX = 0.55f;
+
     private final Mesh[] meshes;
     private final Renderable[] renderables;
     private final Material material;
@@ -182,18 +191,27 @@ public final class UnitRenderer implements Disposable {
         float ground = groundHeight(world, x, z) + GROUND_OFFSET;
 
         Color base = SPECIES_COLOR[units.species[i]];
+        float baseR = base.r;
+        float baseG = base.g;
+        float baseB = base.b;
+        if (units.disease[i] > 0) {
+            baseR += (SICK_TINT.r - baseR) * SICK_MIX;
+            baseG += (SICK_TINT.g - baseG) * SICK_MIX;
+            baseB += (SICK_TINT.b - baseB) * SICK_MIX;
+        }
+
         float bodyColor;
         float headColor;
         if (units.state[i] == Units.STATE_FIGHT) {
             bodyColor = Color.toFloatBits(
-                base.r + (1f - base.r) * COMBAT_WASH,
-                base.g + (1f - base.g) * COMBAT_WASH,
-                base.b + (1f - base.b) * COMBAT_WASH, 1f);
+                baseR + (1f - baseR) * COMBAT_WASH,
+                baseG + (1f - baseG) * COMBAT_WASH,
+                baseB + (1f - baseB) * COMBAT_WASH, 1f);
             headColor = COMBAT_HEAD.toFloatBits();
         } else {
-            bodyColor = base.toFloatBits();
+            bodyColor = Color.toFloatBits(baseR, baseG, baseB, 1f);
             headColor = Color.toFloatBits(
-                base.r * HEAD_SHADE, base.g * HEAD_SHADE, base.b * HEAD_SHADE, 1f);
+                baseR * HEAD_SHADE, baseG * HEAD_SHADE, baseB * HEAD_SHADE, 1f);
         }
 
         float half = BODY_WIDTH * 0.5f;

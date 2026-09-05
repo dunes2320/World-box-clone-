@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
+import com.game.render.EffectRenderer;
 import com.game.render.RtsCamera;
 import com.game.render.TerrainRenderer;
 import com.game.render.TilePicker;
@@ -45,6 +46,7 @@ public final class GodGame extends ApplicationAdapter {
     private TerrainRenderer terrainRenderer;
     private UnitRenderer unitRenderer;
     private VillageRenderer villageRenderer;
+    private EffectRenderer effectRenderer;
     private TilePicker picker;
     private ModelBatch modelBatch;
     private Environment environment;
@@ -59,8 +61,13 @@ public final class GodGame extends ApplicationAdapter {
     private int stressUnits;
     private int fastForwardTicks;
     private boolean forceWar;
+    private boolean forceDisasters;
+    private boolean firestorm;
     private long rebuildNanos;
     private int rebuildCount;
+    private long flameRebuildNanos;
+    private int flameRebuildCount;
+    private int peakFlames;
     private int frameCounter;
     /** Set when something other than a tick changed the units - a spawn, a cull. */
     private boolean unitsDirty = true;
@@ -104,6 +111,16 @@ public final class GodGame extends ApplicationAdapter {
         this.forceWar = true;
     }
 
+    /** Unleashes every disaster during the smoke test, for a screenshot of the aftermath. */
+    public void enableForcedDisasters() {
+        this.forceDisasters = true;
+    }
+
+    /** Sets the entire island alight, to measure the worst case for fire. */
+    public void enableFirestorm() {
+        this.firestorm = true;
+    }
+
     @Override
     public void create() {
         simulation = new Simulation(seed);
@@ -114,6 +131,7 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer = new TerrainRenderer(simulation.getWorld(), simulation.getVillages());
         unitRenderer = new UnitRenderer();
         villageRenderer = new VillageRenderer();
+        effectRenderer = new EffectRenderer();
         picker = new TilePicker();
         modelBatch = new ModelBatch();
         hud = new Hud(toolState, clock);
@@ -163,6 +181,17 @@ public final class GodGame extends ApplicationAdapter {
             }
         }
 
+        // Flames rebuild off the fire's own generation counter rather than the
+        // tick, so a still world with a fire in it does the work and a still
+        // world without one does none.
+        long flameStart = System.nanoTime();
+        if (effectRenderer.rebuildIfChanged(
+            simulation.getWorld(), simulation.getDisasters().getFireGeneration())) {
+            flameRebuildNanos += System.nanoTime() - flameStart;
+            flameRebuildCount++;
+            peakFlames = Math.max(peakFlames, effectRenderer.getVisibleFlames());
+        }
+
         terrainRenderer.update();
         hud.update(simulation, clock, delta);
 
@@ -174,6 +203,7 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer.render(modelBatch, environment);
         unitRenderer.render(modelBatch, environment);
         villageRenderer.render(modelBatch, environment);
+        effectRenderer.render(modelBatch, environment);
         modelBatch.end();
 
         // Depth testing has to come off before the 2D overlay, or panels get
@@ -210,9 +240,15 @@ public final class GodGame extends ApplicationAdapter {
             + " warsDeclared=" + simulation.getRelations().getWarsDeclared()
             + " warDead=" + simulation.getWarCasualties()
             + " fighting=" + countFighting()
+            + " burning=" + simulation.getDisasters().getBurningTiles()
+            + " flames=" + effectRenderer.getVisibleFlames()
+            + " sick=" + simulation.getDisasters().getInfectedUnits()
             + " chunksBuilt=" + terrainRenderer.isFullyBuilt()
+            + " peakFlames=" + peakFlames
             + String.format(" avgUnitRebuildMs=%.3f", rebuildCount == 0 ? 0.0
-                : rebuildNanos / 1e6 / rebuildCount));
+                : rebuildNanos / 1e6 / rebuildCount)
+            + String.format(" avgFlameRebuildMs=%.3f", flameRebuildCount == 0 ? 0.0
+                : flameRebuildNanos / 1e6 / flameRebuildCount));
         Gdx.app.exit();
     }
 
@@ -246,6 +282,64 @@ public final class GodGame extends ApplicationAdapter {
         for (int i = 0; i < 6; i++) {
             simulation.tick();
         }
+    }
+
+    /**
+     * Drops all six disasters on populated ground and lets them run.
+     *
+     * <p>Spread across separate spots rather than stacked, so the screenshot
+     * shows a crater, a burning forest and a drowned coast at once instead of
+     * one very thoroughly destroyed tile.
+     */
+    private void forceDisasters(com.game.sim.World world) {
+        com.game.sim.Disaster[] kinds = com.game.sim.Disaster.values();
+        int placed = 0;
+        // Aim at ground somebody actually lives on: an unpopulated disaster
+        // proves the terrain edits work but says nothing about the casualties.
+        var units = simulation.getUnits();
+        for (int i = 0; i < units.getHighWater() && placed < kinds.length; i += 17) {
+            if (!units.alive[i]) {
+                continue;
+            }
+            int x = (int) units.x[i];
+            int z = (int) units.z[i];
+            if (!world.inBounds(x, z)) {
+                continue;
+            }
+            simulation.strike(kinds[placed++], x, z, 7);
+        }
+
+        // Let the fire spread and the plague take hold before the capture.
+        for (int i = 0; i < 40; i++) {
+            simulation.tick();
+        }
+        System.out.println("DEMO_DISASTERS struck=" + placed
+            + " burning=" + simulation.getDisasters().getBurningTiles()
+            + " sick=" + simulation.getDisasters().getInfectedUnits());
+    }
+
+    /**
+     * Forests the whole island and sets light to all of it - the worst case the
+     * fire code and the flame renderer will ever see.
+     *
+     * <p>A natural map only has a few hundred forest tiles, so lighting one is
+     * no test of anything. This turns every scrap of open ground into fuel
+     * first, which is how "holds frame rate under a full-map fire" gets
+     * measured rather than assumed.
+     */
+    private void forceFirestorm(com.game.sim.World world) {
+        int step = SimConfig.MAX_BRUSH_RADIUS * 2;
+        for (int z = 0; z < world.size; z += step) {
+            for (int x = 0; x < world.size; x += step) {
+                Terraform.addForest(world, x, z, SimConfig.MAX_BRUSH_RADIUS);
+            }
+        }
+        for (int z = 0; z < world.size; z += step) {
+            for (int x = 0; x < world.size; x += step) {
+                simulation.strike(com.game.sim.Disaster.FIRE, x, z, SimConfig.MAX_BRUSH_RADIUS);
+            }
+        }
+        System.out.println("DEMO_FIRESTORM burning=" + simulation.getDisasters().getBurningTiles());
     }
 
     /** Units currently in a fight - the number the combat tint is drawn for. */
@@ -297,6 +391,12 @@ public final class GodGame extends ApplicationAdapter {
         }
         if (forceWar) {
             forceBattle(world);
+        }
+        if (forceDisasters) {
+            forceDisasters(world);
+        }
+        if (firestorm) {
+            forceFirestorm(world);
         }
         unitsDirty = true;
         villageRenderer.rebuild(world, simulation.getVillages());
@@ -396,6 +496,7 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer.dispose();
         unitRenderer.dispose();
         villageRenderer.dispose();
+        effectRenderer.dispose();
         hud.dispose();
     }
 
@@ -499,15 +600,37 @@ public final class GodGame extends ApplicationAdapter {
                     }
                     return true;
                 default:
-                    return selectToolByNumber(keycode);
+                    return selectToolByKey(keycode);
             }
         }
 
-        /** Number keys 1-5 arm the tools in palette order. */
-        private boolean selectToolByNumber(int keycode) {
+        /**
+         * Number keys 1-6 arm the shaping tools in palette order; letters arm
+         * the disasters.
+         *
+         * <p>The disasters get letters rather than continuing the numbers
+         * because twelve tools do not fit on the number row without running
+         * into keys nobody would guess. M, L, F, Q, V and P at least name the
+         * thing they drop, and none of them collide with the WASD pan.
+         */
+        private boolean selectToolByKey(int keycode) {
+            ToolState.Tool disaster = switch (keycode) {
+                case Input.Keys.M -> ToolState.Tool.METEOR;
+                case Input.Keys.L -> ToolState.Tool.LIGHTNING;
+                case Input.Keys.F -> ToolState.Tool.FIRE;
+                case Input.Keys.Q -> ToolState.Tool.QUAKE;
+                case Input.Keys.V -> ToolState.Tool.FLOOD;
+                case Input.Keys.P -> ToolState.Tool.PLAGUE;
+                default -> null;
+            };
+            if (disaster != null) {
+                toolState.setTool(disaster);
+                return true;
+            }
+
             int index = keycode - Input.Keys.NUM_1;
             ToolState.Tool[] tools = ToolState.Tool.values();
-            if (index < 0 || index >= tools.length) {
+            if (index < 0 || index >= tools.length || tools[index].isDisaster()) {
                 return false;
             }
             toolState.setTool(tools[index]);
@@ -545,14 +668,21 @@ public final class GodGame extends ApplicationAdapter {
                         toolState.getSpawnSpecies(), toolState.spawnCountForRadius());
                     unitsDirty = true;
                 }
-                default -> { }
+                default -> {
+                    if (tool.isDisaster()) {
+                        simulation.strike(tool.disaster(), x, z, radius);
+                        unitsDirty = true;
+                    }
+                }
             }
 
             // Terraforming can drown or bury whoever was standing there, so
             // anything left somewhere impossible is removed straight away
-            // rather than waiting for a tick that may be paused.
-            if (tool == ToolState.Tool.WATER || tool == ToolState.Tool.RAISE
-                || tool == ToolState.Tool.LOWER) {
+            // rather than waiting for a tick that may be paused. Disasters
+            // move the ground too, and are exactly the case where the player is
+            // watching for the consequences.
+            if (tool.isDisaster() || tool == ToolState.Tool.WATER
+                || tool == ToolState.Tool.RAISE || tool == ToolState.Tool.LOWER) {
                 if (simulation.cullStrandedUnits() > 0) {
                     unitsDirty = true;
                 }

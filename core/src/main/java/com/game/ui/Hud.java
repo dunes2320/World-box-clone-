@@ -46,7 +46,8 @@ public final class Hud implements Disposable {
 
         worldLabel = new Label("", skin);
         hintLabel = new Label(
-            "LMB tool  |  MMB or Alt+LMB rotate  |  RMB / WASD pan  |  wheel zoom  |  [ ] brush  |  space pause",
+            "LMB tool  |  MMB or Alt+LMB rotate  |  RMB / WASD pan  |  wheel zoom  |  [ ] brush  "
+                + "|  space pause  |  1-6 tools  |  M L F Q V P disasters",
             skin, "dim");
 
         Table topLeft = new Table();
@@ -114,14 +115,21 @@ public final class Hud implements Disposable {
         relations.refresh(simulation.getRelations(), simulation.getTickCount());
 
         WorldStats.countByType(world, tileCounts);
+        var disasters = simulation.getDisasters();
         worldLabel.setText(String.format(
-            "seed %d   tick %d   land %.0f%%   forest %d   villages %d   war dead %d",
+            "seed %d   tick %d   land %.0f%%   forest %d   villages %d   war dead %d%n"
+                + "burning %d   sick %d   lost to fire %d   plague %d   disasters %d",
             simulation.getSeed(),
             simulation.getTickCount(),
             WorldStats.landFraction(world) * 100f,
             tileCounts[TileType.FOREST],
             simulation.getVillages().getLiveCount(),
-            simulation.getWarCasualties()));
+            simulation.getWarCasualties(),
+            disasters.getBurningTiles(),
+            disasters.getInfectedUnits(),
+            disasters.getFireDeaths(),
+            disasters.getPlagueDeaths(),
+            simulation.getDisasterCasualties()));
 
         stage.act(delta);
     }
