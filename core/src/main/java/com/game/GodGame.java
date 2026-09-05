@@ -20,6 +20,8 @@ import com.game.sim.SimClock;
 import com.game.sim.SimConfig;
 import com.game.sim.Simulation;
 import com.game.sim.Terraform;
+import com.game.ui.Hud;
+import com.game.ui.ToolState;
 import java.nio.ByteBuffer;
 
 /**
@@ -35,14 +37,14 @@ public final class GodGame extends ApplicationAdapter {
 
     private Simulation simulation;
     private SimClock clock;
+    private ToolState toolState;
 
     private RtsCamera camera;
     private TerrainRenderer terrainRenderer;
     private TilePicker picker;
     private ModelBatch modelBatch;
     private Environment environment;
-
-    private int brushRadius = 4;
+    private Hud hud;
 
     // Smoke-test hooks. There is no window manager or human in CI, so the only
     // way to prove the renderer actually draws something is to run a fixed
@@ -68,11 +70,13 @@ public final class GodGame extends ApplicationAdapter {
     public void create() {
         simulation = new Simulation(seed);
         clock = new SimClock();
+        toolState = new ToolState();
 
         camera = new RtsCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         terrainRenderer = new TerrainRenderer(simulation.getWorld());
         picker = new TilePicker();
         modelBatch = new ModelBatch();
+        hud = new Hud(toolState, clock);
 
         environment = new Environment();
         // Bright ambient plus one strong key light: enough contrast for the
@@ -81,7 +85,8 @@ public final class GodGame extends ApplicationAdapter {
         environment.add(new DirectionalLight().set(
             new Color(1.0f, 0.97f, 0.88f, 1f), -0.55f, -0.75f, -0.35f));
 
-        Gdx.input.setInputProcessor(new InputMultiplexer(new WorldInput()));
+        // The stage goes first so clicks on the palette never reach the world.
+        Gdx.input.setInputProcessor(new InputMultiplexer(hud.getStage(), new WorldInput()));
 
         // Mesh the whole world before the first frame so the player never sees
         // the map pop in chunk by chunk on startup.
@@ -102,6 +107,7 @@ public final class GodGame extends ApplicationAdapter {
         }
 
         terrainRenderer.update();
+        hud.update(simulation, clock, delta);
 
         Gdx.gl.glClearColor(0.52f, 0.70f, 0.86f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
@@ -111,6 +117,11 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer.render(modelBatch, environment);
         modelBatch.end();
 
+        // Depth testing has to come off before the 2D overlay, or panels get
+        // z-rejected against terrain that was drawn closer to the camera.
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        hud.render();
+
         if (autoExitFrames > 0) {
             runSmokeTestFrame();
         }
@@ -118,6 +129,13 @@ public final class GodGame extends ApplicationAdapter {
 
     private void runSmokeTestFrame() {
         frameCounter++;
+        // Partway through, drive the tool path the way a player would: carve
+        // some terrain and select a tile. Without this the smoke screenshot
+        // only ever proves that an untouched world renders, and says nothing
+        // about whether the brushes or the inspector actually work.
+        if (frameCounter == autoExitFrames / 2) {
+            runToolDemo();
+        }
         if (frameCounter < autoExitFrames) {
             return;
         }
@@ -129,6 +147,31 @@ public final class GodGame extends ApplicationAdapter {
             + " ticks=" + simulation.getTickCount()
             + " chunksBuilt=" + terrainRenderer.isFullyBuilt());
         Gdx.app.exit();
+    }
+
+    /** Exercises every terraform brush and the inspector, for the smoke test. */
+    private void runToolDemo() {
+        var world = simulation.getWorld();
+        int centre = SimConfig.WORLD_SIZE / 2;
+
+        // A mountain and a crater, side by side, so both directions are visible.
+        for (int i = 0; i < 14; i++) {
+            Terraform.raise(world, centre - 14, centre, 7, 0.9f);
+            Terraform.lower(world, centre + 14, centre, 7, 0.9f);
+        }
+        for (int i = 0; i < 12; i++) {
+            Terraform.addWater(world, centre + 14, centre, 6, 0.6f);
+        }
+        Terraform.addForest(world, centre, centre + 20, 9);
+
+        toolState.setTool(ToolState.Tool.RAISE);
+        toolState.setRadius(7);
+        hud.getInspector().select(centre - 14, centre);
+
+        System.out.println("DEMO_APPLIED"
+            + " raisedHeight=" + String.format("%.2f", world.heightAt(centre - 14, centre))
+            + " craterHeight=" + String.format("%.2f", world.heightAt(centre + 14, centre))
+            + " craterType=" + com.game.sim.TileType.name(world.typeAt(centre + 14, centre)));
     }
 
     private void writeScreenshot(String path) {
@@ -181,6 +224,7 @@ public final class GodGame extends ApplicationAdapter {
     public void resize(int width, int height) {
         if (width > 0 && height > 0) {
             camera.resize(width, height);
+            hud.resize(width, height);
         }
     }
 
@@ -188,10 +232,11 @@ public final class GodGame extends ApplicationAdapter {
     public void dispose() {
         modelBatch.dispose();
         terrainRenderer.dispose();
+        hud.dispose();
     }
 
     /**
-     * Mouse and keyboard handling.
+     * Mouse and keyboard handling for the world beneath the HUD.
      *
      * <p>The brief asked for left-drag to rotate the camera and for god tools to
      * be applied by clicking and dragging on the world - which are the same
@@ -225,7 +270,7 @@ public final class GodGame extends ApplicationAdapter {
             }
             if (button == Input.Buttons.LEFT) {
                 painting = true;
-                applyTool(screenX, screenY);
+                applyTool(screenX, screenY, true);
                 return true;
             }
             return false;
@@ -247,7 +292,7 @@ public final class GodGame extends ApplicationAdapter {
                 return true;
             }
             if (painting) {
-                applyTool(screenX, screenY);
+                applyTool(screenX, screenY, false);
                 return true;
             }
             return false;
@@ -271,41 +316,67 @@ public final class GodGame extends ApplicationAdapter {
         public boolean keyDown(int keycode) {
             switch (keycode) {
                 case Input.Keys.LEFT_BRACKET:
-                    brushRadius = Terraform.clampRadius(brushRadius - 1);
+                    toolState.setRadius(toolState.getRadius() - 1);
                     return true;
                 case Input.Keys.RIGHT_BRACKET:
-                    brushRadius = Terraform.clampRadius(brushRadius + 1);
+                    toolState.setRadius(toolState.getRadius() + 1);
                     return true;
                 case Input.Keys.SPACE:
                     clock.setSpeed(clock.isPaused() ? 1 : 0);
                     return true;
                 case Input.Keys.ESCAPE:
-                    Gdx.app.exit();
+                    // Dismiss the inspector first; only quit once there is
+                    // nothing left to back out of, so Escape is never a
+                    // surprise one-way trip out of the game.
+                    if (hud.getInspector().hasSelection()) {
+                        hud.getInspector().clear();
+                    } else {
+                        Gdx.app.exit();
+                    }
                     return true;
                 default:
-                    return false;
+                    return selectToolByNumber(keycode);
             }
         }
 
-        /**
-         * Phase 1's single tool: raise terrain, or lower it with shift held.
-         * The tool palette that selects between all the brushes arrives in
-         * phase 2.
-         */
-        private void applyTool(int screenX, int screenY) {
+        /** Number keys 1-5 arm the tools in palette order. */
+        private boolean selectToolByNumber(int keycode) {
+            int index = keycode - Input.Keys.NUM_1;
+            ToolState.Tool[] tools = ToolState.Tool.values();
+            if (index < 0 || index >= tools.length) {
+                return false;
+            }
+            toolState.setTool(tools[index]);
+            return true;
+        }
+
+        private void applyTool(int screenX, int screenY, boolean initialPress) {
+            ToolState.Tool tool = toolState.getTool();
+            // Inspect is a discrete pick, not a stroke - dragging across the
+            // map should not fire it on every tile in the path.
+            if (!initialPress && !tool.isContinuous()) {
+                return;
+            }
             if (!picker.pick(camera.getCamera(), simulation.getWorld(), screenX, screenY)) {
                 return;
             }
-            boolean shiftHeld = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)
-                || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT);
 
-            // Scaled by frame time so holding the brush still deforms at a
-            // predictable rate on a fast machine rather than a faster one.
-            float strength = SimConfig.TERRAFORM_STRENGTH * Math.min(Gdx.graphics.getDeltaTime() * 12f, 1.5f);
-            if (shiftHeld) {
-                Terraform.lower(simulation.getWorld(), picker.getTileX(), picker.getTileZ(), brushRadius, strength);
-            } else {
-                Terraform.raise(simulation.getWorld(), picker.getTileX(), picker.getTileZ(), brushRadius, strength);
+            int x = picker.getTileX();
+            int z = picker.getTileZ();
+            int radius = toolState.getRadius();
+
+            // Scaled by frame time so holding a brush deforms at a predictable
+            // rate rather than a faster one on a faster machine.
+            float strength = SimConfig.TERRAFORM_STRENGTH
+                * Math.min(Gdx.graphics.getDeltaTime() * 12f, 1.5f);
+
+            switch (tool) {
+                case INSPECT -> hud.getInspector().select(x, z);
+                case RAISE -> Terraform.raise(simulation.getWorld(), x, z, radius, strength);
+                case LOWER -> Terraform.lower(simulation.getWorld(), x, z, radius, strength);
+                case WATER -> Terraform.addWater(simulation.getWorld(), x, z, radius, strength);
+                case FOREST -> Terraform.addForest(simulation.getWorld(), x, z, radius);
+                default -> { }
             }
         }
     }

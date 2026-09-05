@@ -29,15 +29,19 @@ Optional arguments:
 
 | Input | Action |
 |---|---|
-| Left-drag | Apply the current tool to the world |
-| Shift + left-drag | Lower terrain instead of raising it |
+| Left-click / drag | Apply the selected tool to the world |
 | Middle-drag *or* Alt + left-drag | Rotate the camera |
 | Right-drag | Pan |
-| `W` `A` `S` `D` / arrows | Pan |
+| `W` `A` `S` `D` | Pan |
 | Scroll wheel | Zoom |
+| `1`–`5` | Select tool: Inspect, Raise, Lower, Water, Forest |
 | `[` `]` | Shrink / grow the brush |
 | Space | Pause and unpause |
-| Escape | Quit |
+| Escape | Close the inspector, or quit if nothing is selected |
+
+Tools start on **Inspect**, which is non-destructive — click any tile to read
+its terrain, elevation, owner and unit count. The other four are terraform
+brushes; their radius is set by the slider or the bracket keys.
 
 The brief called for left-drag to rotate the camera *and* for god tools to be
 applied by dragging on the world. Those are the same gesture, so the bare left
@@ -90,7 +94,9 @@ collections. There are tests for it.
 
 ## Build status
 
-Phase 1 of 6 is complete: terrain generation, chunked meshing, the RTS camera,
-ray picking and the raise/lower terraform brush. The world is deliberately
-lifeless until the spawn tool arrives in phase 3. See `PLAN.md` for the full
-build order.
+Phases 1-2 of 6 are complete: terrain generation, chunked meshing, the RTS
+camera, ray picking, all four terraform brushes, and the scene2d HUD (tool
+palette, speed controls, tile inspector, world readout).
+
+The world is deliberately lifeless until the spawn tool arrives in phase 3.
+See `PLAN.md` for the full build order.
