@@ -24,6 +24,10 @@ Optional arguments:
 | `--seed <long>` | Generate a specific world. Omit for a random one. |
 | `--frames <n>` | Render `n` frames then exit. Automated verification only. |
 | `--screenshot <path>` | With `--frames`, write the final frame to a PNG. |
+| `--ticks <n>` | With `--frames`, run the simulation forward before capturing. |
+| `--closeup` | With `--frames`, drop the camera in among the units. |
+| `--stress <n>` | With `--frames`, spawn `n` units to measure render cost. |
+| `--war` | With `--frames`, declare a war and stage a battle to capture. |
 
 ## Controls
 
@@ -95,14 +99,40 @@ collections. There are tests for it.
 
 ## Build status
 
-Phases 1-4 of 6 are complete: terrain generation, chunked meshing, the RTS
+Phases 1-5 of 6 are complete: terrain generation, chunked meshing, the RTS
 camera, ray picking, all four terraform brushes, the scene2d HUD, living units
-- four species that wander, eat, age, breed, starve and die - and the villages
-they found, with territory that grows with population and borders drawn on the
-ground.
+- four species that wander, eat, age, breed, starve and die - the villages they
+found, with territory that grows with population and borders drawn on the
+ground, and the wars they fight over those borders.
 
-Species relations and war land in phase 5; disasters in phase 6. See `PLAN.md`
-for the full build order.
+Disasters land in phase 6. See `PLAN.md` for the full build order.
+
+### War and diplomacy
+
+Every pair of species holds a relation between -1 and +1 that drifts over time.
+What moves it is geography: territories that interlock share hundreds of border
+tiles and sour fast, while two species on opposite coasts drift around neutral
+forever. Cross -0.55 and it is war; climb back past -0.15 and it is over.
+
+Wars end on their own three different ways, which is the point. Weariness
+pushes relations back up every pass, battlefield deaths push back down so a
+bloody war outlasts a quiet one, and a hard cap imposes a truce on anything
+still going after 4,000 ticks - so "wars end" is a property of the design and
+not of the tuning. A pair that has just made peace is left alone by border
+friction for a while, or the same two would be back at war within two passes
+and peace would never read as peace.
+
+There are no armies and no orders. Units are in danger when enemies share their
+patch of ground, and in more danger when they are the ones standing on enemy
+territory. That puts the fighting where two colours meet and lets a front move
+when one side starts winning, without a single pathfinding call. Danger comes
+from enemies and never from ground alone: an earlier version had territory hurt
+trespassers outright, which killed a defeated species everywhere at once - 214
+humans to extinct in 2,500 ticks - because a beaten side had nowhere left to
+stand.
+
+Measured over five 40,000-tick runs: 9 to 26 wars each, 1,300 to 4,400
+battlefield dead, and all four species still alive at the end of every one.
 
 ### Villages and territory
 
@@ -132,5 +162,9 @@ without that, the fastest breeder simply takes the whole map (measured: orcs at
 The renderer packs every unit into two batched meshes, rebuilt on the
 simulation tick rather than per frame - units move ten times a second, so
 rebuilding at 60fps would redraw the same geometry five times out of six for
-nothing. Measured at the 2000-unit target: 1.2 ms per rebuild, ten times a
+nothing. Measured at the 2000-unit target: 1.4 ms per rebuild, ten times a
 second, in two draw calls.
+
+Combat costs nothing in peacetime - with no war anywhere the whole pass is one
+boolean check - and diplomacy runs once every 60 ticks rather than every tick,
+because a border dispute does not need re-evaluating six times a second.

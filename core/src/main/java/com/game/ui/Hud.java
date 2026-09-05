@@ -28,6 +28,7 @@ public final class Hud implements Disposable {
     private final SpeedControls speedControls;
     private final InspectorPanel inspector;
     private final StatsPanel stats;
+    private final RelationsPanel relations;
     private final Label worldLabel;
     private final Label hintLabel;
 
@@ -41,6 +42,7 @@ public final class Hud implements Disposable {
         speedControls = new SpeedControls(skin, clock);
         inspector = new InspectorPanel(skin);
         stats = new StatsPanel(skin);
+        relations = new RelationsPanel(skin);
 
         worldLabel = new Label("", skin);
         hintLabel = new Label(
@@ -67,6 +69,8 @@ public final class Hud implements Disposable {
         // the world stays visible.
         Table right = new Table();
         right.add(stats).right().top();
+        right.row();
+        right.add(relations).right().top().padTop(10f);
         right.row();
         right.add(inspector).right().top().padTop(10f);
 
@@ -107,15 +111,17 @@ public final class Hud implements Disposable {
         World world = simulation.getWorld();
         inspector.refresh(world, simulation.getUnits(), simulation.getVillages());
         stats.refresh(simulation.getUnits());
+        relations.refresh(simulation.getRelations(), simulation.getTickCount());
 
         WorldStats.countByType(world, tileCounts);
         worldLabel.setText(String.format(
-            "seed %d   tick %d   land %.0f%%   forest %d   villages %d",
+            "seed %d   tick %d   land %.0f%%   forest %d   villages %d   war dead %d",
             simulation.getSeed(),
             simulation.getTickCount(),
             WorldStats.landFraction(world) * 100f,
             tileCounts[TileType.FOREST],
-            simulation.getVillages().getLiveCount()));
+            simulation.getVillages().getLiveCount(),
+            simulation.getWarCasualties()));
 
         stage.act(delta);
     }

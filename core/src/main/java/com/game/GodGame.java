@@ -58,6 +58,7 @@ public final class GodGame extends ApplicationAdapter {
     private boolean closeUp;
     private int stressUnits;
     private int fastForwardTicks;
+    private boolean forceWar;
     private long rebuildNanos;
     private int rebuildCount;
     private int frameCounter;
@@ -91,6 +92,16 @@ public final class GodGame extends ApplicationAdapter {
      * behaviour (villages, territory) has actually happened by screenshot time. */
     public void setFastForwardTicks(int ticks) {
         this.fastForwardTicks = ticks;
+    }
+
+    /**
+     * Forces one pair into a war during the smoke test. Wars arrive on their
+     * own schedule, so without this a screenshot only catches one by luck -
+     * and a screenshot that happens to be taken in peacetime proves nothing
+     * about whether combat renders.
+     */
+    public void enableForcedWar() {
+        this.forceWar = true;
     }
 
     @Override
@@ -196,10 +207,57 @@ public final class GodGame extends ApplicationAdapter {
             + " units=" + simulation.getUnits().getLiveCount()
             + " drawnUnits=" + unitRenderer.getVisibleUnits()
             + " villages=" + simulation.getVillages().getLiveCount()
+            + " warsDeclared=" + simulation.getRelations().getWarsDeclared()
+            + " warDead=" + simulation.getWarCasualties()
+            + " fighting=" + countFighting()
             + " chunksBuilt=" + terrainRenderer.isFullyBuilt()
             + String.format(" avgUnitRebuildMs=%.3f", rebuildCount == 0 ? 0.0
                 : rebuildNanos / 1e6 / rebuildCount));
         Gdx.app.exit();
+    }
+
+    /**
+     * Declares a war and stages a battle for it, so a smoke screenshot is
+     * evidence rather than luck.
+     *
+     * <p>Declaring the war alone is not enough. Two species at war across a
+     * 128x128 map only actually fight where they happen to meet, so a capture
+     * taken at an arbitrary frame kept landing on a lull - measured at zero
+     * units fighting on a run whose war was very much still on. Putting two
+     * crowds on the same ground guarantees there is a battle to photograph.
+     */
+    private void forceBattle(com.game.sim.World world) {
+        simulation.getRelations().set(com.game.sim.Species.HUMAN, com.game.sim.Species.ORC, -1f);
+        for (int i = 0; i < SimConfig.RELATION_UPDATE_INTERVAL; i++) {
+            simulation.tick();
+        }
+
+        int centre = SimConfig.WORLD_SIZE / 2;
+        for (int radius = 0; radius < centre; radius++) {
+            int x = centre + radius;
+            if (x < world.size && com.game.sim.TileType.isWalkable(world.typeAt(x, centre))) {
+                simulation.spawnUnits(x, centre, 3, com.game.sim.Species.HUMAN, 40);
+                simulation.spawnUnits(x, centre, 3, com.game.sim.Species.ORC, 40);
+                break;
+            }
+        }
+        // Long enough for the combat pass to mark them, short enough that the
+        // battle is still in progress when the frame is captured.
+        for (int i = 0; i < 6; i++) {
+            simulation.tick();
+        }
+    }
+
+    /** Units currently in a fight - the number the combat tint is drawn for. */
+    private int countFighting() {
+        var units = simulation.getUnits();
+        int fighting = 0;
+        for (int i = 0; i < units.getHighWater(); i++) {
+            if (units.alive[i] && units.state[i] == com.game.sim.Units.STATE_FIGHT) {
+                fighting++;
+            }
+        }
+        return fighting;
     }
 
     /** Exercises every terraform brush and the inspector, for the smoke test. */
@@ -237,6 +295,9 @@ public final class GodGame extends ApplicationAdapter {
         for (int i = 0; i < fastForwardTicks; i++) {
             simulation.tick();
         }
+        if (forceWar) {
+            forceBattle(world);
+        }
         unitsDirty = true;
         villageRenderer.rebuild(world, simulation.getVillages());
 
@@ -252,7 +313,21 @@ public final class GodGame extends ApplicationAdapter {
         }
         hud.getInspector().select(inspectX, inspectZ);
         if (closeUp) {
-            camera.focusOn(inspectX, inspectZ, 34f);
+            // Point the close-up at a battle if there is one. Aiming it at an
+            // arbitrary settled tile made the screenshot prove nothing about
+            // combat: the fighting is a small fraction of the map, and the
+            // camera kept landing on quiet coastline.
+            int focusX = inspectX;
+            int focusZ = inspectZ;
+            var units = simulation.getUnits();
+            for (int i = 0; i < units.getHighWater(); i++) {
+                if (units.alive[i] && units.state[i] == com.game.sim.Units.STATE_FIGHT) {
+                    focusX = (int) units.x[i];
+                    focusZ = (int) units.z[i];
+                    break;
+                }
+            }
+            camera.focusOn(focusX, focusZ, 34f);
         }
 
         System.out.println("DEMO_APPLIED"

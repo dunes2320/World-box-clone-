@@ -123,17 +123,26 @@ class DensityGridTest {
     void speciesCrowdingKeepsFourPopulationsAlive() {
         // The regression this whole class exists for. With only a global cap,
         // orcs reached 91% of the map by tick 30,000 and elves about 1%.
-        Simulation sim = new Simulation(2024L);
+        //
+        // Driven through UnitSystem directly rather than through Simulation, so
+        // only breeding is under test. Running the full simulation would let a
+        // war decide the outcome instead, and a species losing a war is exactly
+        // the thing this design is happy to allow - it is being out-bred in
+        // peacetime that must not happen.
+        World world = WorldGen.generate(2024L);
+        Units units = new Units(SimConfig.MAX_UNITS);
+        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
+        Random random = new Random(2024L);
         for (byte s = 0; s < Species.COUNT; s++) {
-            sim.spawnUnits(56 + s * 6, 60 + s * 5, 10, s, 45);
+            UnitSystem.spawnBrush(world, units, random, 56 + s * 6, 60 + s * 5, 10, s, 45);
         }
         for (int tick = 0; tick < 20000; tick++) {
-            sim.tick();
+            UnitSystem.update(world, units, density, random);
         }
 
         int[] counts = new int[Species.COUNT];
-        sim.getUnits().countBySpecies(counts);
-        int total = sim.getUnits().getLiveCount();
+        units.countBySpecies(counts);
+        int total = units.getLiveCount();
         assertTrue(total > 100, "population collapsed to " + total);
 
         for (byte s = 0; s < Species.COUNT; s++) {
@@ -142,5 +151,31 @@ class DensityGridTest {
             assertTrue(share < 0.75,
                 Species.name(s) + " monopolised the map at " + Math.round(share * 100) + "%");
         }
+    }
+
+    @Test
+    void aBeatenSpeciesCanStillHoldOnSomewhere() {
+        // The other half of the same balance: war may cost a species its
+        // villages and most of its people, but a survivor standing somewhere
+        // quiet must not be killed by the map itself. See CombatSystem.
+        World world = WorldGen.generate(2024L);
+        Units units = new Units(64);
+        Villages villages = new Villages(8);
+        Random random = new Random(5L);
+
+        int survivors = UnitSystem.spawnBrush(world, units, random, 64, 64, 6, Species.HUMAN, 12);
+        assertTrue(survivors > 0, "test needs somewhere walkable to stand");
+
+        Relations relations = new Relations(new Random(1));
+        relations.set(Species.HUMAN, Species.ORC, -1f);
+        relations.update(new int[Species.COUNT * Species.COUNT], new Random(1), 0);
+
+        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
+        for (int tick = 0; tick < 5000; tick++) {
+            density.rebuild(units);
+            CombatSystem.update(world, units, villages, relations, density, random);
+        }
+        assertEquals(survivors, units.countOf(Species.HUMAN),
+            "a war with no orcs in it should not kill a single human");
     }
 }

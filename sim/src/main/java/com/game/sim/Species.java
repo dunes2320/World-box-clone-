@@ -17,9 +17,15 @@ public final class Species {
     public static final int COUNT = 4;
 
     private static final String[] NAMES = {"Humans", "Orcs", "Elves", "Dwarves"};
+    private static final String[] SHORT_NAMES = {"Hum", "Orc", "Elf", "Dwa"};
 
     public static String name(byte species) {
         return species >= 0 && species < COUNT ? NAMES[species] : "Unknown";
+    }
+
+    /** Three-letter form, for buttons and the pair-by-pair relations readout. */
+    public static String shortName(byte species) {
+        return species >= 0 && species < COUNT ? SHORT_NAMES[species] : "???";
     }
 
     /**

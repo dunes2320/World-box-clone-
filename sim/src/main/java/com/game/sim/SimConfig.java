@@ -147,6 +147,100 @@ public final class SimConfig {
     public static final int WANDER_MIN_TICKS = 18;
     public static final int WANDER_MAX_TICKS = 55;
 
+    // ---- species relations ----
+
+    /**
+     * Ticks between relation passes. Diplomacy moves slower than settlement,
+     * and deliberately a whole multiple of {@link #VILLAGE_UPDATE_INTERVAL} so
+     * a relations pass always lands right after a territory pass and reads
+     * borders that were drawn this instant rather than up to a pass ago.
+     */
+    public static final int RELATION_UPDATE_INTERVAL = 60;
+
+    /** Where every pair starts: mildly friendly, so nobody opens the game at war. */
+    public static final float RELATION_START = 0.20f;
+    /** Random spread either side of the start, so the four pairs are not identical. */
+    public static final float RELATION_INITIAL_SPREAD = 0.25f;
+
+    /** Random wobble applied to every pair each pass, either direction. */
+    public static final float RELATION_DRIFT = 0.035f;
+    /**
+     * How much one tile of contested border sours a pair each pass. Rubbing up
+     * against each other is what actually causes wars here - two species on
+     * opposite coasts drift around neutral forever, which is as it should be.
+     */
+    public static final float RELATION_BORDER_FRICTION = 0.0018f;
+    /** Ceiling on the friction one pass can apply, so a long border is not instant war. */
+    public static final int RELATION_FRICTION_CAP_TILES = 50;
+    /**
+     * Where a pair lands when a war ends. Agreeing to stop is itself worth
+     * something, so peace pays a little more than the threshold that triggered
+     * it. Landing exactly on the threshold instead was measured at thirteen
+     * wars between the same two species on one seed: two passes of friction put
+     * them straight back under, and "peace" never lasted long enough to read as
+     * peace.
+     */
+    public static final float RELATION_POST_WAR = 0.10f;
+    /**
+     * How long after a war a pair is left alone by border friction. Sharing a
+     * border is a slow grievance, and the two species who just stopped fighting
+     * over one are precisely the two who need a while before it starts counting
+     * against them again.
+     */
+    public static final int WAR_COOLDOWN_TICKS = 1500;
+    /** How fast a war talks itself out once it has started. */
+    public static final float RELATION_WAR_WEARINESS = 0.055f;
+    /** How much each battlefield death deepens the grudge, slowing that recovery. */
+    public static final float RELATION_CASUALTY_GRUDGE = 0.0040f;
+
+    /** Relations at or below this declare war. */
+    public static final float WAR_THRESHOLD = -0.55f;
+    /**
+     * Relations at or above this end one. The gap between the two thresholds is
+     * hysteresis: with a single threshold a pair sitting on it would flip
+     * between war and peace on the random drift alone.
+     */
+    public static final float PEACE_THRESHOLD = -0.15f;
+    /**
+     * Hard ceiling on a war's length. Weariness normally ends a war well before
+     * this, but casualties push the other way, and a backstop means "wars end"
+     * is a guarantee of the design rather than a property of the tuning.
+     */
+    public static final int MAX_WAR_TICKS = 4000;
+
+    // ---- combat ----
+
+    /**
+     * Per-tick chance of being struck, per enemy sharing your density cell.
+     *
+     * <p>Tuned down from 0.030 against five 40,000-tick runs. At the higher
+     * figure a species was wiped out on two of the five seeds; at this one all
+     * four survive on all five, and the runs still produce 9 to 26 wars and
+     * 1,300 to 4,400 battlefield dead apiece. Losing a war costs villages,
+     * villages are what make a species breed faster, and above this rate the
+     * loser never gets back on its feet between wars.
+     */
+    public static final double COMBAT_RISK_PER_ENEMY = 0.018;
+    /**
+     * How much more dangerous a fight is when you are the one standing on the
+     * enemy's territory. Defending your own ground is worth something, which is
+     * what makes a border war push back and forth instead of sliding one way.
+     *
+     * <p>This is a multiplier on the danger enemies pose, deliberately not a
+     * danger of its own. An earlier version had territory hurt trespassers
+     * outright, with no enemy needed - which meant a species that lost its
+     * villages was killed everywhere at once by ground it merely stood on,
+     * with nobody nearby. Measured on seed 2024: humans went from 214 alive to
+     * extinct in 2,500 ticks. Danger comes from enemies now, so a beaten
+     * species can survive in the gaps rather than being erased from the map.
+     */
+    public static final double COMBAT_DEFENDER_ADVANTAGE = 1.8;
+    /**
+     * Damage per hit. Comfortably ahead of the one-per-tick healing a fed unit
+     * gets, or a battle line would be two crowds regenerating at each other.
+     */
+    public static final int COMBAT_DAMAGE = 20;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

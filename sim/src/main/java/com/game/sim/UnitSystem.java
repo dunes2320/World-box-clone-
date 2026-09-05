@@ -52,9 +52,14 @@ public final class UnitSystem {
                     units.kill(i);
                     continue;
                 }
-            } else if (food > 0 && units.health[i] < SimConfig.UNIT_MAX_HEALTH) {
+            } else if (food > 0 && units.health[i] < SimConfig.UNIT_MAX_HEALTH
+                && units.state[i] != Units.STATE_FIGHT) {
                 // Recover slowly once back on good ground, so one bad crossing
-                // of a beach is a setback rather than a death sentence.
+                // of a beach is a setback rather than a death sentence - but not
+                // while standing in a fight, or a battle line would just be two
+                // crowds regenerating at each other. The state read here was set
+                // by last tick's combat pass, which is what makes "still in the
+                // fight" a thing this tick can know about.
                 units.health[i]++;
             }
             units.hunger[i] = (byte) hunger;

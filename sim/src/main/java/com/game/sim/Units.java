@@ -15,10 +15,12 @@ package com.game.sim;
  */
 public final class Units {
 
-    // Behaviour states. Only WANDER and SEEK_FOOD are used yet; the rest are
-    // reserved for the village and combat phases.
+    // Behaviour states. Set by UnitSystem each tick, then possibly overridden by
+    // CombatSystem, which runs after it - so a unit in a fight reads as fighting
+    // rather than as whatever it was doing when the enemy arrived.
     public static final byte STATE_WANDER = 0;
     public static final byte STATE_SEEK_FOOD = 1;
+    public static final byte STATE_FIGHT = 2;
 
     public final int capacity;
 

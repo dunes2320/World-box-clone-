@@ -18,9 +18,12 @@ public final class Simulation {
     private final DensityGrid density;
     private final Villages villages;
     private final Territory territory;
+    private final Relations relations;
+    private final RelationSystem relationSystem;
     private final Random random;
 
     private long tickCount;
+    private int warCasualties;
 
     public Simulation(long seed) {
         this.seed = seed;
@@ -32,6 +35,9 @@ public final class Simulation {
         // Offset from the world seed so the gameplay stream is independent of
         // the terrain stream: regenerating terrain must not shift gameplay rolls.
         this.random = new Random(seed ^ 0x5DEECE66DL);
+        // Draws from that same stream, so a seed also fixes the opening politics.
+        this.relations = new Relations(random);
+        this.relationSystem = new RelationSystem();
     }
 
     public Units getUnits() {
@@ -44,6 +50,19 @@ public final class Simulation {
 
     public Villages getVillages() {
         return villages;
+    }
+
+    public Relations getRelations() {
+        return relations;
+    }
+
+    public RelationSystem getRelationSystem() {
+        return relationSystem;
+    }
+
+    /** Units killed in war since the world began. */
+    public int getWarCasualties() {
+        return warCasualties;
     }
 
     /**
@@ -85,11 +104,19 @@ public final class Simulation {
     public void tick() {
         tickCount++;
         UnitSystem.update(world, units, density, random);
+        // Combat runs every tick, straight after movement, so fighting resolves
+        // where the units actually are. In peacetime it returns immediately.
+        warCasualties += CombatSystem.update(world, units, villages, relations, density, random);
         // Villages move on a slower clock than footsteps: territory does not
         // need recomputing ten times a second, and settling should feel like it
         // takes a while rather than happening the instant a crowd forms.
         if (tickCount % SimConfig.VILLAGE_UPDATE_INTERVAL == 0) {
             VillageSystem.update(world, units, villages, territory, density, random, (int) tickCount);
+        }
+        // Diplomacy is slower still, and reads the borders the village pass just
+        // drew - so a war is declared over the map as it currently stands.
+        if (tickCount % SimConfig.RELATION_UPDATE_INTERVAL == 0) {
+            relationSystem.update(world, villages, relations, random, (int) tickCount);
         }
     }
 }

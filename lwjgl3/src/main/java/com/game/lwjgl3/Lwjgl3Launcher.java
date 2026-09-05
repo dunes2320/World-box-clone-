@@ -33,6 +33,9 @@ public final class Lwjgl3Launcher {
                 if ("--closeup".equals(arg)) {
                     game.enableCloseUp();
                 }
+                if ("--war".equals(arg)) {
+                    game.enableForcedWar();
+                }
             }
             int stress = parseInt(args, "--stress", 0);
             if (stress > 0) {

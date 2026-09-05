@@ -64,6 +64,19 @@ public final class UnitRenderer implements Disposable {
     /** Heads are slightly darker than bodies so the two boxes read as separate. */
     private static final float HEAD_SHADE = 0.82f;
 
+    /**
+     * A unit in a fight is washed out toward white and given a near-black head.
+     *
+     * <p>The signal has to be readable without depending on the species colour,
+     * because it has to work for all four. A single tint does not manage that:
+     * the first attempt blended toward a hot yellow, which for amber humans
+     * produced almost exactly the amber they already were. Pale body plus dark
+     * head is a two-tone contrast no species has and no terrain produces, so it
+     * reads at any zoom where a unit is visible at all.
+     */
+    private static final float COMBAT_WASH = 0.65f;
+    private static final Color COMBAT_HEAD = new Color(0.12f, 0.10f, 0.12f, 1f);
+
     private final Mesh[] meshes;
     private final Renderable[] renderables;
     private final Material material;
@@ -169,9 +182,19 @@ public final class UnitRenderer implements Disposable {
         float ground = groundHeight(world, x, z) + GROUND_OFFSET;
 
         Color base = SPECIES_COLOR[units.species[i]];
-        float bodyColor = base.toFloatBits();
-        float headColor = Color.toFloatBits(
-            base.r * HEAD_SHADE, base.g * HEAD_SHADE, base.b * HEAD_SHADE, 1f);
+        float bodyColor;
+        float headColor;
+        if (units.state[i] == Units.STATE_FIGHT) {
+            bodyColor = Color.toFloatBits(
+                base.r + (1f - base.r) * COMBAT_WASH,
+                base.g + (1f - base.g) * COMBAT_WASH,
+                base.b + (1f - base.b) * COMBAT_WASH, 1f);
+            headColor = COMBAT_HEAD.toFloatBits();
+        } else {
+            bodyColor = base.toFloatBits();
+            headColor = Color.toFloatBits(
+                base.r * HEAD_SHADE, base.g * HEAD_SHADE, base.b * HEAD_SHADE, 1f);
+        }
 
         float half = BODY_WIDTH * 0.5f;
         addBox(x - half, ground, z - half,
