@@ -1,7 +1,26 @@
-target/
-dependency-reduced-pom.xml
-*.class
-hs_err_pid*.log
+# Gradle
+build/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
 .idea/
 *.iml
+*.ipr
+*.iws
 .vscode/
+.settings/
+.classpath
+.project
+bin/
+out/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*~
+
+# Java crash logs
+hs_err_pid*.log
+replay_pid*.log
+*.class
