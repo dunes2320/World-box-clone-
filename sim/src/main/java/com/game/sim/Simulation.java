@@ -14,6 +14,8 @@ public final class Simulation {
 
     private final long seed;
     private final World world;
+    private final Units units;
+    private final DensityGrid density;
     private final Random random;
 
     private long tickCount;
@@ -21,9 +23,38 @@ public final class Simulation {
     public Simulation(long seed) {
         this.seed = seed;
         this.world = WorldGen.generate(seed);
+        this.units = new Units(SimConfig.MAX_UNITS);
+        this.density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
         // Offset from the world seed so the gameplay stream is independent of
         // the terrain stream: regenerating terrain must not shift gameplay rolls.
         this.random = new Random(seed ^ 0x5DEECE66DL);
+    }
+
+    public Units getUnits() {
+        return units;
+    }
+
+    public DensityGrid getDensity() {
+        return density;
+    }
+
+    /**
+     * Scatters units of a species across walkable ground under the brush - the
+     * spawn god tool.
+     *
+     * @return how many were actually placed
+     */
+    public int spawnUnits(int tileX, int tileZ, int radius, byte species, int count) {
+        return UnitSystem.spawnBrush(world, units, random, tileX, tileZ, radius, species, count);
+    }
+
+    /**
+     * Kills anything left stranded by a terrain edit. Called by the god tools
+     * after terraforming rather than every tick, since it is a reaction to an
+     * edit rather than a behaviour.
+     */
+    public int cullStrandedUnits() {
+        return UnitSystem.cullStranded(world, units);
     }
 
     public long getSeed() {
@@ -42,15 +73,9 @@ public final class Simulation {
         return tickCount;
     }
 
-    /**
-     * Advances the world by exactly one fixed step.
-     *
-     * <p>Phase 1 has no living systems yet - the world is terrain only, by
-     * design, since units arrive with the spawn tool in phase 3. The tick
-     * counter still advances so the clock, speed controls and pause can all be
-     * exercised and tested before there is anything to watch.
-     */
+    /** Advances the world by exactly one fixed step. */
     public void tick() {
         tickCount++;
+        UnitSystem.update(world, units, density, random);
     }
 }

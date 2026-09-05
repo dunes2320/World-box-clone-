@@ -7,7 +7,10 @@ import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.graphics.Color;
+import com.game.render.UnitRenderer;
 import com.game.sim.SimConfig;
+import com.game.sim.Species;
 
 /** Bottom bar: one toggle per tool, plus the brush radius control. */
 public final class ToolPalette extends Table {
@@ -16,6 +19,7 @@ public final class ToolPalette extends Table {
     private final Slider radiusSlider;
     private final Label radiusLabel;
     private final ButtonGroup<TextButton> group = new ButtonGroup<>();
+    private final ButtonGroup<TextButton> speciesGroup = new ButtonGroup<>();
 
     /**
      * Guards against the slider and the keyboard shortcuts fighting each other:
@@ -73,6 +77,33 @@ public final class ToolPalette extends Table {
         radiusLabel = new Label(String.valueOf(toolState.getRadius()), skin);
         add(radiusLabel).width(24f);
 
+        // Species selector for the spawn tool. Always visible rather than
+        // appearing only when Spawn is armed, so the palette does not resize
+        // and shuffle every other button sideways as tools change.
+        add(new Label("  Species", skin, "dim")).padLeft(14f);
+        speciesGroup.setMinCheckCount(0);
+        speciesGroup.setMaxCheckCount(1);
+        for (byte species = 0; species < Species.COUNT; species++) {
+            final byte id = species;
+            TextButton button = new TextButton(Species.name(species).substring(0, 3), skin);
+            Color tint = UnitRenderer.colorFor(species);
+            button.getLabel().setColor(tint);
+            button.addListener(new ChangeListener() {
+                @Override
+                public void changed(ChangeEvent event, com.badlogic.gdx.scenes.scene2d.Actor actor) {
+                    if (button.isChecked()) {
+                        toolState.setSpawnSpecies(id);
+                        // Picking a species is a clear statement of intent, so
+                        // arm the spawn tool rather than making it two clicks.
+                        toolState.setTool(ToolState.Tool.SPAWN);
+                    }
+                }
+            });
+            speciesGroup.add(button);
+            add(button).width(52f).height(30f);
+        }
+        speciesGroup.setMinCheckCount(1);
+
         sync();
     }
 
@@ -88,6 +119,17 @@ public final class ToolPalette extends Table {
             syncing = false;
         }
         radiusLabel.setText(String.valueOf(radius));
+
+        String wantedSpecies = Species.name(toolState.getSpawnSpecies()).substring(0, 3);
+        TextButton checkedSpecies = speciesGroup.getChecked();
+        if (checkedSpecies == null || !checkedSpecies.getText().toString().equals(wantedSpecies)) {
+            for (TextButton button : speciesGroup.getButtons()) {
+                if (button.getText().toString().equals(wantedSpecies)) {
+                    button.setChecked(true);
+                    break;
+                }
+            }
+        }
 
         // Keep the checked button matching the state for the same reason.
         ToolState.Tool current = toolState.getTool();

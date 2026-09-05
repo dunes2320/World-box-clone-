@@ -29,6 +29,15 @@ public final class Lwjgl3Launcher {
         int smokeFrames = parseInt(args, "--frames", 0);
         if (smokeFrames > 0) {
             game.enableSmokeTest(smokeFrames, parseString(args, "--screenshot"));
+            for (String arg : args) {
+                if ("--closeup".equals(arg)) {
+                    game.enableCloseUp();
+                }
+            }
+            int stress = parseInt(args, "--stress", 0);
+            if (stress > 0) {
+                game.setStressUnits(stress);
+            }
         }
 
         new Lwjgl3Application(game, config);

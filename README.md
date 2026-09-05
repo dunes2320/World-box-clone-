@@ -34,14 +34,15 @@ Optional arguments:
 | Right-drag | Pan |
 | `W` `A` `S` `D` | Pan |
 | Scroll wheel | Zoom |
-| `1`–`5` | Select tool: Inspect, Raise, Lower, Water, Forest |
+| `1`–`6` | Select tool: Inspect, Raise, Lower, Water, Forest, Spawn |
 | `[` `]` | Shrink / grow the brush |
 | Space | Pause and unpause |
 | Escape | Close the inspector, or quit if nothing is selected |
 
 Tools start on **Inspect**, which is non-destructive — click any tile to read
-its terrain, elevation, owner and unit count. The other four are terraform
-brushes; their radius is set by the slider or the bracket keys.
+its terrain, elevation, owner and unit count. Four are terraform brushes and
+one spawns units; the radius slider (or the bracket keys) sizes them all.
+Picking a species from the palette arms the spawn tool automatically.
 
 The brief called for left-drag to rotate the camera *and* for god tools to be
 applied by dragging on the world. Those are the same gesture, so the bare left
@@ -94,9 +95,24 @@ collections. There are tests for it.
 
 ## Build status
 
-Phases 1-2 of 6 are complete: terrain generation, chunked meshing, the RTS
-camera, ray picking, all four terraform brushes, and the scene2d HUD (tool
-palette, speed controls, tile inspector, world readout).
+Phases 1-3 of 6 are complete: terrain generation, chunked meshing, the RTS
+camera, ray picking, all four terraform brushes, the scene2d HUD, and living
+units - four species that wander, eat, age, breed, starve and die.
 
-The world is deliberately lifeless until the spawn tool arrives in phase 3.
-See `PLAN.md` for the full build order.
+Villages, territory and borders land in phase 4; species relations and war in
+phase 5; disasters in phase 6. See `PLAN.md` for the full build order.
+
+### Population dynamics
+
+Units breed only when fed and only when their surroundings have room. Crowding
+is measured per species and bites harder within a species than between them -
+without that, the fastest breeder simply takes the whole map (measured: orcs at
+91% by tick 30,000, elves at 1%). With it, all four hold steady together.
+
+### Performance
+
+The renderer packs every unit into two batched meshes, rebuilt on the
+simulation tick rather than per frame - units move ten times a second, so
+rebuilding at 60fps would redraw the same geometry five times out of six for
+nothing. Measured at the 2000-unit target: 1.2 ms per rebuild, ten times a
+second, in two draw calls.

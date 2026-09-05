@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.game.render.RtsCamera;
 import com.game.render.TerrainRenderer;
 import com.game.render.TilePicker;
+import com.game.render.UnitRenderer;
 import com.game.sim.SimClock;
 import com.game.sim.SimConfig;
 import com.game.sim.Simulation;
@@ -41,6 +42,7 @@ public final class GodGame extends ApplicationAdapter {
 
     private RtsCamera camera;
     private TerrainRenderer terrainRenderer;
+    private UnitRenderer unitRenderer;
     private TilePicker picker;
     private ModelBatch modelBatch;
     private Environment environment;
@@ -51,7 +53,13 @@ public final class GodGame extends ApplicationAdapter {
     // number of frames, dump the framebuffer, and exit.
     private int autoExitFrames;
     private String screenshotPath;
+    private boolean closeUp;
+    private int stressUnits;
+    private long rebuildNanos;
+    private int rebuildCount;
     private int frameCounter;
+    /** Set when something other than a tick changed the units - a spawn, a cull. */
+    private boolean unitsDirty = true;
 
     public GodGame(long seed) {
         this.seed = seed;
@@ -66,6 +74,16 @@ public final class GodGame extends ApplicationAdapter {
         this.screenshotPath = pngPath;
     }
 
+    /** Drops the smoke-test camera down among the units instead of map-wide. */
+    public void enableCloseUp() {
+        this.closeUp = true;
+    }
+
+    /** Spawns this many units in the smoke test, to measure the render cost at scale. */
+    public void setStressUnits(int units) {
+        this.stressUnits = units;
+    }
+
     @Override
     public void create() {
         simulation = new Simulation(seed);
@@ -74,6 +92,7 @@ public final class GodGame extends ApplicationAdapter {
 
         camera = new RtsCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         terrainRenderer = new TerrainRenderer(simulation.getWorld());
+        unitRenderer = new UnitRenderer();
         picker = new TilePicker();
         modelBatch = new ModelBatch();
         hud = new Hud(toolState, clock);
@@ -105,6 +124,16 @@ public final class GodGame extends ApplicationAdapter {
         for (int i = 0; i < ticks; i++) {
             simulation.tick();
         }
+        // Units move on the fixed tick, not per frame, so rebuilding their
+        // geometry every frame would redraw half a million vertices to put
+        // everything back exactly where it already was.
+        if (ticks > 0 || unitsDirty) {
+            long start = System.nanoTime();
+            unitRenderer.rebuild(simulation.getWorld(), simulation.getUnits());
+            rebuildNanos += System.nanoTime() - start;
+            rebuildCount++;
+            unitsDirty = false;
+        }
 
         terrainRenderer.update();
         hud.update(simulation, clock, delta);
@@ -115,6 +144,7 @@ public final class GodGame extends ApplicationAdapter {
 
         modelBatch.begin(camera.getCamera());
         terrainRenderer.render(modelBatch, environment);
+        unitRenderer.render(modelBatch, environment);
         modelBatch.end();
 
         // Depth testing has to come off before the 2D overlay, or panels get
@@ -145,7 +175,11 @@ public final class GodGame extends ApplicationAdapter {
         System.out.println("SMOKE_OK frames=" + frameCounter
             + " seed=" + seed
             + " ticks=" + simulation.getTickCount()
-            + " chunksBuilt=" + terrainRenderer.isFullyBuilt());
+            + " units=" + simulation.getUnits().getLiveCount()
+            + " drawnUnits=" + unitRenderer.getVisibleUnits()
+            + " chunksBuilt=" + terrainRenderer.isFullyBuilt()
+            + String.format(" avgUnitRebuildMs=%.3f", rebuildCount == 0 ? 0.0
+                : rebuildNanos / 1e6 / rebuildCount));
         Gdx.app.exit();
     }
 
@@ -164,9 +198,24 @@ public final class GodGame extends ApplicationAdapter {
         }
         Terraform.addForest(world, centre, centre + 20, 9);
 
-        toolState.setTool(ToolState.Tool.RAISE);
+        // Seed all four species so the stats panel and the per-species colours
+        // are both evidenced by the screenshot.
+        int perSpecies = Math.max(1, (stressUnits > 0 ? stressUnits : 880) / com.game.sim.Species.COUNT);
+        int spawned = 0;
+        for (byte species = 0; species < com.game.sim.Species.COUNT; species++) {
+            spawned += simulation.spawnUnits(centre - 20 + species * 13, centre - 18,
+                stressUnits > 0 ? 22 : 11, species, perSpecies);
+        }
+        unitsDirty = true;
+
+        if (closeUp) {
+            camera.focusOn(centre - 14, centre - 16, 26f);
+        }
+
+        toolState.setTool(ToolState.Tool.SPAWN);
         toolState.setRadius(7);
         hud.getInspector().select(centre - 14, centre);
+        System.out.println("DEMO_SPAWNED units=" + spawned);
 
         System.out.println("DEMO_APPLIED"
             + " raisedHeight=" + String.format("%.2f", world.heightAt(centre - 14, centre))
@@ -232,6 +281,7 @@ public final class GodGame extends ApplicationAdapter {
     public void dispose() {
         modelBatch.dispose();
         terrainRenderer.dispose();
+        unitRenderer.dispose();
         hud.dispose();
     }
 
@@ -376,7 +426,22 @@ public final class GodGame extends ApplicationAdapter {
                 case LOWER -> Terraform.lower(simulation.getWorld(), x, z, radius, strength);
                 case WATER -> Terraform.addWater(simulation.getWorld(), x, z, radius, strength);
                 case FOREST -> Terraform.addForest(simulation.getWorld(), x, z, radius);
+                case SPAWN -> {
+                    simulation.spawnUnits(x, z, radius,
+                        toolState.getSpawnSpecies(), toolState.spawnCountForRadius());
+                    unitsDirty = true;
+                }
                 default -> { }
+            }
+
+            // Terraforming can drown or bury whoever was standing there, so
+            // anything left somewhere impossible is removed straight away
+            // rather than waiting for a tick that may be paused.
+            if (tool == ToolState.Tool.WATER || tool == ToolState.Tool.RAISE
+                || tool == ToolState.Tool.LOWER) {
+                if (simulation.cullStrandedUnits() > 0) {
+                    unitsDirty = true;
+                }
             }
         }
     }

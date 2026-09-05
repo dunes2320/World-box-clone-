@@ -4,6 +4,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.game.sim.TileType;
+import com.game.sim.Units;
 import com.game.sim.World;
 
 /**
@@ -78,7 +79,7 @@ public final class InspectorPanel extends Table {
      * player is actively terraforming updates live rather than showing a
      * snapshot from whenever it was clicked.
      */
-    public void refresh(World world) {
+    public void refresh(World world, Units units) {
         if (!hasSelection || !world.inBounds(selectedX, selectedZ)) {
             return;
         }
@@ -91,8 +92,24 @@ public final class InspectorPanel extends Table {
         short village = world.ownerVillage[index];
         owner.setText(village == World.NO_OWNER ? "Unclaimed" : "Village " + village);
 
-        // Units arrive in phase 3; until then this row honestly reports zero
-        // rather than being left out and needing a layout change later.
-        units.setText("0");
+        this.units.setText(String.valueOf(countUnitsOnTile(units)));
+    }
+
+    /**
+     * Units standing on the selected tile. A linear scan of the pool rather
+     * than a spatial lookup: it runs once a frame for a single tile, and the
+     * density grid's cells are far too coarse to answer a per-tile question.
+     */
+    private int countUnitsOnTile(Units units) {
+        int count = 0;
+        int end = units.getHighWater();
+        for (int i = 0; i < end; i++) {
+            if (units.alive[i]
+                && (int) Math.floor(units.x[i]) == selectedX
+                && (int) Math.floor(units.z[i]) == selectedZ) {
+                count++;
+            }
+        }
+        return count;
     }
 }

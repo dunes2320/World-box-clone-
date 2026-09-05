@@ -50,6 +50,13 @@ public final class RtsCamera {
         return distance;
     }
 
+    /** Points the camera at a spot on the map from a given distance. */
+    public void focusOn(float worldX, float worldZ, float distanceFromTarget) {
+        target.set(worldX, target.y, worldZ);
+        distance = MathUtils.clamp(distanceFromTarget, MIN_DISTANCE, MAX_DISTANCE);
+        update();
+    }
+
     public void resize(int width, int height) {
         camera.viewportWidth = width;
         camera.viewportHeight = height;

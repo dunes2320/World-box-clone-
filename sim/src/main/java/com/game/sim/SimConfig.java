@@ -69,6 +69,58 @@ public final class SimConfig {
     public static final float ELEVATION_AMPLITUDE = 22.0f;
     public static final float ELEVATION_BIAS = 2.5f;
 
+    // ---- units ----
+
+    /** Pool size. Larger than the population cap so the spawn tool has headroom. */
+    public static final int MAX_UNITS = 3000;
+    /**
+     * Breeding stops here. The brief's performance target is 2000 units, so the
+     * cap is set to it rather than above it - a world that can only reach its
+     * own target is a world that cannot quietly drift out of budget.
+     */
+    public static final int POPULATION_CAP = 2000;
+
+    /** Tiles per tick. At 10 ticks/sec this is a bit over one tile a second. */
+    public static final float UNIT_SPEED = 0.11f;
+    public static final int UNIT_MAX_HEALTH = 100;
+
+    /** Ticks before a unit can breed. */
+    public static final int UNIT_MATURITY = 260;
+    /** Random spread either side of a species' base lifespan. */
+    public static final int LIFESPAN_VARIANCE = 800;
+
+    /** Hunger rises by one a tick; at this point starvation starts biting. */
+    public static final int HUNGER_STARVING = 118;
+    /** Must be below this to breed, so only well-fed populations grow. */
+    public static final int HUNGER_FED = 34;
+    public static final int STARVATION_DAMAGE = 2;
+
+    /** Hunger removed per tick standing on each kind of ground. */
+    public static final int FOOD_FROM_GRASS = 3;
+    public static final int FOOD_FROM_FOREST = 5;
+
+    /** Per-tick breeding chance for a fed adult, before species fertility. */
+    public static final double REPRODUCE_CHANCE = 0.0035;
+
+    /** Side length in tiles of one density-grid cell (see DensityGrid). */
+    public static final int DENSITY_CELL_SIZE = 8;
+    /**
+     * Units of ANY species per density cell at which breeding stops. Caps how
+     * packed one region can get regardless of who lives there.
+     */
+    public static final int LOCAL_CROWDING_LIMIT = 18;
+    /**
+     * Units of the SAME species per cell at which that species stops breeding
+     * there. Deliberately well below the total limit: competition has to bite
+     * harder within a species than between them, or the fastest breeder simply
+     * fills every cell and the others die out (see DensityGrid).
+     */
+    public static final int SPECIES_CROWDING_LIMIT = 6;
+
+    /** How many ticks a unit holds a heading before picking a new one. */
+    public static final int WANDER_MIN_TICKS = 18;
+    public static final int WANDER_MAX_TICKS = 55;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

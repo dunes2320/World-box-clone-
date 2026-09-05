@@ -18,7 +18,8 @@ public final class ToolState {
         RAISE("Raise"),
         LOWER("Lower"),
         WATER("Water"),
-        FOREST("Forest");
+        FOREST("Forest"),
+        SPAWN("Spawn");
 
         private final String label;
 
@@ -41,6 +42,7 @@ public final class ToolState {
     // trench through the map.
     private Tool tool = Tool.INSPECT;
     private int radius = 4;
+    private byte spawnSpecies = com.game.sim.Species.HUMAN;
 
     public Tool getTool() {
         return tool;
@@ -56,5 +58,23 @@ public final class ToolState {
 
     public void setRadius(int radius) {
         this.radius = Terraform.clampRadius(radius);
+    }
+
+    /** Which species the spawn tool places. */
+    public byte getSpawnSpecies() {
+        return spawnSpecies;
+    }
+
+    public void setSpawnSpecies(byte species) {
+        this.spawnSpecies = species;
+    }
+
+    /**
+     * How many units one click of the spawn brush drops. Scaled by area so a
+     * wide brush seeds a real population rather than the same handful spread
+     * thinner.
+     */
+    public int spawnCountForRadius() {
+        return Math.max(3, radius * radius / 2);
     }
 }

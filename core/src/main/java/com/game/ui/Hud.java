@@ -27,6 +27,7 @@ public final class Hud implements Disposable {
     private final ToolPalette palette;
     private final SpeedControls speedControls;
     private final InspectorPanel inspector;
+    private final StatsPanel stats;
     private final Label worldLabel;
     private final Label hintLabel;
 
@@ -39,6 +40,7 @@ public final class Hud implements Disposable {
         palette = new ToolPalette(skin, toolState);
         speedControls = new SpeedControls(skin, clock);
         inspector = new InspectorPanel(skin);
+        stats = new StatsPanel(skin);
 
         worldLabel = new Label("", skin);
         hintLabel = new Label(
@@ -63,9 +65,14 @@ public final class Hud implements Disposable {
 
         // Middle band: inspector pinned right, everything else left clear so
         // the world stays visible.
+        Table right = new Table();
+        right.add(stats).right().top();
+        right.row();
+        right.add(inspector).right().top().padTop(10f);
+
         Table middle = new Table();
         middle.add().expandX().fillX();
-        middle.add(inspector).right().top();
+        middle.add(right).right().top();
         root.add(middle).expand().fill().pad(10f);
         root.row();
 
@@ -98,7 +105,8 @@ public final class Hud implements Disposable {
         speedControls.sync();
 
         World world = simulation.getWorld();
-        inspector.refresh(world);
+        inspector.refresh(world, simulation.getUnits());
+        stats.refresh(simulation.getUnits());
 
         WorldStats.countByType(world, tileCounts);
         worldLabel.setText(String.format(
