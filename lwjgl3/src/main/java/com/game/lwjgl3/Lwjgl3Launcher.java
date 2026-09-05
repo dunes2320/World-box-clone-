@@ -38,6 +38,10 @@ public final class Lwjgl3Launcher {
             if (stress > 0) {
                 game.setStressUnits(stress);
             }
+            int fastForward = parseInt(args, "--ticks", 0);
+            if (fastForward > 0) {
+                game.setFastForwardTicks(fastForward);
+            }
         }
 
         new Lwjgl3Application(game, config);

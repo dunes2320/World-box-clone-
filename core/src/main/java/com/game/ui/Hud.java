@@ -105,16 +105,17 @@ public final class Hud implements Disposable {
         speedControls.sync();
 
         World world = simulation.getWorld();
-        inspector.refresh(world, simulation.getUnits());
+        inspector.refresh(world, simulation.getUnits(), simulation.getVillages());
         stats.refresh(simulation.getUnits());
 
         WorldStats.countByType(world, tileCounts);
         worldLabel.setText(String.format(
-            "seed %d   tick %d   land %.0f%%   forest %d",
+            "seed %d   tick %d   land %.0f%%   forest %d   villages %d",
             simulation.getSeed(),
             simulation.getTickCount(),
             WorldStats.landFraction(world) * 100f,
-            tileCounts[TileType.FOREST]));
+            tileCounts[TileType.FOREST],
+            simulation.getVillages().getLiveCount()));
 
         stage.act(delta);
     }

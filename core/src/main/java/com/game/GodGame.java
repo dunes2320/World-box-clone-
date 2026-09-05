@@ -17,6 +17,7 @@ import com.game.render.RtsCamera;
 import com.game.render.TerrainRenderer;
 import com.game.render.TilePicker;
 import com.game.render.UnitRenderer;
+import com.game.render.VillageRenderer;
 import com.game.sim.SimClock;
 import com.game.sim.SimConfig;
 import com.game.sim.Simulation;
@@ -43,6 +44,7 @@ public final class GodGame extends ApplicationAdapter {
     private RtsCamera camera;
     private TerrainRenderer terrainRenderer;
     private UnitRenderer unitRenderer;
+    private VillageRenderer villageRenderer;
     private TilePicker picker;
     private ModelBatch modelBatch;
     private Environment environment;
@@ -55,6 +57,7 @@ public final class GodGame extends ApplicationAdapter {
     private String screenshotPath;
     private boolean closeUp;
     private int stressUnits;
+    private int fastForwardTicks;
     private long rebuildNanos;
     private int rebuildCount;
     private int frameCounter;
@@ -84,6 +87,12 @@ public final class GodGame extends ApplicationAdapter {
         this.stressUnits = units;
     }
 
+    /** Runs the simulation forward inside the smoke test, so slow emergent
+     * behaviour (villages, territory) has actually happened by screenshot time. */
+    public void setFastForwardTicks(int ticks) {
+        this.fastForwardTicks = ticks;
+    }
+
     @Override
     public void create() {
         simulation = new Simulation(seed);
@@ -91,8 +100,9 @@ public final class GodGame extends ApplicationAdapter {
         toolState = new ToolState();
 
         camera = new RtsCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        terrainRenderer = new TerrainRenderer(simulation.getWorld());
+        terrainRenderer = new TerrainRenderer(simulation.getWorld(), simulation.getVillages());
         unitRenderer = new UnitRenderer();
+        villageRenderer = new VillageRenderer();
         picker = new TilePicker();
         modelBatch = new ModelBatch();
         hud = new Hud(toolState, clock);
@@ -133,6 +143,13 @@ public final class GodGame extends ApplicationAdapter {
             rebuildNanos += System.nanoTime() - start;
             rebuildCount++;
             unitsDirty = false;
+
+            // Villages change far more slowly than units; rebuild their markers
+            // only when the set actually differs from what is on screen.
+            int liveVillages = simulation.getVillages().getLiveCount();
+            if (liveVillages != villageRenderer.getVisibleVillages()) {
+                villageRenderer.rebuild(simulation.getWorld(), simulation.getVillages());
+            }
         }
 
         terrainRenderer.update();
@@ -145,6 +162,7 @@ public final class GodGame extends ApplicationAdapter {
         modelBatch.begin(camera.getCamera());
         terrainRenderer.render(modelBatch, environment);
         unitRenderer.render(modelBatch, environment);
+        villageRenderer.render(modelBatch, environment);
         modelBatch.end();
 
         // Depth testing has to come off before the 2D overlay, or panels get
@@ -177,6 +195,7 @@ public final class GodGame extends ApplicationAdapter {
             + " ticks=" + simulation.getTickCount()
             + " units=" + simulation.getUnits().getLiveCount()
             + " drawnUnits=" + unitRenderer.getVisibleUnits()
+            + " villages=" + simulation.getVillages().getLiveCount()
             + " chunksBuilt=" + terrainRenderer.isFullyBuilt()
             + String.format(" avgUnitRebuildMs=%.3f", rebuildCount == 0 ? 0.0
                 : rebuildNanos / 1e6 / rebuildCount));
@@ -208,14 +227,33 @@ public final class GodGame extends ApplicationAdapter {
         }
         unitsDirty = true;
 
-        if (closeUp) {
-            camera.focusOn(centre - 14, centre - 16, 26f);
-        }
-
         toolState.setTool(ToolState.Tool.SPAWN);
         toolState.setRadius(7);
-        hud.getInspector().select(centre - 14, centre);
         System.out.println("DEMO_SPAWNED units=" + spawned);
+
+        // Villages take thousands of ticks to establish. Running the sim
+        // forward here lets one screenshot show settled territory rather than
+        // a freshly seeded crowd standing around.
+        for (int i = 0; i < fastForwardTicks; i++) {
+            simulation.tick();
+        }
+        unitsDirty = true;
+        villageRenderer.rebuild(world, simulation.getVillages());
+
+        // Select a settled tile so the inspector shows a real owner.
+        int inspectX = centre;
+        int inspectZ = centre;
+        for (int i = 0; i < world.tileCount; i++) {
+            if (world.ownerVillage[i] != com.game.sim.World.NO_OWNER) {
+                inspectX = i % world.size;
+                inspectZ = i / world.size;
+                break;
+            }
+        }
+        hud.getInspector().select(inspectX, inspectZ);
+        if (closeUp) {
+            camera.focusOn(inspectX, inspectZ, 34f);
+        }
 
         System.out.println("DEMO_APPLIED"
             + " raisedHeight=" + String.format("%.2f", world.heightAt(centre - 14, centre))
@@ -282,6 +320,7 @@ public final class GodGame extends ApplicationAdapter {
         modelBatch.dispose();
         terrainRenderer.dispose();
         unitRenderer.dispose();
+        villageRenderer.dispose();
         hud.dispose();
     }
 

@@ -16,6 +16,8 @@ public final class Simulation {
     private final World world;
     private final Units units;
     private final DensityGrid density;
+    private final Villages villages;
+    private final Territory territory;
     private final Random random;
 
     private long tickCount;
@@ -25,6 +27,8 @@ public final class Simulation {
         this.world = WorldGen.generate(seed);
         this.units = new Units(SimConfig.MAX_UNITS);
         this.density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
+        this.villages = new Villages(SimConfig.MAX_VILLAGES);
+        this.territory = new Territory(world.tileCount);
         // Offset from the world seed so the gameplay stream is independent of
         // the terrain stream: regenerating terrain must not shift gameplay rolls.
         this.random = new Random(seed ^ 0x5DEECE66DL);
@@ -36,6 +40,10 @@ public final class Simulation {
 
     public DensityGrid getDensity() {
         return density;
+    }
+
+    public Villages getVillages() {
+        return villages;
     }
 
     /**
@@ -77,5 +85,11 @@ public final class Simulation {
     public void tick() {
         tickCount++;
         UnitSystem.update(world, units, density, random);
+        // Villages move on a slower clock than footsteps: territory does not
+        // need recomputing ten times a second, and settling should feel like it
+        // takes a while rather than happening the instant a crowd forms.
+        if (tickCount % SimConfig.VILLAGE_UPDATE_INTERVAL == 0) {
+            VillageSystem.update(world, units, villages, territory, density, random, (int) tickCount);
+        }
     }
 }

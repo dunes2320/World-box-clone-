@@ -47,11 +47,19 @@ public final class UnitRenderer implements Disposable {
     /** Lifts units clear of the ground so they do not z-fight the terrain top face. */
     private static final float GROUND_OFFSET = 0.02f;
 
+    /**
+     * Species colours, chosen for contrast against terrain rather than for
+     * naturalism. The same colour tints a species' territory, and the first
+     * set - tan humans, green orcs, silver elves, copper dwarves - was close
+     * enough to grass, sand and stone that orc territory was invisible on
+     * grassland and human territory vanished on sand. These four hues share no
+     * ground with the terrain palette, so a claim reads at any zoom.
+     */
     private static final Color[] SPECIES_COLOR = {
-        new Color(0.90f, 0.74f, 0.58f, 1f), // human - warm tan
-        new Color(0.42f, 0.62f, 0.30f, 1f), // orc - green
-        new Color(0.85f, 0.88f, 0.95f, 1f), // elf - pale silver
-        new Color(0.76f, 0.47f, 0.29f, 1f), // dwarf - copper
+        new Color(0.98f, 0.72f, 0.18f, 1f), // human - amber
+        new Color(0.88f, 0.22f, 0.26f, 1f), // orc - crimson
+        new Color(0.22f, 0.82f, 0.88f, 1f), // elf - cyan
+        new Color(0.66f, 0.38f, 0.90f, 1f), // dwarf - violet
     };
     /** Heads are slightly darker than bodies so the two boxes read as separate. */
     private static final float HEAD_SHADE = 0.82f;

@@ -43,21 +43,26 @@ public final class Species {
     }
 
     /**
-     * Relative breeding pressure. Orcs multiply fastest and elves slowest,
-     * roughly inverse to lifespan, so no single species runs away with the map
-     * purely by living longer.
+     * Relative breeding pressure, roughly inverse to lifespan so no species
+     * runs away with the map purely by living longer.
+     *
+     * <p>The spread is deliberately narrower than it first was. Villages give
+     * their residents a breeding bonus, and a bonus is a multiplier: it
+     * compounds whatever fertility gap already exists, because more births mean
+     * more villages mean more bonus. Tuned against the old 1.55/0.6 spread,
+     * elves slid to a single village and a shrinking population in every run.
      */
     public static float fertility(byte species) {
         switch (species) {
             case ORC:
-                return 1.55f;
+                return 1.40f;
             case HUMAN:
                 return 1.0f;
             case DWARF:
-                return 0.85f;
+                return 0.88f;
             case ELF:
             default:
-                return 0.6f;
+                return 0.78f;
         }
     }
 }

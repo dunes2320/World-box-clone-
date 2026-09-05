@@ -4,7 +4,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.game.sim.TileType;
+import com.game.sim.Species;
 import com.game.sim.Units;
+import com.game.sim.Villages;
 import com.game.sim.World;
 
 /**
@@ -79,7 +81,7 @@ public final class InspectorPanel extends Table {
      * player is actively terraforming updates live rather than showing a
      * snapshot from whenever it was clicked.
      */
-    public void refresh(World world, Units units) {
+    public void refresh(World world, Units units, Villages villages) {
         if (!hasSelection || !world.inBounds(selectedX, selectedZ)) {
             return;
         }
@@ -90,7 +92,13 @@ public final class InspectorPanel extends Table {
         height.setText(String.format("%.2f", world.height[index]));
 
         short village = world.ownerVillage[index];
-        owner.setText(village == World.NO_OWNER ? "Unclaimed" : "Village " + village);
+        if (village == World.NO_OWNER || !villages.isAlive(village)) {
+            owner.setText("Unclaimed");
+        } else {
+            // Name it by who lives there rather than by index - "Orcs #3" says
+            // something about the world, "Village 3" says nothing.
+            owner.setText(Species.name(villages.species[village]) + " #" + village);
+        }
 
         this.units.setText(String.valueOf(countUnitsOnTile(units)));
     }

@@ -95,12 +95,30 @@ collections. There are tests for it.
 
 ## Build status
 
-Phases 1-3 of 6 are complete: terrain generation, chunked meshing, the RTS
-camera, ray picking, all four terraform brushes, the scene2d HUD, and living
-units - four species that wander, eat, age, breed, starve and die.
+Phases 1-4 of 6 are complete: terrain generation, chunked meshing, the RTS
+camera, ray picking, all four terraform brushes, the scene2d HUD, living units
+- four species that wander, eat, age, breed, starve and die - and the villages
+they found, with territory that grows with population and borders drawn on the
+ground.
 
-Villages, territory and borders land in phase 4; species relations and war in
-phase 5; disasters in phase 6. See `PLAN.md` for the full build order.
+Species relations and war land in phase 5; disasters in phase 6. See `PLAN.md`
+for the full build order.
+
+### Villages and territory
+
+Settled adults found villages where their own kind is already clustered and no
+other village is too close. A village's radius follows its population, and
+every tile in reach is claimed by whichever village pushes hardest on it -
+population over distance. That is recomputed from scratch each village update
+rather than incrementally claimed and released, which keeps the map free of the
+ordering artefacts an incremental version leaves behind when two villages
+contest the same ground.
+
+Claimed ground is tinted toward the owning species' colour and border tiles are
+tinted harder, so nations read as shapes from a god's-eye zoom. Those four
+species colours are picked for contrast against the terrain, not for
+naturalism: the first set had green orcs, whose territory was invisible on
+grassland.
 
 ### Population dynamics
 

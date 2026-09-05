@@ -4,8 +4,10 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.graphics.Color;
 import com.game.sim.SimConfig;
 import com.game.sim.TileType;
+import com.game.sim.Villages;
 import com.game.sim.World;
 
 /**
@@ -65,8 +67,16 @@ public final class ChunkMesh implements Disposable {
         return indexCount == 0;
     }
 
+    /**
+     * How far a claimed tile's colour is pulled towards its owner's species
+     * colour. Border tiles are pushed much further so the edge of a territory
+     * reads as a line rather than the interior simply looking tinted.
+     */
+    private static final float TERRITORY_TINT = 0.38f;
+    private static final float BORDER_TINT = 0.80f;
+
     /** Regenerates this chunk's geometry from the world's current state. */
-    public void rebuild(World world, int chunkX, int chunkZ) {
+    public void rebuild(World world, Villages villages, int chunkX, int chunkZ) {
         vertexCount = 0;
         indexCount = 0;
 
@@ -88,7 +98,7 @@ public final class ChunkMesh implements Disposable {
                 // seabed's own height, so lakes and coastline read as water
                 // surfaces instead of blue-tinted holes.
                 float top = TileType.isWater(type) ? SimConfig.SEA_LEVEL : height;
-                float topColor = TerrainPalette.topPacked(type);
+                float topColor = territoryTintedTop(world, villages, x, z, type);
                 float sideColor = TerrainPalette.sidePacked(type);
 
                 addQuad(
@@ -110,6 +120,44 @@ public final class ChunkMesh implements Disposable {
 
         mesh.setVertices(vertices, 0, vertexCount * FLOATS_PER_VERTEX);
         mesh.setIndices(indices, 0, indexCount);
+    }
+
+    /**
+     * A tile's top-face colour with its owning village's species colour blended
+     * in. Unclaimed ground is left exactly as the palette painted it.
+     */
+    private static float territoryTintedTop(World world, Villages villages, int x, int z, byte type) {
+        short owner = world.ownerVillage[world.index(x, z)];
+        if (owner == World.NO_OWNER || villages == null || !villages.isAlive(owner)) {
+            return TerrainPalette.topPacked(type);
+        }
+        Color base = TerrainPalette.top(type);
+        Color tint = UnitRenderer.colorFor(villages.species[owner]);
+        float strength = isBorderTile(world, x, z, owner) ? BORDER_TINT : TERRITORY_TINT;
+        return Color.toFloatBits(
+            base.r + (tint.r - base.r) * strength,
+            base.g + (tint.g - base.g) * strength,
+            base.b + (tint.b - base.b) * strength,
+            1f);
+    }
+
+    /**
+     * True if any orthogonal neighbour is owned by someone else - including
+     * nobody, so a territory's outer edge against wilderness reads as a border
+     * too, not just the seam between two rival claims.
+     */
+    private static boolean isBorderTile(World world, int x, int z, short owner) {
+        return differsFrom(world, x - 1, z, owner)
+            || differsFrom(world, x + 1, z, owner)
+            || differsFrom(world, x, z - 1, owner)
+            || differsFrom(world, x, z + 1, owner);
+    }
+
+    private static boolean differsFrom(World world, int x, int z, short owner) {
+        if (!world.inBounds(x, z)) {
+            return false;
+        }
+        return world.ownerVillage[world.index(x, z)] != owner;
     }
 
     /**

@@ -117,6 +117,32 @@ public final class SimConfig {
      */
     public static final int SPECIES_CROWDING_LIMIT = 6;
 
+    // ---- villages ----
+
+    public static final int MAX_VILLAGES = 96;
+    /** Ticks between village passes. Territory need not keep up with footsteps. */
+    public static final int VILLAGE_UPDATE_INTERVAL = 20;
+
+    /** Per-pass chance an eligible homeless adult founds a village. */
+    public static final double VILLAGE_FOUND_CHANCE = 0.012;
+    /**
+     * Same-species neighbours required in the density cell before settling.
+     * Settling is something a group does; without this the map fills with
+     * one-person hamlets wherever a wanderer happens to pause.
+     */
+    public static final int VILLAGE_FOUND_MIN_NEARBY = 4;
+    /** Minimum gap between village centres, in tiles. */
+    public static final float VILLAGE_MIN_SPACING = 13f;
+
+    public static final float VILLAGE_BASE_RADIUS = 4f;
+    public static final float VILLAGE_MAX_RADIUS = 17f;
+    public static final float VILLAGE_RADIUS_PER_POP = 1.15f;
+    /** Fraction of the gap to the target radius closed each pass. */
+    public static final float VILLAGE_RADIUS_EASING = 0.12f;
+
+    /** Villagers breed faster than drifters - the point of settling down. */
+    public static final double VILLAGE_BREEDING_BONUS = 1.45;
+
     /** How many ticks a unit holds a heading before picking a new one. */
     public static final int WANDER_MIN_TICKS = 18;
     public static final int WANDER_MAX_TICKS = 55;

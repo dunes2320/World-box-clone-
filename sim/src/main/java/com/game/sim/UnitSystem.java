@@ -81,6 +81,9 @@ public final class UnitSystem {
                     double chance = SimConfig.REPRODUCE_CHANCE
                         * Species.fertility(speciesId)
                         * Math.min(ownRoom, sharedRoom);
+                    if (units.homeVillage[i] != Units.NO_VILLAGE) {
+                        chance *= SimConfig.VILLAGE_BREEDING_BONUS;
+                    }
                     if (random.nextDouble() < chance) {
                         breed(world, units, i, random);
                     }

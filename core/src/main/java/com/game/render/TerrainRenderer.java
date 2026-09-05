@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.utils.Disposable;
+import com.game.sim.Villages;
 import com.game.sim.World;
 
 /**
@@ -26,12 +27,14 @@ public final class TerrainRenderer implements Disposable {
     private static final int MAX_REBUILDS_PER_FRAME = 8;
 
     private final World world;
+    private final Villages villages;
     private final ChunkMesh[] chunks;
     private final Renderable[] renderables;
     private final Material material;
 
-    public TerrainRenderer(World world) {
+    public TerrainRenderer(World world, Villages villages) {
         this.world = world;
+        this.villages = villages;
         this.chunks = new ChunkMesh[world.chunkCount()];
         this.renderables = new Renderable[world.chunkCount()];
 
@@ -67,7 +70,7 @@ public final class TerrainRenderer implements Disposable {
             }
             int chunkX = i % world.chunksPerAxis;
             int chunkZ = i / world.chunksPerAxis;
-            chunks[i].rebuild(world, chunkX, chunkZ);
+            chunks[i].rebuild(world, villages, chunkX, chunkZ);
 
             Renderable renderable = renderables[i];
             renderable.meshPart.size = chunks[i].getIndexCount();
