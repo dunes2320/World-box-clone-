@@ -42,6 +42,12 @@ public final class Features {
     private int freeCount;
     private int highWater;
     private int liveCount;
+    /**
+     * Bumped every time a feature is placed or removed. Renderers compare it
+     * against a stored value and skip their rebuild if the set has not
+     * changed - which, on a mature world, is most frames.
+     */
+    private int generation;
 
     // Kinds are byte constants for the same reason TileType is: they are
     // stored per feature in a flat array.
@@ -136,6 +142,7 @@ public final class Features {
         tileHeads[tileIndex] = index;
 
         liveCount++;
+        generation++;
         if (index >= highWater) {
             highWater = index + 1;
         }
@@ -169,6 +176,12 @@ public final class Features {
         next[index] = NONE;
         freeList[freeCount++] = index;
         liveCount--;
+        generation++;
+    }
+
+    /** Bumps once every time the feature set changes; renderers key their cache on it. */
+    public int getGeneration() {
+        return generation;
     }
 
     /** Counts placed features on a tile - the length of its chain. */

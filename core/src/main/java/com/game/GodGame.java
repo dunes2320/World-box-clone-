@@ -14,7 +14,9 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.game.render.EffectRenderer;
+import com.game.render.RoadRenderer;
 import com.game.render.RtsCamera;
+import com.game.render.StructureRenderer;
 import com.game.render.TerrainRenderer;
 import com.game.render.TilePicker;
 import com.game.render.UnitRenderer;
@@ -47,6 +49,8 @@ public final class GodGame extends ApplicationAdapter {
     private TerrainRenderer terrainRenderer;
     private UnitRenderer unitRenderer;
     private VillageRenderer villageRenderer;
+    private StructureRenderer structureRenderer;
+    private RoadRenderer roadRenderer;
     private EffectRenderer effectRenderer;
     private TilePicker picker;
     private ModelBatch modelBatch;
@@ -143,6 +147,8 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer = new TerrainRenderer(simulation.getWorld(), simulation.getVillages());
         unitRenderer = new UnitRenderer(simulation.getUnits().capacity);
         villageRenderer = new VillageRenderer();
+        structureRenderer = new StructureRenderer();
+        roadRenderer = new RoadRenderer();
         effectRenderer = new EffectRenderer();
         picker = new TilePicker();
         modelBatch = new ModelBatch();
@@ -196,6 +202,14 @@ public final class GodGame extends ApplicationAdapter {
             }
         }
 
+        // Structures rebuild on the feature generation counter, so a settled
+        // village that stopped building costs one comparison per frame. Roads
+        // key off the road count for the same reason.
+        structureRenderer.rebuildIfChanged(
+            simulation.getWorld(), simulation.getVillages(), simulation.getFeatures(),
+            simulation.getFeatures().getGeneration());
+        roadRenderer.rebuildIfChanged(simulation.getWorld(), simulation.getRoads());
+
         // Flames rebuild off the fire's own generation counter rather than the
         // tick, so a still world with a fire in it does the work and a still
         // world without one does none.
@@ -216,6 +230,10 @@ public final class GodGame extends ApplicationAdapter {
 
         modelBatch.begin(camera.getCamera());
         terrainRenderer.render(modelBatch, environment, camera.getCamera());
+        // Roads first: they sit just above the ground, and drawing them before
+        // structures avoids a road half-covered by a house it should reach.
+        roadRenderer.render(modelBatch, environment);
+        structureRenderer.render(modelBatch, environment);
         unitRenderer.render(modelBatch, environment);
         villageRenderer.render(modelBatch, environment);
         effectRenderer.render(modelBatch, environment);
@@ -259,6 +277,8 @@ public final class GodGame extends ApplicationAdapter {
             + " units=" + simulation.getUnits().getLiveCount()
             + " drawnUnits=" + unitRenderer.getVisibleUnits()
             + " villages=" + simulation.getVillages().getLiveCount()
+            + " buildings=" + structureRenderer.getVisibleStructures()
+            + " roads=" + roadRenderer.getVisibleRoads()
             + " warsDeclared=" + simulation.getRelations().getWarsDeclared()
             + " warDead=" + simulation.getWarCasualties()
             + " fighting=" + countFighting()
@@ -522,6 +542,8 @@ public final class GodGame extends ApplicationAdapter {
         terrainRenderer.dispose();
         unitRenderer.dispose();
         villageRenderer.dispose();
+        structureRenderer.dispose();
+        roadRenderer.dispose();
         effectRenderer.dispose();
         hud.dispose();
     }

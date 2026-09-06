@@ -21,6 +21,9 @@ public final class Simulation {
     private final Relations relations;
     private final RelationSystem relationSystem;
     private final DisasterSystem disasters;
+    private final Features features;
+    private final Roads roads;
+    private final RoadSystem roadSystem;
     private final Random random;
 
     private final int populationCap;
@@ -57,6 +60,13 @@ public final class Simulation {
         this.relations = new Relations(random);
         this.relationSystem = new RelationSystem();
         this.disasters = new DisasterSystem(world.size, SimConfig.DENSITY_CELL_SIZE);
+        // Feature pool sized off the village pool: about 60 features per
+        // village at peak covers houses + a handful of each economy building
+        // + the road segments crossing that village's ground.
+        int featureCapacity = Math.max(2048, villages.capacity * 80);
+        this.features = new Features(featureCapacity, world.tileCount);
+        this.roads = new Roads(world.tileCount);
+        this.roadSystem = new RoadSystem(world.size);
     }
 
     /** Population ceiling for this world's size, above which breeding stops. */
@@ -86,6 +96,14 @@ public final class Simulation {
 
     public DisasterSystem getDisasters() {
         return disasters;
+    }
+
+    public Features getFeatures() {
+        return features;
+    }
+
+    public Roads getRoads() {
+        return roads;
     }
 
     /** Units killed in war since the world began. */
@@ -165,6 +183,11 @@ public final class Simulation {
         // takes a while rather than happening the instant a crowd forms.
         if (tickCount % SimConfig.VILLAGE_UPDATE_INTERVAL == 0) {
             VillageSystem.update(world, units, villages, territory, density, random, (int) tickCount);
+            // Once villages have moved and their territories have settled,
+            // let them build. Buildings first so a fresh house has ground
+            // reserved before roads try to reach it.
+            BuildingSystem.update(world, villages, features, random, (int) tickCount);
+            roadSystem.update(world, villages, features, roads);
         }
         // Diplomacy is slower still, and reads the borders the village pass just
         // drew - so a war is declared over the map as it currently stands.

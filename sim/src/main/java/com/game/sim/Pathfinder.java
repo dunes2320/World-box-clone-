@@ -27,6 +27,8 @@ public final class Pathfinder {
 
     private static final int ORTHOGONAL_COST = 10;
     private static final int DIAGONAL_COST = 14;
+    /** Divisor applied to step cost when moving onto a road tile. */
+    private static final int ROAD_DISCOUNT = 2;
     /** Sentinel for "no predecessor" / "unexplored". */
     private static final int UNSET = -1;
 
@@ -70,13 +72,21 @@ public final class Pathfinder {
         resultPath = new int[Math.max(64, worldSize * 2)];
     }
 
+    /** Convenience overload: no road network. Traversal is uniform cost. */
+    public boolean findPath(World world, int sx, int sz, int tx, int tz) {
+        return findPath(world, null, sx, sz, tx, tz);
+    }
+
     /**
      * Finds a path from ({@code sx, sz}) to ({@code tx, tz}) on the world's
      * walkable tiles. Returns true on success; the path can then be walked
      * from {@link #getResultLength()} - 1 down to 0, or read from
      * {@link #getResultPath()} which stores tile indices in that order.
+     *
+     * @param roads optional road network; road tiles cost half a step, which
+     *     is what makes units prefer them
      */
-    public boolean findPath(World world, int sx, int sz, int tx, int tz) {
+    public boolean findPath(World world, Roads roads, int sx, int sz, int tx, int tz) {
         resultPathLength = 0;
         if (!world.inBounds(sx, sz) || !world.inBounds(tx, tz)) {
             return false;
@@ -120,7 +130,7 @@ public final class Pathfinder {
 
             int cx = current % worldSize;
             int cz = current / worldSize;
-            expandNeighbours(world, current, cx, cz, tx, tz);
+            expandNeighbours(world, roads, current, cx, cz, tx, tz);
         }
         return false;
     }
@@ -135,17 +145,20 @@ public final class Pathfinder {
     }
 
     /**
-     * Walkable-only cost lookup. Extension point for phase 8 roads: return a
-     * lower number for a road tile and units automatically prefer it, no
-     * search-algorithm change required.
+     * Step cost into {@code neighbour}. A road tile costs half a step so
+     * A* actively prefers going the long way round on a road over a
+     * shorter path across open ground. The heuristic still uses the full
+     * ORTHOGONAL_COST which stays admissible even with the discount.
      */
-    private int stepCost(World world, int neighbour, boolean diagonal) {
-        // Placeholder for the road bonus. Currently every walkable tile costs
-        // the same; phase 8 will divide by a small factor for road tiles.
-        return diagonal ? DIAGONAL_COST : ORTHOGONAL_COST;
+    private int stepCost(Roads roads, int neighbour, boolean diagonal) {
+        int base = diagonal ? DIAGONAL_COST : ORTHOGONAL_COST;
+        if (roads != null && roads.isRoad(neighbour)) {
+            return base / ROAD_DISCOUNT;
+        }
+        return base;
     }
 
-    private void expandNeighbours(World world, int current, int cx, int cz, int tx, int tz) {
+    private void expandNeighbours(World world, Roads roads, int current, int cx, int cz, int tx, int tz) {
         int gCurrent = gScore[current];
         for (int dz = -1; dz <= 1; dz++) {
             for (int dx = -1; dx <= 1; dx++) {
@@ -176,7 +189,7 @@ public final class Pathfinder {
                     continue;
                 }
 
-                int tentative = gCurrent + stepCost(world, neighbour, diagonal);
+                int tentative = gCurrent + stepCost(roads, neighbour, diagonal);
                 if (visitStamp[neighbour] != currentStamp || tentative < gScore[neighbour]) {
                     visitStamp[neighbour] = currentStamp;
                     cameFrom[neighbour] = current;
