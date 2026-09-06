@@ -37,6 +37,7 @@ import java.nio.ByteBuffer;
 public final class GodGame extends ApplicationAdapter {
 
     private final long seed;
+    private int worldSize = SimConfig.DEFAULT_WORLD_SIZE;
 
     private Simulation simulation;
     private SimClock clock;
@@ -74,6 +75,16 @@ public final class GodGame extends ApplicationAdapter {
 
     public GodGame(long seed) {
         this.seed = seed;
+    }
+
+    /**
+     * Overrides the default world side length. Must be a positive multiple of
+     * {@link SimConfig#CHUNK_SIZE} - the launcher clamps to that before
+     * calling. Has to be set before {@link #create()}, which is when the
+     * simulation and every renderer are built.
+     */
+    public void setWorldSize(int worldSize) {
+        this.worldSize = worldSize;
     }
 
     /**
@@ -123,13 +134,14 @@ public final class GodGame extends ApplicationAdapter {
 
     @Override
     public void create() {
-        simulation = new Simulation(seed);
+        simulation = new Simulation(seed, worldSize);
         clock = new SimClock();
         toolState = new ToolState();
 
         camera = new RtsCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        camera.configureForWorld(simulation.getWorld().size);
         terrainRenderer = new TerrainRenderer(simulation.getWorld(), simulation.getVillages());
-        unitRenderer = new UnitRenderer();
+        unitRenderer = new UnitRenderer(simulation.getUnits().capacity);
         villageRenderer = new VillageRenderer();
         effectRenderer = new EffectRenderer();
         picker = new TilePicker();
@@ -155,14 +167,17 @@ public final class GodGame extends ApplicationAdapter {
 
     @Override
     public void render() {
+        long frameStart = System.nanoTime();
         float delta = Gdx.graphics.getDeltaTime();
 
         handleHeldKeys(delta);
 
+        long tickStart = System.nanoTime();
         int ticks = clock.advance(delta);
         for (int i = 0; i < ticks; i++) {
             simulation.tick();
         }
+        long tickNs = ticks > 0 ? (System.nanoTime() - tickStart) : 0;
         // Units move on the fixed tick, not per frame, so rebuilding their
         // geometry every frame would redraw half a million vertices to put
         // everything back exactly where it already was.
@@ -200,7 +215,7 @@ public final class GodGame extends ApplicationAdapter {
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
 
         modelBatch.begin(camera.getCamera());
-        terrainRenderer.render(modelBatch, environment);
+        terrainRenderer.render(modelBatch, environment, camera.getCamera());
         unitRenderer.render(modelBatch, environment);
         villageRenderer.render(modelBatch, environment);
         effectRenderer.render(modelBatch, environment);
@@ -210,6 +225,9 @@ public final class GodGame extends ApplicationAdapter {
         // z-rejected against terrain that was drawn closer to the camera.
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         hud.render();
+
+        long frameNs = System.nanoTime() - frameStart;
+        hud.getDebugOverlay().update(frameNs, tickNs, simulation, terrainRenderer);
 
         if (autoExitFrames > 0) {
             runSmokeTestFrame();
@@ -231,8 +249,12 @@ public final class GodGame extends ApplicationAdapter {
         if (screenshotPath != null) {
             writeScreenshot(screenshotPath);
         }
+        Runtime rt = Runtime.getRuntime();
+        long usedMB = (rt.totalMemory() - rt.freeMemory()) >> 20;
         System.out.println("SMOKE_OK frames=" + frameCounter
             + " seed=" + seed
+            + " worldSize=" + simulation.getWorld().size
+            + " chunks=" + terrainRenderer.getChunkCount()
             + " ticks=" + simulation.getTickCount()
             + " units=" + simulation.getUnits().getLiveCount()
             + " drawnUnits=" + unitRenderer.getVisibleUnits()
@@ -244,11 +266,15 @@ public final class GodGame extends ApplicationAdapter {
             + " flames=" + effectRenderer.getVisibleFlames()
             + " sick=" + simulation.getDisasters().getInfectedUnits()
             + " chunksBuilt=" + terrainRenderer.isFullyBuilt()
+            + " chunksDrawn=" + terrainRenderer.getChunksDrawnLastFrame()
+            + " chunksCulled=" + terrainRenderer.getChunksCulledLastFrame()
             + " peakFlames=" + peakFlames
+            + " memMB=" + usedMB
             + String.format(" avgUnitRebuildMs=%.3f", rebuildCount == 0 ? 0.0
                 : rebuildNanos / 1e6 / rebuildCount)
             + String.format(" avgFlameRebuildMs=%.3f", flameRebuildCount == 0 ? 0.0
-                : flameRebuildNanos / 1e6 / flameRebuildCount));
+                : flameRebuildNanos / 1e6 / flameRebuildCount)
+            + " " + hud.getDebugOverlay().bench());
         Gdx.app.exit();
     }
 
@@ -268,7 +294,7 @@ public final class GodGame extends ApplicationAdapter {
             simulation.tick();
         }
 
-        int centre = SimConfig.WORLD_SIZE / 2;
+        int centre = simulation.getWorld().size / 2;
         for (int radius = 0; radius < centre; radius++) {
             int x = centre + radius;
             if (x < world.size && com.game.sim.TileType.isWalkable(world.typeAt(x, centre))) {
@@ -357,7 +383,7 @@ public final class GodGame extends ApplicationAdapter {
     /** Exercises every terraform brush and the inspector, for the smoke test. */
     private void runToolDemo() {
         var world = simulation.getWorld();
-        int centre = SimConfig.WORLD_SIZE / 2;
+        int centre = simulation.getWorld().size / 2;
 
         // A mountain and a crater, side by side, so both directions are visible.
         for (int i = 0; i < 14; i++) {
@@ -588,6 +614,9 @@ public final class GodGame extends ApplicationAdapter {
                     return true;
                 case Input.Keys.SPACE:
                     clock.setSpeed(clock.isPaused() ? 1 : 0);
+                    return true;
+                case Input.Keys.F3:
+                    hud.getDebugOverlay().toggle();
                     return true;
                 case Input.Keys.ESCAPE:
                     // Dismiss the inspector first; only quit once there is

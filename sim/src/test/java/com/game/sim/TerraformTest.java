@@ -101,11 +101,16 @@ class TerraformTest {
     @Test
     void terraformMarksAffectedChunksDirty() {
         World world = flatWorld(1.0f, 0.0f);
-        Terraform.raise(world, 20, 20, 3, 1.0f);
-        assertTrue(world.isChunkDirty(world.chunkIndex(1, 1)), "the edited chunk must be scheduled for a rebuild");
+        int chunk = SimConfig.CHUNK_SIZE;
+        int editX = chunk + chunk / 2;
+        int editZ = chunk + chunk / 2;
+        Terraform.raise(world, editX, editZ, 3, 1.0f);
+        assertTrue(world.isChunkDirty(world.chunkIndex(1, 1)),
+            "the edited chunk must be scheduled for a rebuild");
 
-        boolean farChunkClean = !world.isChunkDirty(world.chunkIndex(7, 7));
-        assertTrue(farChunkClean, "an untouched chunk should not be rebuilt");
+        int lastChunk = world.chunksPerAxis - 1;
+        assertFalse(world.isChunkDirty(world.chunkIndex(lastChunk, lastChunk)),
+            "an untouched chunk should not be rebuilt");
     }
 
     @Test

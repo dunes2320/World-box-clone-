@@ -29,6 +29,7 @@ public final class Hud implements Disposable {
     private final InspectorPanel inspector;
     private final StatsPanel stats;
     private final RelationsPanel relations;
+    private final DebugOverlay debugOverlay;
     private final Label worldLabel;
     private final Label hintLabel;
 
@@ -43,6 +44,7 @@ public final class Hud implements Disposable {
         inspector = new InspectorPanel(skin);
         stats = new StatsPanel(skin);
         relations = new RelationsPanel(skin);
+        debugOverlay = new DebugOverlay(skin);
 
         worldLabel = new Label("", skin);
         hintLabel = new Label(
@@ -63,6 +65,9 @@ public final class Hud implements Disposable {
         topRow.add(speedControls).left();
         topRow.add(topLeft).left().padLeft(10f);
         topRow.add().expandX();
+        // F3 overlay pins top-right of the top row so it never occludes the
+        // world; hidden until toggled.
+        topRow.add(debugOverlay).right().padLeft(10f);
         root.add(topRow).expandX().fillX().pad(10f).top().left();
         root.row();
 
@@ -98,6 +103,10 @@ public final class Hud implements Disposable {
 
     public InspectorPanel getInspector() {
         return inspector;
+    }
+
+    public DebugOverlay getDebugOverlay() {
+        return debugOverlay;
     }
 
     /** True when the pointer is over a widget, so world input should stand down. */

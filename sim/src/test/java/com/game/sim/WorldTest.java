@@ -48,8 +48,11 @@ class WorldTest {
     @Test
     void markDirtyFlagsOnlyTheOwningChunkInTheInterior() {
         World world = cleanWorld();
-        // (20, 20) sits inside chunk (1, 1) and touches no seam.
-        world.markDirty(20, 20);
+        // A tile well inside chunk (1, 1), safely away from any seam whatever
+        // the chunk size happens to be.
+        int chunk = SimConfig.CHUNK_SIZE;
+        int interior = chunk + chunk / 2;
+        world.markDirty(interior, interior);
         int owning = world.chunkIndex(1, 1);
         for (int c = 0; c < world.chunkCount(); c++) {
             assertEquals(c == owning, world.isChunkDirty(c), "unexpected dirty state for chunk " + c);
@@ -59,9 +62,11 @@ class WorldTest {
     @Test
     void markDirtyAlsoFlagsNeighboursAcrossASeam() {
         World world = cleanWorld();
-        // x=16 is the first column of chunk (1, *), so its west wall geometry
-        // belongs to chunk (0, *) - both must rebuild or a crack appears.
-        world.markDirty(16, 20);
+        // The first column of chunk (1, *) - its west wall geometry belongs to
+        // chunk (0, *), so both must rebuild or a crack appears.
+        int seamX = SimConfig.CHUNK_SIZE;
+        int interior = SimConfig.CHUNK_SIZE + SimConfig.CHUNK_SIZE / 2;
+        world.markDirty(seamX, interior);
         assertTrue(world.isChunkDirty(world.chunkIndex(1, 1)), "owning chunk must be dirty");
         assertTrue(world.isChunkDirty(world.chunkIndex(0, 1)), "chunk across the seam must be dirty too");
     }

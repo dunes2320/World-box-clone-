@@ -3,6 +3,7 @@ package com.game.lwjgl3;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.game.GodGame;
+import com.game.sim.SimConfig;
 
 /** Desktop entry point. */
 public final class Lwjgl3Launcher {
@@ -25,6 +26,7 @@ public final class Lwjgl3Launcher {
         config.disableAudio(true);
 
         GodGame game = new GodGame(parseSeed(args));
+        game.setWorldSize(parseWorldSize(args));
 
         int smokeFrames = parseInt(args, "--frames", 0);
         if (smokeFrames > 0) {
@@ -60,6 +62,36 @@ public final class Lwjgl3Launcher {
      * Optional {@code --seed <value>} argument. Handy for returning to a world
      * you liked, and for reproducing a bug on the exact terrain that caused it.
      */
+    /**
+     * Optional {@code --size <n>} argument. Accepts the {@code small}, {@code medium}
+     * and {@code large} presets, plus any positive multiple of {@link SimConfig#CHUNK_SIZE}
+     * so unusual sizes stay reachable for benchmarking.
+     */
+    private static int parseWorldSize(String[] args) {
+        String value = parseString(args, "--size");
+        if (value == null) {
+            return SimConfig.DEFAULT_WORLD_SIZE;
+        }
+        switch (value.toLowerCase()) {
+            case "small": return SimConfig.WORLD_SIZE_SMALL;
+            case "medium": return SimConfig.WORLD_SIZE_MEDIUM;
+            case "large": return SimConfig.WORLD_SIZE_LARGE;
+            default: /* fall through to numeric */ break;
+        }
+        try {
+            int size = Integer.parseInt(value);
+            if (size <= 0 || size % SimConfig.CHUNK_SIZE != 0) {
+                System.err.println("--size must be a positive multiple of "
+                    + SimConfig.CHUNK_SIZE + ", got " + size + "; using default");
+                return SimConfig.DEFAULT_WORLD_SIZE;
+            }
+            return size;
+        } catch (NumberFormatException e) {
+            System.err.println("Ignoring unparseable --size value: " + value);
+            return SimConfig.DEFAULT_WORLD_SIZE;
+        }
+    }
+
     private static long parseSeed(String[] args) {
         String value = parseString(args, "--seed");
         if (value != null) {

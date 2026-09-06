@@ -15,85 +15,129 @@ public final class UnitSystem {
     }
 
     /**
+     * How the slow per-unit systems (ageing, hunger, breeding) are spread
+     * across ticks in the live simulation. Every unit's
+     * {@code id % SLOW_STRIDE == tick % SLOW_STRIDE} decides whether its slow
+     * pass runs this tick.
+     *
+     * <p>Movement still runs every tick for every unit so nobody visibly
+     * hitches, but at 10 ticks/sec an ageing pass six times slower is still
+     * ~1.6 checks a simulated second - a beat nobody notices missing. Slow
+     * costs (starvation math, breeding rolls, RNG draws) are scaled by
+     * SLOW_STRIDE to keep the long-run rates unchanged: a unit that eats
+     * every 6th tick metabolises six ticks of hunger at once when it does.
+     */
+    public static final int SLOW_STRIDE = 6;
+
+    /**
+     * Test-friendly overload: strides at 1, uses the legacy population cap,
+     * and runs the slow pass for every unit every tick. Tests written before
+     * staggering existed keep meaning what they used to mean.
+     */
+    public static void update(World world, Units units, DensityGrid density, Random random) {
+        update(world, units, density, random, SimConfig.POPULATION_CAP, 0L, 1);
+    }
+
+    /** Production entry: strides at {@link #SLOW_STRIDE} across ticks. */
+    public static void update(World world, Units units, DensityGrid density,
+                              Random random, int populationCap, long tickCount) {
+        update(world, units, density, random, populationCap, tickCount, SLOW_STRIDE);
+    }
+
+    /**
      * Advances every living unit by one tick.
      *
      * <p>Births are appended to the pool as they happen. Because slots are
      * handed out from a free list, a newborn can land on an index below the
-     * one currently being iterated - in which case it simply waits for the next
-     * tick, which is correct: a unit born this instant should not also act this
-     * instant.
+     * one currently being iterated - in which case it simply waits for the
+     * next tick, which is correct: a unit born this instant should not also
+     * act this instant.
+     *
+     * @param stride how many ticks apart a unit's slow pass runs; 1 processes
+     *     every unit every tick (the phase 3 behaviour)
      */
-    public static void update(World world, Units units, DensityGrid density, Random random) {
+    public static void update(World world, Units units, DensityGrid density,
+                              Random random, int populationCap, long tickCount, int stride) {
         density.rebuild(units);
+        int slowSlice = Math.floorMod(tickCount, stride);
         int end = units.getHighWater();
         for (int i = 0; i < end; i++) {
             if (!units.alive[i]) {
                 continue;
             }
 
-            // --- ageing ---
-            int age = units.age[i] + 1;
-            units.age[i] = (short) Math.min(age, Short.MAX_VALUE);
-            if (age >= units.maxAge[i]) {
-                units.kill(i);
-                continue;
-            }
+            boolean slowTick = (i % stride) == slowSlice;
 
-            // --- feeding ---
-            int food = foodAt(world, units.x[i], units.z[i]);
-            int hunger = units.hunger[i] + 1 - food;
-            if (hunger < 0) {
-                hunger = 0;
-            }
-            if (hunger > SimConfig.HUNGER_STARVING) {
-                hunger = SimConfig.HUNGER_STARVING;
-                units.health[i] -= SimConfig.STARVATION_DAMAGE;
-                if (units.health[i] <= 0) {
+            if (slowTick) {
+                // --- ageing (stride ticks at once for this unit) ---
+                int age = units.age[i] + stride;
+                units.age[i] = (short) Math.min(age, Short.MAX_VALUE);
+                if (age >= units.maxAge[i]) {
                     units.kill(i);
                     continue;
                 }
-            } else if (food > 0 && units.health[i] < SimConfig.UNIT_MAX_HEALTH
-                && units.state[i] != Units.STATE_FIGHT) {
-                // Recover slowly once back on good ground, so one bad crossing
-                // of a beach is a setback rather than a death sentence - but not
-                // while standing in a fight, or a battle line would just be two
-                // crowds regenerating at each other. The state read here was set
-                // by last tick's combat pass, which is what makes "still in the
-                // fight" a thing this tick can know about.
-                units.health[i]++;
-            }
-            units.hunger[i] = (byte) hunger;
-            units.state[i] = hunger > SimConfig.HUNGER_FED ? Units.STATE_SEEK_FOOD : Units.STATE_WANDER;
 
-            move(world, units, i, random);
-
-            // --- breeding ---
-            if (units.getLiveCount() < SimConfig.POPULATION_CAP
-                && age >= SimConfig.UNIT_MATURITY
-                && hunger <= SimConfig.HUNGER_FED) {
-                // Density-dependent breeding. Two ceilings: how packed the
-                // region is overall, and - biting harder - how many of this
-                // unit's own kind are already here. The second is what lets
-                // four species coexist instead of the fastest breeder taking
-                // the map; see DensityGrid for the measurements behind it.
-                byte speciesId = units.species[i];
-                int sameKind = density.speciesAt(units.x[i], units.z[i], speciesId);
-                int allKinds = density.totalAt(units.x[i], units.z[i]);
-                if (sameKind < SimConfig.SPECIES_CROWDING_LIMIT
-                    && allKinds < SimConfig.LOCAL_CROWDING_LIMIT) {
-                    double ownRoom = 1.0 - sameKind / (double) SimConfig.SPECIES_CROWDING_LIMIT;
-                    double sharedRoom = 1.0 - allKinds / (double) SimConfig.LOCAL_CROWDING_LIMIT;
-                    double chance = SimConfig.REPRODUCE_CHANCE
-                        * Species.fertility(speciesId)
-                        * Math.min(ownRoom, sharedRoom);
-                    if (units.homeVillage[i] != Units.NO_VILLAGE) {
-                        chance *= SimConfig.VILLAGE_BREEDING_BONUS;
+                // --- feeding (stride ticks' worth) ---
+                int food = foodAt(world, units.x[i], units.z[i]);
+                int hunger = units.hunger[i] + stride - food * stride;
+                if (hunger < 0) {
+                    hunger = 0;
+                }
+                if (hunger > SimConfig.HUNGER_STARVING) {
+                    hunger = SimConfig.HUNGER_STARVING;
+                    units.health[i] = (short) (units.health[i]
+                        - SimConfig.STARVATION_DAMAGE * stride);
+                    if (units.health[i] <= 0) {
+                        units.kill(i);
+                        continue;
                     }
-                    if (random.nextDouble() < chance) {
-                        breed(world, units, i, random);
+                } else if (food > 0 && units.health[i] < SimConfig.UNIT_MAX_HEALTH
+                    && units.state[i] != Units.STATE_FIGHT) {
+                    // Recover slowly once back on good ground, so one bad
+                    // crossing of a beach is a setback rather than a death
+                    // sentence - but not while standing in a fight, or a
+                    // battle line would just be two crowds regenerating at
+                    // each other. The state read here was set by the previous
+                    // combat pass, which is what makes "still in the fight" a
+                    // thing this tick can know about.
+                    int headroom = SimConfig.UNIT_MAX_HEALTH - units.health[i];
+                    int healed = Math.min(stride, headroom);
+                    units.health[i] = (short) (units.health[i] + healed);
+                }
+                units.hunger[i] = (byte) hunger;
+                units.state[i] = hunger > SimConfig.HUNGER_FED
+                    ? Units.STATE_SEEK_FOOD : Units.STATE_WANDER;
+
+                // --- breeding ---
+                if (units.getLiveCount() < populationCap
+                    && age >= SimConfig.UNIT_MATURITY
+                    && hunger <= SimConfig.HUNGER_FED) {
+                    // Density-dependent breeding. Two ceilings: how packed the
+                    // region is overall, and - biting harder - how many of
+                    // this unit's own kind are already here. The second is
+                    // what lets four species coexist; see DensityGrid.
+                    byte speciesId = units.species[i];
+                    int sameKind = density.speciesAt(units.x[i], units.z[i], speciesId);
+                    int allKinds = density.totalAt(units.x[i], units.z[i]);
+                    if (sameKind < SimConfig.SPECIES_CROWDING_LIMIT
+                        && allKinds < SimConfig.LOCAL_CROWDING_LIMIT) {
+                        double ownRoom = 1.0 - sameKind / (double) SimConfig.SPECIES_CROWDING_LIMIT;
+                        double sharedRoom = 1.0 - allKinds / (double) SimConfig.LOCAL_CROWDING_LIMIT;
+                        double chance = SimConfig.REPRODUCE_CHANCE
+                            * Species.fertility(speciesId)
+                            * Math.min(ownRoom, sharedRoom)
+                            * stride;
+                        if (units.homeVillage[i] != Units.NO_VILLAGE) {
+                            chance *= SimConfig.VILLAGE_BREEDING_BONUS;
+                        }
+                        if (random.nextDouble() < chance) {
+                            breed(world, units, i, random);
+                        }
                     }
                 }
             }
+
+            move(world, units, i, random);
         }
     }
 

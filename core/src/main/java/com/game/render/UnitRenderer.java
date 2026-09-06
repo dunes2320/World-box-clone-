@@ -96,8 +96,18 @@ public final class UnitRenderer implements Disposable {
     private int indexCount;
     private int visibleUnits;
 
+    /** Backwards-compatible entry: sizes for the legacy 3,000-unit pool. */
     public UnitRenderer() {
-        int meshCount = (SimConfig.MAX_UNITS + UNITS_PER_MESH - 1) / UNITS_PER_MESH;
+        this(SimConfig.MAX_UNITS);
+    }
+
+    /**
+     * Sizes the mesh pool for a specific unit capacity. The live simulation
+     * uses this so a 384 or 512 world with more units to render never runs
+     * short of mesh slots and starts silently dropping units from the frame.
+     */
+    public UnitRenderer(int unitsCapacity) {
+        int meshCount = (unitsCapacity + UNITS_PER_MESH - 1) / UNITS_PER_MESH;
         meshes = new Mesh[meshCount];
         renderables = new Renderable[meshCount];
 

@@ -11,7 +11,7 @@ import com.game.sim.Villages;
 import com.game.sim.World;
 
 /**
- * Builds and owns the {@link Mesh} for one 16x16 chunk of terrain.
+ * Builds and owns the {@link Mesh} for one chunk of terrain.
  *
  * <p>Tiles are drawn stepped rather than smoothly interpolated: each tile is a
  * flat quad at its own height, plus vertical wall quads dropping to any
@@ -19,6 +19,12 @@ import com.game.sim.World;
  * vertex is shared between faces, every face can carry a single flat colour and
  * a single hard normal - which is what "flat shading, vertex colours, no
  * textures" actually requires.
+ *
+ * <p>The staging buffers used during {@link #rebuild} are shared statics
+ * rather than per-instance arrays. A 32x32 chunk's worst-case buffer is 573KB
+ * of floats; at 256 chunks (a 512-tile world) that would be 150MB of CPU RAM
+ * doing nothing between rebuilds. Since {@code TerrainRenderer} rebuilds one
+ * chunk at a time on the render thread, one shared buffer is sufficient.
  */
 public final class ChunkMesh implements Disposable {
 
@@ -39,16 +45,27 @@ public final class ChunkMesh implements Disposable {
     /** position(3) + normal(3) + packed colour(1). */
     private static final int FLOATS_PER_VERTEX = 7;
 
-    private final Mesh mesh;
-    private final float[] vertices = new float[MAX_VERTICES * FLOATS_PER_VERTEX];
-    private final short[] indices = new short[MAX_INDICES];
+    // Shared staging arrays - see class javadoc. Not thread safe; every caller
+    // must be on the render thread which is where TerrainRenderer runs.
+    private static final float[] STAGING_VERTICES = new float[MAX_VERTICES * FLOATS_PER_VERTEX];
+    private static final short[] STAGING_INDICES = new short[MAX_INDICES];
 
+    private final Mesh mesh;
+    /**
+     * Chunk axis-aligned bounding box, refreshed at the end of every rebuild.
+     * The renderer tests this against the camera frustum so off-screen chunks
+     * cost neither a draw call nor a shader-side vertex pass. Initialised to a
+     * degenerate box so a chunk that has never been rebuilt is culled by
+     * default rather than always drawn.
+     */
+    private final com.badlogic.gdx.math.collision.BoundingBox bounds =
+        new com.badlogic.gdx.math.collision.BoundingBox();
     private int vertexCount;
     private int indexCount;
 
     public ChunkMesh() {
-        // 4 quads/tile * 256 tiles * 4 verts = 5120 max, comfortably inside the
-        // 65535 ceiling that short indices impose.
+        // At 32x32 tiles: 5 quads/tile * 1024 tiles * 4 verts = 20,480 verts,
+        // comfortably inside the 65,535 ceiling short indices impose.
         mesh = new Mesh(false, MAX_VERTICES, MAX_INDICES,
             new VertexAttribute(VertexAttributes.Usage.Position, 3, "a_position"),
             new VertexAttribute(VertexAttributes.Usage.Normal, 3, "a_normal"),
@@ -85,6 +102,11 @@ public final class ChunkMesh implements Disposable {
         int endX = Math.min(startX + SimConfig.CHUNK_SIZE, world.size);
         int endZ = Math.min(startZ + SimConfig.CHUNK_SIZE, world.size);
 
+        // Track this chunk's actual vertical range for the frustum bounds. A
+        // chunk covering only lowland grass sits in a much shorter slab than
+        // one holding a snow peak, and a tight box culls more aggressively.
+        float minY = SimConfig.SEA_LEVEL;
+        float maxY = SimConfig.SEA_LEVEL;
         for (int z = startZ; z < endZ; z++) {
             for (int x = startX; x < endX; x++) {
                 byte type = world.typeAt(x, z);
@@ -98,6 +120,8 @@ public final class ChunkMesh implements Disposable {
                 // seabed's own height, so lakes and coastline read as water
                 // surfaces instead of blue-tinted holes.
                 float top = TileType.isWater(type) ? SimConfig.SEA_LEVEL : height;
+                if (top < minY) minY = top;
+                if (top > maxY) maxY = top;
                 float topColor = territoryTintedTop(world, villages, x, z, type);
                 float sideColor = TerrainPalette.sidePacked(type);
 
@@ -118,8 +142,25 @@ public final class ChunkMesh implements Disposable {
             }
         }
 
-        mesh.setVertices(vertices, 0, vertexCount * FLOATS_PER_VERTEX);
-        mesh.setIndices(indices, 0, indexCount);
+        mesh.setVertices(STAGING_VERTICES, 0, vertexCount * FLOATS_PER_VERTEX);
+        mesh.setIndices(STAGING_INDICES, 0, indexCount);
+
+        // Bounds include the floor a wall could drop to, so a mountain-tile
+        // chunk on the edge of a deep-water trench is not culled the moment
+        // the camera looks at its neighbour's cliff face.
+        bounds.set(
+            new com.badlogic.gdx.math.Vector3(startX, SimConfig.MIN_HEIGHT, startZ),
+            new com.badlogic.gdx.math.Vector3(endX, maxY, endZ));
+        // A stunted maxY would make an empty chunk cull incorrectly; hold the
+        // sea level baseline so the water plane always registers.
+        if (maxY > minY) {
+            bounds.ext(new com.badlogic.gdx.math.Vector3(startX, minY, startZ));
+        }
+    }
+
+    /** Axis-aligned bounds of this chunk's geometry, in world space. */
+    public com.badlogic.gdx.math.collision.BoundingBox getBounds() {
+        return bounds;
     }
 
     /**
@@ -205,23 +246,23 @@ public final class ChunkMesh implements Disposable {
         pushVertex(x2, y2, z2, nx, ny, nz, color);
         pushVertex(x3, y3, z3, nx, ny, nz, color);
 
-        indices[indexCount++] = (short) base;
-        indices[indexCount++] = (short) (base + 1);
-        indices[indexCount++] = (short) (base + 2);
-        indices[indexCount++] = (short) base;
-        indices[indexCount++] = (short) (base + 2);
-        indices[indexCount++] = (short) (base + 3);
+        STAGING_INDICES[indexCount++] = (short) base;
+        STAGING_INDICES[indexCount++] = (short) (base + 1);
+        STAGING_INDICES[indexCount++] = (short) (base + 2);
+        STAGING_INDICES[indexCount++] = (short) base;
+        STAGING_INDICES[indexCount++] = (short) (base + 2);
+        STAGING_INDICES[indexCount++] = (short) (base + 3);
     }
 
     private void pushVertex(float x, float y, float z, float nx, float ny, float nz, float color) {
         int i = vertexCount * FLOATS_PER_VERTEX;
-        vertices[i] = x;
-        vertices[i + 1] = y;
-        vertices[i + 2] = z;
-        vertices[i + 3] = nx;
-        vertices[i + 4] = ny;
-        vertices[i + 5] = nz;
-        vertices[i + 6] = color;
+        STAGING_VERTICES[i] = x;
+        STAGING_VERTICES[i + 1] = y;
+        STAGING_VERTICES[i + 2] = z;
+        STAGING_VERTICES[i + 3] = nx;
+        STAGING_VERTICES[i + 4] = ny;
+        STAGING_VERTICES[i + 5] = nz;
+        STAGING_VERTICES[i + 6] = color;
         vertexCount++;
     }
 

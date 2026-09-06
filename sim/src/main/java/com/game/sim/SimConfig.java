@@ -8,11 +8,30 @@ public final class SimConfig {
 
     // ---- world dimensions ----
 
-    public static final int WORLD_SIZE = 128;
-    public static final int TILE_COUNT = WORLD_SIZE * WORLD_SIZE;
-    public static final int CHUNK_SIZE = 16;
-    public static final int CHUNKS_PER_AXIS = WORLD_SIZE / CHUNK_SIZE;
-    public static final int CHUNK_COUNT = CHUNKS_PER_AXIS * CHUNKS_PER_AXIS;
+    /**
+     * Chunk side in tiles. Every world size must divide by this.
+     *
+     * <p>Bumped from 16 to 32 in phase 7 for the scale-up. Smaller chunks
+     * would give more of them than the CPU can iterate cheaply at 512x512;
+     * larger chunks would make a single terraform edit rebuild too much
+     * geometry at once. 32x32 = 1024 tiles per chunk, comfortably under the
+     * 65535 short-index vertex cap even with all five wall quads populated.
+     */
+    public static final int CHUNK_SIZE = 32;
+
+    /**
+     * Default world side length in tiles - what a new {@link Simulation} uses
+     * when the launcher does not pass {@code --size}. Every dimension the sim
+     * needs (chunk grid, unit pool, population cap, village pool) is now
+     * derived from a world size rather than a fixed constant, so the same
+     * codebase runs at 128 for tests and 512 for a big playthrough.
+     */
+    public static final int DEFAULT_WORLD_SIZE = 384;
+
+    /** Small / Medium / Large presets for the world-setup picker. */
+    public static final int WORLD_SIZE_SMALL = 256;
+    public static final int WORLD_SIZE_MEDIUM = 384;
+    public static final int WORLD_SIZE_LARGE = 512;
 
     // ---- timing ----
 
@@ -71,14 +90,39 @@ public final class SimConfig {
 
     // ---- units ----
 
-    /** Pool size. Larger than the population cap so the spawn tool has headroom. */
+    /**
+     * Legacy pool size, retained for tests that construct {@link Units}
+     * directly at the original 128-tile scale. Live {@link Simulation}
+     * instances now size the pool with {@link #unitsCapacityFor(int)} so a
+     * bigger world gets a bigger pool without recompiling.
+     */
     public static final int MAX_UNITS = 3000;
     /**
-     * Breeding stops here. The brief's performance target is 2000 units, so the
-     * cap is set to it rather than above it - a world that can only reach its
-     * own target is a world that cannot quietly drift out of budget.
+     * Legacy population cap for the original 128 world. New code should call
+     * {@link #populationCapFor(int)} instead. Kept here so tests already
+     * built against this number keep meaning the same thing.
      */
     public static final int POPULATION_CAP = 2000;
+
+    /**
+     * Population cap that scales with world size.
+     *
+     * <p>Twenty units per tile of world side length keeps the units-per-tile
+     * ratio steady across scales: 2,560 at 128, 5,120 at 256, 7,680 at 384,
+     * and 10,240 at 512 - enough headroom for the brief's 8,000-unit target
+     * at the large size, without exploding on the small one.
+     */
+    public static int populationCapFor(int worldSize) {
+        return Math.max(POPULATION_CAP, worldSize * 20);
+    }
+
+    /**
+     * Pool capacity, sized 1.5x the population cap so the spawn tool always
+     * has headroom above the natural ceiling.
+     */
+    public static int unitsCapacityFor(int worldSize) {
+        return Math.max(MAX_UNITS, populationCapFor(worldSize) * 3 / 2);
+    }
 
     /** Tiles per tick. At 10 ticks/sec this is a bit over one tile a second. */
     public static final float UNIT_SPEED = 0.11f;
@@ -119,7 +163,20 @@ public final class SimConfig {
 
     // ---- villages ----
 
+    /** Legacy village pool size at 128; new code uses {@link #villagesCapacityFor(int)}. */
     public static final int MAX_VILLAGES = 96;
+
+    /**
+     * Village pool sized from world area.
+     *
+     * <p>One village per ~250 tiles matches the empirical density from phase 4
+     * measurements: 96 at 128 was comfortable, and this same ratio gives 262
+     * at 256, 590 at 384, and 1,048 at 512 - all safely inside the signed-short
+     * index we store per tile in {@code World.ownerVillage}.
+     */
+    public static int villagesCapacityFor(int worldSize) {
+        return Math.max(MAX_VILLAGES, worldSize * worldSize / 250);
+    }
     /** Ticks between village passes. Territory need not keep up with footsteps. */
     public static final int VILLAGE_UPDATE_INTERVAL = 20;
 

@@ -10,8 +10,14 @@ public final class WorldGen {
     private WorldGen() {
     }
 
+    /** Convenience for tests: generates a small test-scale world. */
     public static World generate(long seed) {
-        World world = new World();
+        return generate(seed, 128);
+    }
+
+    /** Generates a world of {@code size} tiles a side. */
+    public static World generate(long seed, int size) {
+        World world = new World(size);
         generateInto(world, seed);
         return world;
     }

@@ -52,8 +52,15 @@ public final class World {
         markAllChunksDirty();
     }
 
+    /**
+     * A small world for tests and other short-lived callers who do not care
+     * what size it is. Uses 128 rather than {@link SimConfig#DEFAULT_WORLD_SIZE}
+     * so the sim test suite keeps running in a second, not a minute: a 384
+     * world has nine times the tiles, and most tests do not exercise anything
+     * that needs a bigger one.
+     */
     public World() {
-        this(SimConfig.WORLD_SIZE);
+        this(128);
     }
 
     public int index(int x, int z) {

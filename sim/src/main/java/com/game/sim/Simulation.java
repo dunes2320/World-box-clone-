@@ -23,16 +23,32 @@ public final class Simulation {
     private final DisasterSystem disasters;
     private final Random random;
 
+    private final int populationCap;
+
     private long tickCount;
     private int warCasualties;
     private int disasterCasualties;
 
+    /** Default-size world at {@link SimConfig#DEFAULT_WORLD_SIZE}. */
     public Simulation(long seed) {
+        this(seed, SimConfig.DEFAULT_WORLD_SIZE);
+    }
+
+    /**
+     * Builds a world of {@code worldSize} tiles a side and sizes every pool,
+     * cap and grid off it. All the per-scale constants live in one place
+     * ({@link SimConfig}) so a 512 world is not just a larger map but a
+     * larger population, a larger village pool and a larger territory buffer -
+     * without a config file, a save format bump, or any behaviour code that
+     * has to know its world's size.
+     */
+    public Simulation(long seed, int worldSize) {
         this.seed = seed;
-        this.world = WorldGen.generate(seed);
-        this.units = new Units(SimConfig.MAX_UNITS);
+        this.world = WorldGen.generate(seed, worldSize);
+        this.units = new Units(SimConfig.unitsCapacityFor(worldSize));
+        this.populationCap = SimConfig.populationCapFor(worldSize);
         this.density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
-        this.villages = new Villages(SimConfig.MAX_VILLAGES);
+        this.villages = new Villages(SimConfig.villagesCapacityFor(worldSize));
         this.territory = new Territory(world.tileCount);
         // Offset from the world seed so the gameplay stream is independent of
         // the terrain stream: regenerating terrain must not shift gameplay rolls.
@@ -41,6 +57,11 @@ public final class Simulation {
         this.relations = new Relations(random);
         this.relationSystem = new RelationSystem();
         this.disasters = new DisasterSystem(world.size, SimConfig.DENSITY_CELL_SIZE);
+    }
+
+    /** Population ceiling for this world's size, above which breeding stops. */
+    public int getPopulationCap() {
+        return populationCap;
     }
 
     public Units getUnits() {
@@ -132,7 +153,7 @@ public final class Simulation {
     /** Advances the world by exactly one fixed step. */
     public void tick() {
         tickCount++;
-        UnitSystem.update(world, units, density, random);
+        UnitSystem.update(world, units, density, random, populationCap, tickCount);
         // Combat runs every tick, straight after movement, so fighting resolves
         // where the units actually are. In peacetime it returns immediately.
         warCasualties += CombatSystem.update(world, units, villages, relations, density, random);

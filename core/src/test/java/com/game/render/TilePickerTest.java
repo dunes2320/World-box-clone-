@@ -191,6 +191,6 @@ class TilePickerTest {
             assertEquals(x, picker.getTileX(), "repeated picks must agree");
             assertEquals(z, picker.getTileZ(), "repeated picks must agree");
         }
-        assertTrue(SimConfig.WORLD_SIZE > 0);
+        assertTrue(SimConfig.DEFAULT_WORLD_SIZE > 0);
     }
 }

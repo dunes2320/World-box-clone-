@@ -80,7 +80,12 @@ class VillageSystemTest {
     void aLoneWandererDoesNotFoundAVillage() {
         // Settling is something a group does. One unit crossing empty country
         // must keep walking, or the map fills with one-person hamlets.
-        Simulation sim = new Simulation(7L);
+        //
+        // Pinned to a 128-tile world so this stays a deterministic tick-budget
+        // test independent of what the default world size happens to be. On a
+        // bigger world one unit gets thousands more ticks alone before hitting
+        // any other, which is a different scenario.
+        Simulation sim = new Simulation(7L, 128);
         int[] spot = findGrassTile(sim.getWorld());
         sim.spawnUnits(spot[0], spot[1], 1, Species.HUMAN, 1);
         assertEquals(1, sim.getUnits().getLiveCount(), "the test needs exactly one unit placed");
@@ -316,7 +321,8 @@ class VillageSystemTest {
 
         int changed = territory.recompute(world, villages);
         assertTrue(changed > 0);
-        assertTrue(world.isChunkDirty(world.chunkIndex(4, 4)),
+        int centreChunk = 64 / SimConfig.CHUNK_SIZE;
+        assertTrue(world.isChunkDirty(world.chunkIndex(centreChunk, centreChunk)),
             "the chunk containing the new territory must be re-meshed");
     }
 

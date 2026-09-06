@@ -15,7 +15,13 @@ public final class RtsCamera {
     private static final float MIN_PITCH = 12.0f;
     private static final float MAX_PITCH = 82.0f;
     private static final float MIN_DISTANCE = 6.0f;
-    private static final float MAX_DISTANCE = 220.0f;
+    /**
+     * Maximum orbit distance is set from the world's own size in
+     * {@link #configureForWorld(int)}: the phase 7 large map (512) needs
+     * enough pull-back to frame the whole thing, but the small map should
+     * not zoom out until the terrain is a postage stamp.
+     */
+    private float maxDistance = 220.0f;
 
     private static final float ROTATE_SENSITIVITY = 0.35f;
     private static final float ZOOM_SENSITIVITY = 0.12f;
@@ -29,12 +35,27 @@ public final class RtsCamera {
     private float yawDegrees = 45.0f;
     private float pitchDegrees = 50.0f;
     private float distance = 110.0f;
+    private int worldSize = SimConfig.DEFAULT_WORLD_SIZE;
 
     public RtsCamera(int viewportWidth, int viewportHeight) {
         camera = new PerspectiveCamera(60f, viewportWidth, viewportHeight);
         camera.near = 0.5f;
-        camera.far = 600f;
-        target.set(SimConfig.WORLD_SIZE * 0.5f, 0f, SimConfig.WORLD_SIZE * 0.5f);
+        camera.far = 2400f;
+        configureForWorld(worldSize);
+    }
+
+    /**
+     * Points the camera at the middle of the world and sizes its orbit and
+     * pan clamp to it. Called once at construction and again if the world
+     * ever gets remade at a different size in the same session.
+     */
+    public void configureForWorld(int worldSize) {
+        this.worldSize = worldSize;
+        // Enough pull-back to frame the whole map at any size, without letting
+        // the small map zoom past uselessness.
+        this.maxDistance = Math.max(220f, worldSize * 1.4f);
+        this.distance = MathUtils.clamp(distance, MIN_DISTANCE, maxDistance);
+        target.set(worldSize * 0.5f, 0f, worldSize * 0.5f);
         update();
     }
 
@@ -53,7 +74,7 @@ public final class RtsCamera {
     /** Points the camera at a spot on the map from a given distance. */
     public void focusOn(float worldX, float worldZ, float distanceFromTarget) {
         target.set(worldX, target.y, worldZ);
-        distance = MathUtils.clamp(distanceFromTarget, MIN_DISTANCE, MAX_DISTANCE);
+        distance = MathUtils.clamp(distanceFromTarget, MIN_DISTANCE, maxDistance);
         update();
     }
 
@@ -105,8 +126,8 @@ public final class RtsCamera {
         // Keep the focus point over the map, with a little slack so the coast
         // can be centred without the camera escaping to empty space.
         float slack = 20f;
-        target.x = MathUtils.clamp(target.x, -slack, SimConfig.WORLD_SIZE + slack);
-        target.z = MathUtils.clamp(target.z, -slack, SimConfig.WORLD_SIZE + slack);
+        target.x = MathUtils.clamp(target.x, -slack, worldSize + slack);
+        target.z = MathUtils.clamp(target.z, -slack, worldSize + slack);
         update();
     }
 
@@ -114,7 +135,7 @@ public final class RtsCamera {
     public void zoom(float amount) {
         // Proportional to current distance, so zooming feels equally paced when
         // dialled right in and when pulled right out.
-        distance = MathUtils.clamp(distance * (1f + amount * ZOOM_SENSITIVITY), MIN_DISTANCE, MAX_DISTANCE);
+        distance = MathUtils.clamp(distance * (1f + amount * ZOOM_SENSITIVITY), MIN_DISTANCE, maxDistance);
         update();
     }
 

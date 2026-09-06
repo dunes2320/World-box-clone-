@@ -24,7 +24,7 @@ class UnitSystemTest {
     }
 
     private static DensityGrid newDensity() {
-        return new DensityGrid(SimConfig.WORLD_SIZE, SimConfig.DENSITY_CELL_SIZE);
+        return new DensityGrid(128, SimConfig.DENSITY_CELL_SIZE);
     }
 
     @Test
