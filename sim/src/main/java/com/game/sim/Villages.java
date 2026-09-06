@@ -22,6 +22,14 @@ public final class Villages {
     public final int[] foundedTick;
     public final boolean[] alive;
 
+    // ---- economy stockpiles ----
+    // Kept on Villages rather than a parallel Economy class so a slot reused
+    // by a new village comes with fresh zeroes automatically. See found().
+    public final int[] food;
+    public final int[] wood;
+    public final int[] stone;
+    public final int[] gold;
+
     private final int[] freeList;
     private int freeCount;
     private int highWater;
@@ -41,6 +49,10 @@ public final class Villages {
         radius = new float[capacity];
         foundedTick = new int[capacity];
         alive = new boolean[capacity];
+        food = new int[capacity];
+        wood = new int[capacity];
+        stone = new int[capacity];
+        gold = new int[capacity];
 
         freeList = new int[capacity];
         for (int i = 0; i < capacity; i++) {
@@ -79,6 +91,12 @@ public final class Villages {
         radius[index] = SimConfig.VILLAGE_BASE_RADIUS;
         foundedTick[index] = tick;
         alive[index] = true;
+        // Fresh stockpiles - a reused slot starts penniless, no matter what
+        // the abandoned village left behind.
+        food[index] = SimConfig.FOUNDING_FOOD;
+        wood[index] = SimConfig.FOUNDING_WOOD;
+        stone[index] = 0;
+        gold[index] = 0;
 
         liveCount++;
         if (index >= highWater) {

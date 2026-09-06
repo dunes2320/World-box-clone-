@@ -171,7 +171,7 @@ public final class Simulation {
     /** Advances the world by exactly one fixed step. */
     public void tick() {
         tickCount++;
-        UnitSystem.update(world, units, density, random, populationCap, tickCount);
+        UnitSystem.update(world, units, villages, density, random, populationCap, tickCount);
         // Combat runs every tick, straight after movement, so fighting resolves
         // where the units actually are. In peacetime it returns immediately.
         warCasualties += CombatSystem.update(world, units, villages, relations, density, random);
@@ -188,6 +188,11 @@ public final class Simulation {
             // reserved before roads try to reach it.
             BuildingSystem.update(world, villages, features, random, (int) tickCount);
             roadSystem.update(world, villages, features, roads);
+            // Economy runs after buildings and roads: production reads what
+            // BuildingSystem just placed, and trade reads the roads
+            // RoadSystem just laid.
+            Economy.update(world, villages, units, features);
+            Trade.update(world, villages, roads);
         }
         // Diplomacy is slower still, and reads the borders the village pass just
         // drew - so a war is declared over the map as it currently stands.

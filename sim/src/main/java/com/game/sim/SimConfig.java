@@ -200,6 +200,83 @@ public final class SimConfig {
     /** Villagers breed faster than drifters - the point of settling down. */
     public static final double VILLAGE_BREEDING_BONUS = 1.45;
 
+    // ---- economy ----
+
+    /** Food a village opens with, enough to get a couple of farms running. */
+    public static final int FOUNDING_FOOD = 40;
+    /** Wood a village opens with, enough to build a house or two. */
+    public static final int FOUNDING_WOOD = 20;
+
+    public static final int RESOURCE_FOOD = 0;
+    public static final int RESOURCE_WOOD = 1;
+    public static final int RESOURCE_STONE = 2;
+    public static final int RESOURCE_GOLD = 3;
+
+    /** Food a completed farm yields each village pass. */
+    public static final int FARM_YIELD_FOOD = 4;
+    /** Wood a completed lumber camp yields each pass. */
+    public static final int LUMBER_YIELD_WOOD = 3;
+    /** Stone a completed mine yields each pass. */
+    public static final int MINE_YIELD_STONE = 2;
+    /** Gold a market yields each pass. */
+    public static final int MARKET_YIELD_GOLD = 1;
+    /** Gold a dock yields per pass. */
+    public static final int DOCK_YIELD_GOLD = 1;
+
+    /** How much food one resident eats per village pass. */
+    public static final int FOOD_PER_RESIDENT = 1;
+
+    /**
+     * Above this stockpile, villagers get an economy-fed breeding boost on top
+     * of the base village bonus. Below it, breeding falls back to the base
+     * bonus. That is what makes prosperity look prosperous.
+     */
+    public static final int PROSPERITY_FOOD_THRESHOLD = 60;
+    /** Multiplier stacked on VILLAGE_BREEDING_BONUS when the pantry is full. */
+    public static final double PROSPERITY_BONUS = 1.35;
+    /**
+     * When food runs out, breeding stops entirely and a fraction of residents
+     * leave home each pass looking for grass. Not a total shutdown of the
+     * village - a village of nomads that gets fed again can revive.
+     */
+    public static final double HUNGER_DEPARTURE_CHANCE = 0.03;
+
+    // Build costs by kind. Wood is the currency of a young village; stone
+    // takes over as mines start producing. Central buildings cost gold.
+    public static final int COST_HOUSE_WOOD = 6;
+    public static final int COST_FARM_WOOD = 4;
+    public static final int COST_LUMBER_WOOD = 5;
+    public static final int COST_MINE_WOOD = 8;
+    public static final int COST_MINE_STONE = 4;
+    public static final int COST_DOCK_WOOD = 8;
+    public static final int COST_MARKET_WOOD = 10;
+    public static final int COST_MARKET_STONE = 6;
+    public static final int COST_TEMPLE_WOOD = 8;
+    public static final int COST_TEMPLE_STONE = 12;
+    public static final int COST_BARRACKS_WOOD = 8;
+    public static final int COST_BARRACKS_STONE = 8;
+    public static final int COST_WALL_STONE = 4;
+
+    /** Ticks a house takes to finish; everything else is a small multiple of this. */
+    public static final int BUILD_TIME_HOUSE = 40;
+    public static final int BUILD_TIME_FARM = 40;
+    public static final int BUILD_TIME_LUMBER = 60;
+    public static final int BUILD_TIME_MINE = 80;
+    public static final int BUILD_TIME_DOCK = 80;
+    public static final int BUILD_TIME_MARKET = 120;
+    public static final int BUILD_TIME_TEMPLE = 140;
+    public static final int BUILD_TIME_BARRACKS = 100;
+    public static final int BUILD_TIME_WALL = 20;
+
+    // ---- trade ----
+
+    /** Villages within this tile distance of each other can trade. */
+    public static final float TRADE_RANGE = 30f;
+    /** Only villages of the same species trade (until phase 10's kingdoms). */
+    public static final int TRADE_MIN_SURPLUS = 30;
+    /** Fraction of the surplus that moves in a single trade pass. */
+    public static final float TRADE_TRANSFER_FRACTION = 0.20f;
+
     /** How many ticks a unit holds a heading before picking a new one. */
     public static final int WANDER_MIN_TICKS = 18;
     public static final int WANDER_MAX_TICKS = 55;

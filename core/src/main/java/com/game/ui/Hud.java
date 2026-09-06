@@ -119,7 +119,8 @@ public final class Hud implements Disposable {
         speedControls.sync();
 
         World world = simulation.getWorld();
-        inspector.refresh(world, simulation.getUnits(), simulation.getVillages());
+        inspector.refresh(world, simulation.getUnits(), simulation.getVillages(),
+            simulation.getFeatures());
         stats.refresh(simulation.getUnits());
         relations.refresh(simulation.getRelations(), simulation.getTickCount());
 

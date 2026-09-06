@@ -35,13 +35,14 @@ public final class UnitSystem {
      * staggering existed keep meaning what they used to mean.
      */
     public static void update(World world, Units units, DensityGrid density, Random random) {
-        update(world, units, density, random, SimConfig.POPULATION_CAP, 0L, 1);
+        update(world, units, /* villages */ null, density, random,
+            SimConfig.POPULATION_CAP, 0L, 1);
     }
 
     /** Production entry: strides at {@link #SLOW_STRIDE} across ticks. */
-    public static void update(World world, Units units, DensityGrid density,
+    public static void update(World world, Units units, Villages villages, DensityGrid density,
                               Random random, int populationCap, long tickCount) {
-        update(world, units, density, random, populationCap, tickCount, SLOW_STRIDE);
+        update(world, units, villages, density, random, populationCap, tickCount, SLOW_STRIDE);
     }
 
     /**
@@ -56,7 +57,7 @@ public final class UnitSystem {
      * @param stride how many ticks apart a unit's slow pass runs; 1 processes
      *     every unit every tick (the phase 3 behaviour)
      */
-    public static void update(World world, Units units, DensityGrid density,
+    public static void update(World world, Units units, Villages villages, DensityGrid density,
                               Random random, int populationCap, long tickCount, int stride) {
         density.rebuild(units);
         int slowSlice = Math.floorMod(tickCount, stride);
@@ -127,10 +128,18 @@ public final class UnitSystem {
                             * Species.fertility(speciesId)
                             * Math.min(ownRoom, sharedRoom)
                             * stride;
-                        if (units.homeVillage[i] != Units.NO_VILLAGE) {
+                        short home = units.homeVillage[i];
+                        if (home != Units.NO_VILLAGE) {
                             chance *= SimConfig.VILLAGE_BREEDING_BONUS;
+                            // Prosperity stacks a further multiplier when the
+                            // pantry is full and silences breeding when it is
+                            // empty - villages actually starve now, they do
+                            // not just quietly grow more slowly.
+                            if (villages != null && villages.isAlive(home)) {
+                                chance *= Economy.prosperityMultiplier(villages, home);
+                            }
                         }
-                        if (random.nextDouble() < chance) {
+                        if (chance > 0 && random.nextDouble() < chance) {
                             breed(world, units, i, random);
                         }
                     }

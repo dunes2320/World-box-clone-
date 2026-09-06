@@ -93,12 +93,17 @@ public final class BuildingSystem {
         }
         int placed = 0;
         for (int a = 0; a < attempts && have + placed < want && !features.isFull(); a++) {
+            if (!Economy.canAfford(villages, v, kind)) {
+                break;
+            }
             int siteTile = pickSite(world, villages, features, random, v, kind);
             if (siteTile < 0) {
                 continue;
             }
-            int index = features.place(siteTile, kind, 128, 128, (short) v, 0);
+            int index = features.place(siteTile, kind, 128, 128, (short) v,
+                Economy.buildTime(kind));
             if (index >= 0) {
+                Economy.charge(villages, v, kind);
                 placed++;
             }
         }
