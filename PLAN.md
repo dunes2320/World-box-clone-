@@ -284,3 +284,305 @@ The world stops being empty.
 Not in the brief, so not built unless you ask: save/load, sound, main
 menu or world-setup screen, textures (vertex colors only),
 multiplayer, mod support, installers/packaging.
+
+---
+
+# PLAN v2 — scale-up + depth
+
+Phases 1-6 are done: the game runs, the six god tools work, wars start
+and end on their own. The follow-up brief keeps everything as-is and
+adds two things: a much bigger world, and real depth on top of it.
+Nothing is being rewritten. This section is for review before any code
+is touched.
+
+## Decisions from the second round of questions
+
+| Question | Answer | Consequence |
+|---|---|---|
+| Kingdoms vs. species relations | **Both layers; species seed kingdom relations** | Kingdoms own the live relations. `Species.affinity(a,b)` is a starting bias for a new kingdom pair and a small drift bias each pass, so orc-elf kingdoms *tend* toward hostility but can ally. The 4x4 species matrix stays for the readout and for seeding, no longer decides war on its own. |
+| Ambient combat vs. armies | **Armies replace ambient** | `CombatSystem` becomes army-only: fighting happens where armies are, not wherever enemies meet. Cheaper per tick and war reads as a discrete event. Border friction still exists in the diplomacy pass - it just drives the *decision* to raise an army, not damage on the ground. |
+| RNG and save round-trip | **Keep `Random`; save seed + replay from genesis** | Existing seeds stay valid. `SaveManager` writes seed + tickCount + the god-tool command log. Load reseeds and re-runs. That means every god-tool call has to be recorded, which is what the event log needs to be anyway. |
+| Perf verification | **I measure CPU budgets, you confirm real fps** | F3 overlay + a `--bench` mode that prints tick time, geometry rebuild ms, chunk rebuilds/frame, draw calls, retained memory. I hold those inside stated per-frame budgets. Real fps at 60 you confirm on hardware I can't run on. |
+
+## Perf and pathing approach — this is where the risk lives
+
+The 128->384 (or 512) jump multiplies tile count by 9-16x and unit
+count by 4x. A lot of what worked at 128 will not survive. Here is
+what changes and why.
+
+### Chunk size and LOD
+
+Chunk size goes from **16 to 32**. At 384x384 that is 144 chunks
+(12x12); at 512 it is 256 chunks (16x16). Smaller chunks would give
+more of them than the CPU can iterate cheaply; larger chunks would
+make a single terraform edit rebuild too much geometry at once.
+
+Two changes that pay for themselves at this scale:
+
+- **Frustum culling per chunk.** Chunk AABBs are cheap to test against
+  the camera. Off-screen chunks stop drawing entirely. At 512, an
+  overhead view sees maybe a third of them.
+- **Distant LOD.** Chunks past a distance threshold render as a
+  4-to-1 merged mesh (one quad per 2x2 tile group). Same colour
+  choice as the fine mesh, so no visual seam - the LOD boundary is
+  literally where the resolution steps. Rebuilt lazily and cached.
+
+### Sub-tile features
+
+A village growing from 3 tiles to 20-40 means a house can no longer
+*be* a tile. Instead, each tile carries a small list of **features**
+with a local `(dx, dz)` offset inside the tile. Farms, houses,
+plazas, roads, and props all live here. A tile with no features is
+one byte in the feature-count array; a tile with features
+indexes into a shared feature pool sized from the world, no per-tile
+`ArrayList`.
+
+Rendered by a new `StructureRenderer`, one batched mesh per feature
+kind, so it stays flat-arrays-and-one-draw-call the way units are.
+
+### Hierarchical pathfinding
+
+Per-unit A* over 512x512 is a non-starter. Instead:
+
+- **Portal graph** built from the chunk grid: each chunk exposes
+  portals on its four sides where a walkable tile meets a walkable
+  tile in the neighbouring chunk. Chunks connect chunks; portals
+  connect chunks to chunks. That's a graph of a few hundred nodes,
+  A* over it is negligible.
+- **Flow field inside a chunk** for the last leg to the destination
+  tile, computed once and shared by any unit heading to that
+  destination in that chunk.
+- **Path cache keyed by `(originVillage, destination)`** not by unit,
+  so a caravan and a farmer walking the same road share one path
+  and one flow field. Invalidated on terraform, war, or a road
+  edit.
+
+Villages that never send units very far never trigger any of this;
+the cost scales with movement.
+
+### Staggered updates
+
+Units update on `id % N` per tick. N depends on what the tick is
+doing:
+
+- Ageing, hunger, breeding: staggered N=6, so each unit thinks
+  ~1.6 times/sec at 10 tps. Nobody notices hunger a tenth of a
+  second late.
+- Movement: still every tick, so animation stays smooth.
+- Combat (once armies are in): every tick, but only for units in
+  an army - `Units.army` is checked first.
+
+That drops the sim cost of 8000 units to roughly what 2000 costs
+today for the once-per-6-ticks systems.
+
+### Region aggregate
+
+Anything that doesn't need per-unit granularity moves to
+`RegionGrid` (one entry per 32-tile chunk): total population,
+per-species population, food surplus, dominant kingdom. Diplomacy
+and economy read the aggregate, not the pool. Rebuilt lazily on the
+tick they're consumed on.
+
+### Memory budget
+
+Flat arrays sized from `worldSize` at construction, one allocation
+each. At 512x512:
+
+| Array | Size |
+|---|---|
+| `byte tileType`, `byte burn`, `byte biomeAffinity` | 256 KB each |
+| `float height`, `float fertility` | 1 MB each |
+| `short ownerVillage`, `short featureFirst`, `short kingdom` | 512 KB each |
+
+Units at 8000: SoA is ~20 fields x 8000 x average 4 bytes = ~640
+KB. Comfortably under 20 MB for all sim state at 512x512.
+
+## Files added, files unchanged
+
+Everything in the phase 1-6 tree stays. New files:
+
+```
+sim/
+  RegionGrid.java          per-chunk aggregate for cheap sim queries
+  Pathfinder.java          portal graph + chunk flow fields, cached
+  Features.java            SoA feature pool: kind, tile, dx, dz, owner
+  Buildings.java           blueprint table + placement rules
+  Roads.java               road bit per tile, road-aware move cost
+  Economy.java             stockpile per village, jobs, production
+  Trade.java               caravan units on the road network
+  Kingdoms.java            kingdom pool + relations, seeded by species
+  Armies.java              army orders: march, siege, capture
+  UnitLore.java            names, traits, skills, family lineage
+  History.java             append-only event log with tick + subject
+  Culture.java             per-kingdom knowledge + era
+  Religion.java            faith spread along roads
+  Wildlife.java            neutral animal SoA pool
+  Powers.java              new god powers dispatched via disasters
+  SaveManager.java         seed + tick + command log + event log
+
+core/
+  render/
+    ChunkLod.java          merged 2x2 mesh per far chunk
+    StructureRenderer.java one mesh per feature kind
+    RoadRenderer.java      road ribbon mesh
+    ArmyRenderer.java      army banner + count indicator
+    WildlifeRenderer.java  animals as unit-like boxes
+    OverlayRenderer.java   F3 debug overlay
+  ui/
+    HistoryPanel.java      scrollable event log
+    KingdomPanel.java      inspector for a clicked kingdom
+    LineagePanel.java      family tree for a clicked unit
+    WorldSetup.java        Small / Medium / Large picker on new world
+```
+
+## Determinism, save/load, and the god-tool log
+
+Every god-tool call (`spawnUnits`, `strike`, `Terraform.raise`,
+etc.) now goes through a `GodCommand` record that gets appended to
+`Simulation.commandLog`. `tick()` reads any commands whose scheduled
+tick equals the current one and dispatches them before advancing.
+That gives us three things at once:
+
+- Save = `{ seed, currentTick, commands }`. Load re-runs.
+- The event log gets each command entered as a "you did X" line for
+  free.
+- Determinism is provable by test: replay from tick 0, compare state
+  to the pre-save state, must be bit-identical.
+
+Because we're keeping `java.util.Random`, replay-on-load can be slow
+on very old worlds. Two mitigations: on save, we snapshot every
+20,000 ticks to disk alongside the log, and load resumes from the
+nearest snapshot. A snapshot is not the deterministic source of
+truth; the log is. Snapshots exist purely to skip work.
+
+## Phase order
+
+Each phase ends with `./gradlew build`, tests green, a commit, and a
+runnable game where the new system is visible. **Phase 7 ships alone**
+so you can run and confirm the scale-up before I add anything on top.
+
+### Phase 7 - Scale-up + perf infrastructure
+- World size becomes a parameter; default 384, `--size 256|384|512`
+- Chunk size 32; array sizes derive from world size
+- Frustum culling per chunk + distant LOD merged meshes
+- `RegionGrid` aggregate, populated from the existing SoA pools
+- Staggered unit updates via `id % N` on ageing/hunger/breeding
+- Sub-tile `Features` pool wired up but empty of content
+- `Pathfinder` implemented and unit-tested; no callers yet
+- `OverlayRenderer` (F3 toggle): fps, tick ms (last 60 frames avg
+  and max), unit count, chunk rebuilds/frame, draw calls, MB
+  retained
+- `--bench` CLI flag: fixed camera path, 30 seconds, prints those
+  same numbers as CSV so regressions are catchable
+- **Done when:** at 512x512 with 8000 units, my numbers fit the
+  stated budgets and you confirm fps
+
+### Phase 8 - Buildings and Roads
+- `Buildings`: house / farm / barracks / dock / temple / market /
+  wall / mine / lumber camp, with placement rules
+- Village placement pass every N ticks decides what to build
+- `Roads` bit-per-tile, generated by hierarchical pathfinder
+  between village centre and outlying buildings, and between allied
+  villages
+- `Pathfinder` gets a road-aware cost function; units on a road
+  move faster
+- `StructureRenderer` + `RoadRenderer`
+- Tests: placement rules (no farms on stone, docks touch water),
+  road generation determinism, movement speed on/off road
+- **Done when:** villages visibly build things and roads connect
+  them
+
+### Phase 9 - Economy and Growth
+- Per-village stockpiles: food, wood, stone, gold
+- Jobs assigned to units (`Units.job`): farmer, woodcutter, miner,
+  builder, soldier, trader, none
+- Buildings cost resources, take build time
+- Village growth rate scales with food surplus; starvation shrinks
+- `Trade`: caravan units spawned on roads carrying goods between
+  friendly villages
+- New inspector rows for a village: stockpiles, jobs breakdown
+- Tests: production balances (starvation reachable, boom reachable),
+  trade caravan round trip
+- **Done when:** villages visibly prosper or wither on their own
+
+### Phase 10 - Kingdoms, armies, and diplomacy
+- `Kingdoms` pool: name, flag colour, capital, member villages
+- Each village belongs to a kingdom; new villages join their species'
+  nearest kingdom or found a new one if isolated
+- Kingdom relations seeded from `Species.affinity(a,b)` plus drift
+  from border friction, trade volume, and shared enemies
+- States: peace, alliance, truce, war (hysteresis as with species)
+- **Armies replace ambient combat**: `Armies` are ordered groups
+  drawn from a village's population. `CombatSystem` rewritten to
+  fight only where armies are
+- Armies march (hierarchical path), siege villages, capture on
+  siege success -> ownership transfers, buildings damaged
+- Kingdoms split when a distant village rebels (distance from
+  capital > threshold and relation with capital < threshold)
+- `KingdomPanel` on click
+- Tests: kingdom seeding, army order state machine, siege capture,
+  rebellion split, hysteresis
+- **Done when:** kingdoms rise, fight, absorb each other, and
+  fracture, visibly
+
+### Phase 11 - Unit depth (named, traits, families)
+- `UnitLore`: name, traits (brave/greedy/sickly/strong/fertile),
+  skills that grow with work, deed count
+- Family lines: `parents[2]`, `children` compact list, inheritance
+  of traits and (for kings) titles
+- King and general as roles with distinct stats effects
+- `LineagePanel` on click, `InspectorPanel` shows name and traits
+- Traits actually do things: brave units join armies willingly,
+  greedy traders skim, sickly units catch plague faster
+- Tests: family tree consistency after 5,000 ticks, trait
+  distribution stays bounded, no orphan lineages
+- **Done when:** clicking any unit tells you a real story
+
+### Phase 12 - Culture and Tech
+- Per-kingdom knowledge counter fed by population and temples/markets
+- Eras: stone, bronze, iron, medieval; each gates buildings/units
+  and swaps their palette/geometry to distinguish
+- Religions: founded at a temple, spread along trade routes, convert
+  villages, occasionally split
+- Tests: era progression monotonicity, religion spread bounded by
+  trade graph reachability
+- **Done when:** a screenshot shows visibly different eras across
+  the map
+
+### Phase 13 - Wildlife and Powers
+- `Wildlife`: deer / wolves / bears / fish, own SoA pool, simple
+  predator-prey; light per-tick cost via staggering
+- Rare monsters (dragon, kraken) that attack villages
+- God powers: blessing, curse, mind control, drought, tornado,
+  tsunami, volcano, ice age, spawn kingdom. Each one dispatches
+  through existing systems: `drought` lowers fertility, `mind
+  control` reassigns kingdom, `spawn kingdom` uses the kingdom
+  founding path
+- Tests: predator-prey stays bounded (no extinction cascade from
+  spawn defaults), each power actually affects the system it names
+- **Done when:** a natural map shows animals living their lives,
+  and every listed power has a visible effect
+
+### Phase 14 - History
+- `History`: append-only event log, tick + subject + template
+- Events auto-generated by other systems: village founded, king
+  died, war declared, dragon slew someone
+- God tools automatically log too (from the command log)
+- `HistoryPanel`: scrollable, filterable by kingdom or unit
+- Tests: log is append-only, deterministic (same seed + same
+  commands => same log), no duplicate lines from one event
+- **Done when:** you can read the world's past
+
+### Phase 15 - Save / load
+- `SaveManager`: writes `{ seed, currentTick, commandLog,
+  eventLog, snapshot? }`
+- Load re-runs deterministically from nearest snapshot forward
+- Autosave snapshot every 20,000 ticks
+- Tests: save then load then run 1000 ticks == never save, run 1000
+  ticks, bit-identical
+- **Done when:** the round-trip test passes on any world
+
+## Explicitly still out of scope
+
+Sound, main menu, textures (vertex colours only), multiplayer, mod
+support, installers. Save/load is now in scope, per the brief.
