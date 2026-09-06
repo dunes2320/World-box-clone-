@@ -24,6 +24,9 @@ public final class Simulation {
     private final Features features;
     private final Roads roads;
     private final RoadSystem roadSystem;
+    private final Kingdoms kingdoms;
+    private final KingdomRelations kingdomRelations;
+    private final Armies armies;
     private final Random random;
 
     private final int populationCap;
@@ -67,6 +70,10 @@ public final class Simulation {
         this.features = new Features(featureCapacity, world.tileCount);
         this.roads = new Roads(world.tileCount);
         this.roadSystem = new RoadSystem(world.size);
+        int kCap = SimConfig.kingdomsCapacityFor(worldSize);
+        this.kingdoms = new Kingdoms(kCap);
+        this.kingdomRelations = new KingdomRelations(kCap);
+        this.armies = new Armies(SimConfig.armiesCapacityFor(worldSize));
     }
 
     /** Population ceiling for this world's size, above which breeding stops. */
@@ -104,6 +111,18 @@ public final class Simulation {
 
     public Roads getRoads() {
         return roads;
+    }
+
+    public Kingdoms getKingdoms() {
+        return kingdoms;
+    }
+
+    public KingdomRelations getKingdomRelations() {
+        return kingdomRelations;
+    }
+
+    public Armies getArmies() {
+        return armies;
     }
 
     /** Units killed in war since the world began. */
@@ -172,9 +191,12 @@ public final class Simulation {
     public void tick() {
         tickCount++;
         UnitSystem.update(world, units, villages, density, random, populationCap, tickCount);
-        // Combat runs every tick, straight after movement, so fighting resolves
-        // where the units actually are. In peacetime it returns immediately.
-        warCasualties += CombatSystem.update(world, units, villages, relations, density, random);
+        // Combat runs every tick and covers only the small half of the picture:
+        // civilians caught in an army's firing line. Army-vs-army and siege
+        // damage happens on the village pass in MilitarySystem, since that is
+        // the cadence armies actually move on.
+        warCasualties += CombatSystem.update(world, units, villages,
+            armies, kingdoms, relations, density, random);
         // Fire and plague advance every tick too, and cost nothing when the
         // world is neither alight nor sick.
         disasters.update(world, units, random);
@@ -183,6 +205,10 @@ public final class Simulation {
         // takes a while rather than happening the instant a crowd forms.
         if (tickCount % SimConfig.VILLAGE_UPDATE_INTERVAL == 0) {
             VillageSystem.update(world, units, villages, territory, density, random, (int) tickCount);
+            // Kingdom bookkeeping runs first at village pace: sort fresh
+            // villages into kingdoms and recount memberships so later systems
+            // read a settled political map.
+            KingdomSystem.update(villages, kingdoms, kingdomRelations, random, (int) tickCount);
             // Once villages have moved and their territories have settled,
             // let them build. Buildings first so a fresh house has ground
             // reserved before roads try to reach it.
@@ -193,11 +219,20 @@ public final class Simulation {
             // RoadSystem just laid.
             Economy.update(world, villages, units, features);
             Trade.update(world, villages, roads);
+            // Armies march on the village clock too - so a war between two
+            // neighbouring kingdoms produces visible campaigns rather than a
+            // frozen border.
+            warCasualties += MilitarySystem.update(world, villages, kingdoms,
+                kingdomRelations, armies, features, random, (int) tickCount);
         }
         // Diplomacy is slower still, and reads the borders the village pass just
         // drew - so a war is declared over the map as it currently stands.
         if (tickCount % SimConfig.RELATION_UPDATE_INTERVAL == 0) {
             relationSystem.update(world, villages, relations, random, (int) tickCount);
+            // Kingdom-level relations move on the same slow clock, since a
+            // kingdom war declaration should also feel like a considered
+            // event rather than a per-tick coin flip.
+            kingdomRelations.update(kingdoms, (int) tickCount, random);
         }
     }
 }

@@ -1,15 +1,19 @@
 package com.game.sim;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Phase 10 moved organised violence into {@link MilitarySystem} - armies do
+ * the killing, and civilians take collateral only when caught inside an
+ * actively-besieging army's radius. These tests cover the surviving half
+ * of {@link CombatSystem}: peacetime is free, an army's siege radius bites
+ * enemy civilians, and units already in a fight do not heal that same tick.
+ */
 class CombatSystemTest {
-
-    private static final int[] NO_CONTACT = new int[Species.COUNT * Species.COUNT];
 
     private static World grassWorld() {
         World world = new World();
@@ -20,176 +24,135 @@ class CombatSystemTest {
         return world;
     }
 
+    private static Kingdoms twoKingdomsHumansAndOrcs() {
+        Kingdoms k = new Kingdoms(4);
+        k.found(0, Species.HUMAN, 0);
+        k.found(1, Species.ORC, 0);
+        return k;
+    }
+
     private static Relations warBetween(byte a, byte b) {
         Relations relations = new Relations(new Random(1));
         relations.set(a, b, -1f);
-        relations.update(NO_CONTACT, new Random(1), 0);
+        relations.update(new int[Species.COUNT * Species.COUNT], new Random(1), 0);
         assertTrue(relations.isAtWar(a, b), "test setup should have started a war");
         return relations;
-    }
-
-    /** Two crowds standing on the same spot, which is what a battle looks like here. */
-    private static Units twoCrowdsAt(float x, float z, int perSide, byte a, byte b) {
-        Units units = new Units(200);
-        for (int i = 0; i < perSide; i++) {
-            units.spawn(x, z, a, 5000, 0f);
-            units.spawn(x, z, b, 5000, 0f);
-        }
-        return units;
     }
 
     @Test
     void peacetimeCostsNothingAndKillsNobody() {
         World world = grassWorld();
-        Units units = twoCrowdsAt(64.5f, 64.5f, 20, Species.HUMAN, Species.ORC);
+        Units units = new Units(200);
+        for (int i = 0; i < 20; i++) {
+            units.spawn(64.5f, 64.5f, Species.HUMAN, 5000, 0f);
+            units.spawn(64.5f, 64.5f, Species.ORC, 5000, 0f);
+        }
         Villages villages = new Villages(8);
+        Armies armies = new Armies(4);
         DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
-        density.rebuild(units);
         Relations peace = new Relations(new Random(1));
 
         int before = units.getLiveCount();
         for (int tick = 0; tick < 500; tick++) {
-            assertEquals(0, CombatSystem.update(world, units, villages, peace, density, new Random(tick)));
+            assertEquals(0, CombatSystem.update(world, units, villages, armies, null,
+                peace, density, new Random(tick)));
         }
         assertEquals(before, units.getLiveCount());
     }
 
     @Test
-    void enemiesSharingGroundKillEachOther() {
+    void anArmyBesiegingKillsEnemyCiviliansInItsRadius() {
         World world = grassWorld();
-        Units units = twoCrowdsAt(64.5f, 64.5f, 20, Species.HUMAN, Species.ORC);
-        Villages villages = new Villages(8);
+        Units units = new Units(200);
+        for (int i = 0; i < 40; i++) {
+            units.spawn(64.5f, 64.5f, Species.ORC, 5000, 0f);
+        }
+        Villages villages = new Villages(4);
+        Kingdoms kingdoms = twoKingdomsHumansAndOrcs();
+        Armies armies = new Armies(4);
+        int army = armies.raise(0, 64.5f, 64.5f, 10, 0, 0);
+        armies.setState(army, Armies.STATE_BESIEGING, 0);
         DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
         Relations relations = warBetween(Species.HUMAN, Species.ORC);
-        Random random = new Random(42);
 
         int deaths = 0;
         for (int tick = 0; tick < 300; tick++) {
-            density.rebuild(units);
-            deaths += CombatSystem.update(world, units, villages, relations, density, random);
+            deaths += CombatSystem.update(world, units, villages, armies, kingdoms,
+                relations, density, new Random(tick));
         }
-
-        assertTrue(deaths > 0, "a battle should produce casualties");
+        assertTrue(deaths > 0, "an army under siege should draw civilian blood in its radius");
         assertEquals(40 - units.getLiveCount(), deaths, "every death must come out of the pool");
-        assertTrue(relations.warCasualties(Species.HUMAN, Species.ORC) > 0,
-            "casualties should be reported back to the pair that caused them");
     }
 
     @Test
-    void bystandersAtPeaceAreNotDrawnIn() {
+    void aMarchingArmyPassesThroughWithoutSlaughter() {
+        World world = grassWorld();
+        Units units = new Units(80);
+        for (int i = 0; i < 30; i++) {
+            units.spawn(64.5f, 64.5f, Species.ORC, 5000, 0f);
+        }
+        Villages villages = new Villages(4);
+        Kingdoms kingdoms = twoKingdomsHumansAndOrcs();
+        Armies armies = new Armies(4);
+        int army = armies.raise(0, 64.5f, 64.5f, 10, 0, 0);
+        // STATE_MARCHING - the default from raise() - should hurt no civilian.
+        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
+        Relations relations = warBetween(Species.HUMAN, Species.ORC);
+
+        int before = units.getLiveCount();
+        for (int tick = 0; tick < 300; tick++) {
+            CombatSystem.update(world, units, villages, armies, kingdoms,
+                relations, density, new Random(tick));
+        }
+        assertEquals(before, units.getLiveCount(),
+            "an army only sacking a village does damage; a column marching does not");
+    }
+
+    @Test
+    void bystandersOfTheAttackingSpeciesAreNotHitByTheirOwnArmy() {
         World world = grassWorld();
         Units units = new Units(200);
         for (int i = 0; i < 20; i++) {
-            units.spawn(64.5f, 64.5f, Species.HUMAN, 5000, 0f);
             units.spawn(64.5f, 64.5f, Species.ORC, 5000, 0f);
+            units.spawn(64.5f, 64.5f, Species.HUMAN, 5000, 0f);
             // Elves are standing in exactly the same place and at war with nobody.
             units.spawn(64.5f, 64.5f, Species.ELF, 5000, 0f);
         }
-        Villages villages = new Villages(8);
+        Villages villages = new Villages(4);
+        Kingdoms kingdoms = twoKingdomsHumansAndOrcs();
+        Armies armies = new Armies(4);
+        // Human army besieging orcish ground. Elves are not the attacker so
+        // they DO take collateral; own-species humans do not.
+        int army = armies.raise(0, 64.5f, 64.5f, 12, 0, 0);
+        armies.setState(army, Armies.STATE_BESIEGING, 0);
         DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
         Relations relations = warBetween(Species.HUMAN, Species.ORC);
-        Random random = new Random(43);
 
+        int humansBefore = units.countOf(Species.HUMAN);
         for (int tick = 0; tick < 300; tick++) {
-            density.rebuild(units);
-            CombatSystem.update(world, units, villages, relations, density, random);
+            CombatSystem.update(world, units, villages, armies, kingdoms,
+                relations, density, new Random(tick));
         }
-        assertEquals(20, units.countOf(Species.ELF), "a neutral species should not take losses");
-        assertTrue(units.countOf(Species.HUMAN) + units.countOf(Species.ORC) < 40);
-    }
-
-    /** A world where one village of {@code owner} holds the ground around (64, 64). */
-    private static Villages territoryHeldBy(World world, byte owner) {
-        Villages villages = new Villages(8);
-        int village = villages.found(64, 64, owner, 0);
-        villages.population[village] = 10;
-        villages.radius[village] = 8f;
-        new Territory(world.tileCount).recompute(world, villages);
-        assertEquals(village, world.ownerVillage[world.index(64, 64)]);
-        return villages;
+        assertEquals(humansBefore, units.countOf(Species.HUMAN),
+            "an army does not shoot its own species");
     }
 
     @Test
-    void emptyEnemyTerritoryIsNotLethalOnItsOwn() {
+    void unitsInAnArmysBesiegingRadiusAreMarkedAsFighting() {
         World world = grassWorld();
-        Villages villages = territoryHeldBy(world, Species.ORC);
-
         Units units = new Units(8);
-        // One lone human deep in orc land, with no orc anywhere near it. This
-        // is what a refugee from a lost war looks like, and it is the case that
-        // used to wipe a defeated species off the map everywhere at once.
-        int refugee = units.spawn(64.5f, 64.5f, Species.HUMAN, 5000, 0f);
-        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
-        density.rebuild(units);
-        Relations relations = warBetween(Species.HUMAN, Species.ORC);
-
-        for (int tick = 0; tick < 2000; tick++) {
-            assertEquals(0,
-                CombatSystem.update(world, units, villages, relations, density, new Random(tick)));
-        }
-        assertTrue(units.isAlive(refugee));
-        assertEquals(SimConfig.UNIT_MAX_HEALTH, units.health[refugee],
-            "ground cannot hurt anyone; only enemies can");
-    }
-
-    @Test
-    void fightingOnEnemyGroundIsDeadlierThanFightingAtHome() {
-        int awayLosses = battleLosses(Species.ORC);
-        int homeLosses = battleLosses(Species.HUMAN);
-        assertTrue(awayLosses > homeLosses,
-            "defenders should have the edge: " + homeLosses + " lost at home vs "
-                + awayLosses + " lost away");
-    }
-
-    /**
-     * Runs an identical human-versus-orc battle on ground held by {@code owner}
-     * and returns the humans' losses, so the only difference between the two
-     * runs is whose territory it was fought on.
-     */
-    private static int battleLosses(byte owner) {
-        World world = grassWorld();
-        Villages villages = territoryHeldBy(world, owner);
-        Units units = twoCrowdsAt(64.5f, 64.5f, 25, Species.HUMAN, Species.ORC);
+        int u = units.spawn(64.5f, 64.5f, Species.ORC, 5000, 0f);
+        Villages villages = new Villages(4);
+        Kingdoms kingdoms = twoKingdomsHumansAndOrcs();
+        Armies armies = new Armies(4);
+        int army = armies.raise(0, 64.5f, 64.5f, 6, 0, 0);
+        armies.setState(army, Armies.STATE_BESIEGING, 0);
         DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
         Relations relations = warBetween(Species.HUMAN, Species.ORC);
-        Random random = new Random(77);
 
-        for (int tick = 0; tick < 120; tick++) {
-            density.rebuild(units);
-            CombatSystem.update(world, units, villages, relations, density, random);
-        }
-        return 25 - units.countOf(Species.HUMAN);
-    }
-
-    @Test
-    void ownTerritoryIsSafeInPeaceAndInWar() {
-        World world = grassWorld();
-        Villages villages = territoryHeldBy(world, Species.HUMAN);
-
-        Units units = new Units(8);
-        units.spawn(64.5f, 64.5f, Species.HUMAN, 5000, 0f);
-        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
-        density.rebuild(units);
-        Relations relations = warBetween(Species.HUMAN, Species.ORC);
-
-        for (int tick = 0; tick < 2000; tick++) {
-            assertEquals(0,
-                CombatSystem.update(world, units, villages, relations, density, new Random(tick)));
-        }
-        assertEquals(SimConfig.UNIT_MAX_HEALTH, units.health[0], "nobody should be hurt at home");
-    }
-
-    @Test
-    void unitsInAFightAreMarkedAsFighting() {
-        World world = grassWorld();
-        Units units = twoCrowdsAt(64.5f, 64.5f, 10, Species.HUMAN, Species.ORC);
-        Villages villages = new Villages(8);
-        DensityGrid density = new DensityGrid(world.size, SimConfig.DENSITY_CELL_SIZE);
-        density.rebuild(units);
-        Relations relations = warBetween(Species.HUMAN, Species.ORC);
-
-        CombatSystem.update(world, units, villages, relations, density, new Random(45));
-        assertEquals(Units.STATE_FIGHT, units.state[0]);
+        CombatSystem.update(world, units, villages, armies, kingdoms, relations, density,
+            new Random(45));
+        assertEquals(Units.STATE_FIGHT, units.state[u]);
     }
 
     @Test

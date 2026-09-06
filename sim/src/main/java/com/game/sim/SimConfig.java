@@ -438,6 +438,85 @@ public final class SimConfig {
     /** Per-tick infection chance, per sick unit sharing a density cell. */
     public static final double DISEASE_SPREAD_CHANCE = 0.0022;
 
+    // ---- kingdoms ----
+
+    /**
+     * How many kingdoms the world can hold at once, per world size.
+     * Kingdoms are heavier than villages: relations, armies, and a colour
+     * per entry - and a village index limit of {@link Short#MAX_VALUE} still
+     * caps how many can point at any one kingdom slot. 32 is enough headroom
+     * for the four species to run a handful of parallel kingdoms each.
+     */
+    public static int kingdomsCapacityFor(int worldSize) {
+        return Math.max(32, worldSize / 8);
+    }
+
+    /**
+     * Distance a fresh village looks for an existing same-species kingdom to
+     * join before founding its own. Tuned so villages in the same
+     * geographic cluster all end up under one flag, but distant colonies
+     * form independent kingdoms rather than joining a capital across the map.
+     */
+    public static final float KINGDOM_JOIN_RANGE = 50f;
+
+    /**
+     * Distance a member village has to be from its capital before it can
+     * rebel. Below this a village stays loyal no matter its politics.
+     */
+    public static final float KINGDOM_REBEL_DISTANCE = 90f;
+
+    /** How long a kingdom must have existed before any of its villages can rebel. */
+    public static final int KINGDOM_REBEL_MIN_AGE = 6000;
+
+    /** Random wobble applied to every kingdom pair each relations pass. */
+    public static final float KINGDOM_DRIFT = 0.030f;
+    /** How much each battlefield kingdom-vs-kingdom death sours their pair. */
+    public static final float KINGDOM_CASUALTY_GRUDGE = 0.010f;
+    /** Weariness eases a war back toward peace once it has been running. */
+    public static final float KINGDOM_WAR_WEARINESS = 0.045f;
+
+    // ---- armies ----
+
+    /**
+     * Army pool sized off world size. One in-flight army per active war
+     * per attacker plus headroom.
+     */
+    public static int armiesCapacityFor(int worldSize) {
+        return Math.max(64, kingdomsCapacityFor(worldSize) * 4);
+    }
+
+    /** Minimum draftable soldiers before an army is worth raising. */
+    public static final int ARMY_MIN_SIZE = 3;
+    /** Cap on soldiers per army - big kingdoms field several armies, not one huge one. */
+    public static final int ARMY_MAX_SIZE = 25;
+    /** Population the capital keeps for itself when drafting an army. */
+    public static final int ARMY_CAPITAL_RESERVE = 4;
+
+    /** Tiles per pass an army marches. Village-pass cadence, so slow but steady. */
+    public static final float ARMY_MARCH_SPEED = 8f;
+    /** Squared-distance-free arrival tolerance: any closer than this counts as at the target. */
+    public static final float ARMY_ARRIVE_RANGE = 2.5f;
+
+    /** Two hostile armies within this distance fight instead of continuing on. */
+    public static final float ARMY_FIGHT_RANGE = 4f;
+    /** Numerator of the per-pass hit rate: hits = enemy_size * N / D. */
+    public static final int ARMY_HIT_NUMERATOR = 1;
+    public static final int ARMY_HIT_DENOMINATOR = 3;
+
+    /** Radius around a besieging army in which civilians take stray fire. */
+    public static final float ARMY_COLLATERAL_RADIUS = 3.5f;
+    /** Per-pass chance a civilian inside the radius takes a hit. */
+    public static final double ARMY_COLLATERAL_CHANCE = 0.20;
+
+    /** Divisor turning army size into siege damage per pass on the defender. */
+    public static final int SIEGE_DAMAGE_DIVISOR = 3;
+    /** Divisor turning defender population into damage per pass on the besieger. */
+    public static final int SIEGE_DEFENSE_DIVISOR = 6;
+    /** Survivors left in a captured village to seed its new life under the winner. */
+    public static final int SIEGE_SURVIVORS = 2;
+    /** Buildings destroyed in the sack, aside from houses and roads. */
+    public static final int SIEGE_BUILDINGS_LOST = 3;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

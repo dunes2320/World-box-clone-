@@ -71,4 +71,27 @@ public final class Species {
                 return 0.78f;
         }
     }
+
+    /**
+     * How naturally friendly two species are toward each other's kingdoms, in
+     * {@code [-1, +1]}. Seeds {@link KingdomRelations} when a kingdom is born,
+     * so an orc kingdom and an elf kingdom open the game predisposed to war
+     * even if they have never met, and two dwarf kingdoms open predisposed to
+     * peace. Species-level {@link Relations} still drifts on its own; this is
+     * only the starting number for a specific kingdom pair.
+     */
+    public static float affinity(byte a, byte b) {
+        if (a == b) {
+            return 0.55f;
+        }
+        byte lo = a < b ? a : b;
+        byte hi = a < b ? b : a;
+        if (lo == HUMAN && hi == ORC) return -0.40f;
+        if (lo == HUMAN && hi == ELF) return 0.30f;
+        if (lo == HUMAN && hi == DWARF) return 0.20f;
+        if (lo == ORC && hi == ELF) return -0.50f;
+        if (lo == ORC && hi == DWARF) return -0.20f;
+        if (lo == ELF && hi == DWARF) return -0.10f;
+        return 0f;
+    }
 }

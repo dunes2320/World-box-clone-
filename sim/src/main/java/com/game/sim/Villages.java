@@ -30,6 +30,17 @@ public final class Villages {
     public final int[] stone;
     public final int[] gold;
 
+    /**
+     * Which kingdom this village belongs to, or {@link #NO_KINGDOM} for a
+     * village founded before {@link Kingdoms} has assigned it. The kingdom
+     * layer maintains this - villages themselves never write here after
+     * founding.
+     */
+    public final short[] kingdom;
+
+    /** Sentinel for {@link #kingdom} - a village that has not yet joined one. */
+    public static final short NO_KINGDOM = -1;
+
     private final int[] freeList;
     private int freeCount;
     private int highWater;
@@ -53,6 +64,7 @@ public final class Villages {
         wood = new int[capacity];
         stone = new int[capacity];
         gold = new int[capacity];
+        kingdom = new short[capacity];
 
         freeList = new int[capacity];
         for (int i = 0; i < capacity; i++) {
@@ -97,6 +109,10 @@ public final class Villages {
         wood[index] = SimConfig.FOUNDING_WOOD;
         stone[index] = 0;
         gold[index] = 0;
+        // A fresh village is stateless politically - the kingdom layer picks
+        // it up on its next pass and either sorts it into an existing kingdom
+        // or founds a new one around it.
+        kingdom[index] = NO_KINGDOM;
 
         liveCount++;
         if (index >= highWater) {
