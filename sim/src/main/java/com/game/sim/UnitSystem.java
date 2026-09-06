@@ -35,14 +35,23 @@ public final class UnitSystem {
      * staggering existed keep meaning what they used to mean.
      */
     public static void update(World world, Units units, DensityGrid density, Random random) {
-        update(world, units, /* villages */ null, density, random,
-            SimConfig.POPULATION_CAP, 0L, 1);
+        update(world, units, /* villages */ null, /* lore */ null, density, random,
+            SimConfig.POPULATION_CAP, 0L, 1, /* worldSeed */ 0L);
     }
 
     /** Production entry: strides at {@link #SLOW_STRIDE} across ticks. */
     public static void update(World world, Units units, Villages villages, DensityGrid density,
                               Random random, int populationCap, long tickCount) {
-        update(world, units, villages, density, random, populationCap, tickCount, SLOW_STRIDE);
+        update(world, units, villages, /* lore */ null, density, random,
+            populationCap, tickCount, SLOW_STRIDE, 0L);
+    }
+
+    /** Phase 11 entry: also updates {@link UnitLore} on births. */
+    public static void update(World world, Units units, Villages villages, UnitLore lore,
+                              DensityGrid density, Random random, int populationCap,
+                              long tickCount, long worldSeed) {
+        update(world, units, villages, lore, density, random,
+            populationCap, tickCount, SLOW_STRIDE, worldSeed);
     }
 
     /**
@@ -57,8 +66,9 @@ public final class UnitSystem {
      * @param stride how many ticks apart a unit's slow pass runs; 1 processes
      *     every unit every tick (the phase 3 behaviour)
      */
-    public static void update(World world, Units units, Villages villages, DensityGrid density,
-                              Random random, int populationCap, long tickCount, int stride) {
+    public static void update(World world, Units units, Villages villages, UnitLore lore,
+                              DensityGrid density, Random random, int populationCap,
+                              long tickCount, int stride, long worldSeed) {
         density.rebuild(units);
         int slowSlice = Math.floorMod(tickCount, stride);
         int end = units.getHighWater();
@@ -74,6 +84,7 @@ public final class UnitSystem {
                 int age = units.age[i] + stride;
                 units.age[i] = (short) Math.min(age, Short.MAX_VALUE);
                 if (age >= units.maxAge[i]) {
+                    if (lore != null) lore.clear(i);
                     units.kill(i);
                     continue;
                 }
@@ -89,6 +100,7 @@ public final class UnitSystem {
                     units.health[i] = (short) (units.health[i]
                         - SimConfig.STARVATION_DAMAGE * stride);
                     if (units.health[i] <= 0) {
+                        if (lore != null) lore.clear(i);
                         units.kill(i);
                         continue;
                     }
@@ -128,6 +140,11 @@ public final class UnitSystem {
                             * Species.fertility(speciesId)
                             * Math.min(ownRoom, sharedRoom)
                             * stride;
+                        // Personal fertility trait stacks - a fertile parent
+                        // outbreeds a plain neighbour of the same species.
+                        if (lore != null && Traits.has(lore.traits[i], Traits.FERTILE)) {
+                            chance *= SimConfig.TRAIT_FERTILE_BONUS;
+                        }
                         short home = units.homeVillage[i];
                         if (home != Units.NO_VILLAGE) {
                             chance *= SimConfig.VILLAGE_BREEDING_BONUS;
@@ -140,7 +157,7 @@ public final class UnitSystem {
                             }
                         }
                         if (chance > 0 && random.nextDouble() < chance) {
-                            breed(world, units, i, random);
+                            breed(world, units, lore, i, random, worldSeed);
                         }
                     }
                 }
@@ -180,7 +197,8 @@ public final class UnitSystem {
     }
 
     /** Places a newborn on walkable ground next to its parent, if there is any. */
-    private static void breed(World world, Units units, int parent, Random random) {
+    private static void breed(World world, Units units, UnitLore lore, int parent,
+                              Random random, long worldSeed) {
         for (int attempt = 0; attempt < 6; attempt++) {
             float angle = (float) (random.nextDouble() * Math.PI * 2.0);
             float distance = 0.6f + (float) random.nextDouble() * 1.4f;
@@ -190,7 +208,14 @@ public final class UnitSystem {
                 continue;
             }
             byte species = units.species[parent];
-            units.spawn(childX, childZ, species, lifespanFor(species, random), angle);
+            int child = units.spawn(childX, childZ, species, lifespanFor(species, random), angle);
+            if (child >= 0 && lore != null) {
+                // Second parent stays anonymous for now - pairing units at
+                // breed time would need proximity matchmaking that the sim
+                // does not do yet. The one known parent still carries a real
+                // lineage down through descendants.
+                lore.recordBirth(child, species, parent, UnitLore.NO_PARENT, worldSeed, random);
+            }
             return;
         }
     }
@@ -208,8 +233,16 @@ public final class UnitSystem {
      * <p>Returns how many actually got placed, which can be fewer than asked
      * for if the area is mostly water or the pool is full.
      */
+    /** Legacy overload for callers without lore. */
     public static int spawnBrush(World world, Units units, Random random,
                                  int centreX, int centreZ, int radius, byte species, int count) {
+        return spawnBrush(world, units, /* lore */ null, random,
+            centreX, centreZ, radius, species, count, /* worldSeed */ 0L);
+    }
+
+    public static int spawnBrush(World world, Units units, UnitLore lore, Random random,
+                                 int centreX, int centreZ, int radius, byte species, int count,
+                                 long worldSeed) {
         int placed = 0;
         int attempts = 0;
         int maxAttempts = count * 12;
@@ -240,6 +273,10 @@ public final class UnitSystem {
             // Stagger starting ages so a spawned group does not later die of
             // old age all at once, leaving a hole in the population curve.
             units.age[index] = (short) random.nextInt(SimConfig.UNIT_MATURITY);
+            if (lore != null) {
+                lore.recordBirth(index, species, UnitLore.NO_PARENT, UnitLore.NO_PARENT,
+                    worldSeed, random);
+            }
             placed++;
         }
         return placed;
@@ -278,10 +315,15 @@ public final class UnitSystem {
      * behaviour.
      */
     public static int cullStranded(World world, Units units) {
+        return cullStranded(world, units, /* lore */ null);
+    }
+
+    public static int cullStranded(World world, Units units, UnitLore lore) {
         int culled = 0;
         int end = units.getHighWater();
         for (int i = 0; i < end; i++) {
             if (units.alive[i] && !isWalkable(world, units.x[i], units.z[i])) {
+                if (lore != null) lore.clear(i);
                 units.kill(i);
                 culled++;
             }

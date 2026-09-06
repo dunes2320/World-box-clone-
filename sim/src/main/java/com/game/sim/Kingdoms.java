@@ -28,6 +28,14 @@ public final class Kingdoms {
     public final int foundedTick[];
     /** Packed 0xRRGGBB flag colour; derived from species + slot. */
     public final int[] color;
+    /**
+     * The unit index of this kingdom's king - the oldest live subject of
+     * the ruling species. Refreshed by {@link KingdomSystem} once per
+     * pass; {@link #NO_KING} when the kingdom has nobody old enough or
+     * the last candidate died.
+     */
+    public final short[] king;
+    public static final short NO_KING = -1;
     /** Short display name, e.g. "H1" for Human kingdom in slot 1. */
     private final String[] name;
 
@@ -50,6 +58,8 @@ public final class Kingdoms {
         population = new int[capacity];
         foundedTick = new int[capacity];
         color = new int[capacity];
+        king = new short[capacity];
+        java.util.Arrays.fill(king, NO_KING);
         name = new String[capacity];
 
         freeList = new int[capacity];
@@ -93,6 +103,7 @@ public final class Kingdoms {
         population[index] = 0;
         foundedTick[index] = tick;
         color[index] = deriveColor(speciesId, index);
+        king[index] = NO_KING;
         name[index] = Species.shortName(speciesId) + (index + 1);
 
         liveCount++;
@@ -110,6 +121,7 @@ public final class Kingdoms {
         alive[index] = false;
         villageCount[index] = 0;
         population[index] = 0;
+        king[index] = NO_KING;
         name[index] = null;
         freeList[freeCount++] = index;
         liveCount--;

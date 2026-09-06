@@ -120,7 +120,7 @@ public final class Hud implements Disposable {
 
         World world = simulation.getWorld();
         inspector.refresh(world, simulation.getUnits(), simulation.getVillages(),
-            simulation.getFeatures());
+            simulation.getFeatures(), simulation.getUnitLore(), simulation.getKingdoms());
         stats.refresh(simulation.getUnits());
         relations.refresh(simulation.getRelations(), simulation.getTickCount());
 

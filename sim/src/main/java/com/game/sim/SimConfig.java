@@ -517,6 +517,24 @@ public final class SimConfig {
     /** Buildings destroyed in the sack, aside from houses and roads. */
     public static final int SIEGE_BUILDINGS_LOST = 3;
 
+    // ---- traits ----
+
+    /** Chance a flag rolls true on a wanderer with no parents to inherit from. */
+    public static final double TRAIT_BASE_CHANCE = 0.16;
+    /** Chance a flag carries when both parents had it. Not 1.0, so lines can lose traits. */
+    public static final double TRAIT_BOTH_PARENTS_CHANCE = 0.90;
+    /** Chance a flag carries when exactly one parent had it. */
+    public static final double TRAIT_ONE_PARENT_CHANCE = 0.50;
+    /** De-novo mutation chance for a flag neither parent had. */
+    public static final double TRAIT_MUTATION_CHANCE = 0.06;
+
+    /** Multiplier on breeding chance for a fertile unit. */
+    public static final double TRAIT_FERTILE_BONUS = 1.35;
+    /** Multiplier on disease susceptibility for a sickly unit. */
+    public static final double TRAIT_SICKLY_MULT = 2.0;
+    /** Multiplier on collateral hit chance for a strong unit (below 1 = fewer hits). */
+    public static final double TRAIT_STRONG_COLLATERAL_MULT = 0.5;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

@@ -27,6 +27,7 @@ public final class Simulation {
     private final Kingdoms kingdoms;
     private final KingdomRelations kingdomRelations;
     private final Armies armies;
+    private final UnitLore unitLore;
     private final Random random;
 
     private final int populationCap;
@@ -74,6 +75,9 @@ public final class Simulation {
         this.kingdoms = new Kingdoms(kCap);
         this.kingdomRelations = new KingdomRelations(kCap);
         this.armies = new Armies(SimConfig.armiesCapacityFor(worldSize));
+        // Lore mirrors the units pool: one entry per slot, so a unit's
+        // index is also the index into its story.
+        this.unitLore = new UnitLore(this.units.capacity);
     }
 
     /** Population ceiling for this world's size, above which breeding stops. */
@@ -125,6 +129,10 @@ public final class Simulation {
         return armies;
     }
 
+    public UnitLore getUnitLore() {
+        return unitLore;
+    }
+
     /** Units killed in war since the world began. */
     public int getWarCasualties() {
         return warCasualties;
@@ -159,7 +167,8 @@ public final class Simulation {
      * @return how many were actually placed
      */
     public int spawnUnits(int tileX, int tileZ, int radius, byte species, int count) {
-        return UnitSystem.spawnBrush(world, units, random, tileX, tileZ, radius, species, count);
+        return UnitSystem.spawnBrush(world, units, unitLore, random,
+            tileX, tileZ, radius, species, count, seed);
     }
 
     /**
@@ -168,7 +177,7 @@ public final class Simulation {
      * edit rather than a behaviour.
      */
     public int cullStrandedUnits() {
-        return UnitSystem.cullStranded(world, units);
+        return UnitSystem.cullStranded(world, units, unitLore);
     }
 
     public long getSeed() {
@@ -190,16 +199,17 @@ public final class Simulation {
     /** Advances the world by exactly one fixed step. */
     public void tick() {
         tickCount++;
-        UnitSystem.update(world, units, villages, density, random, populationCap, tickCount);
+        UnitSystem.update(world, units, villages, unitLore, density, random,
+            populationCap, tickCount, seed);
         // Combat runs every tick and covers only the small half of the picture:
         // civilians caught in an army's firing line. Army-vs-army and siege
         // damage happens on the village pass in MilitarySystem, since that is
         // the cadence armies actually move on.
         warCasualties += CombatSystem.update(world, units, villages,
-            armies, kingdoms, relations, density, random);
+            armies, kingdoms, unitLore, relations, density, random);
         // Fire and plague advance every tick too, and cost nothing when the
         // world is neither alight nor sick.
-        disasters.update(world, units, random);
+        disasters.update(world, units, unitLore, random);
         // Villages move on a slower clock than footsteps: territory does not
         // need recomputing ten times a second, and settling should feel like it
         // takes a while rather than happening the instant a crowd forms.
@@ -208,7 +218,7 @@ public final class Simulation {
             // Kingdom bookkeeping runs first at village pace: sort fresh
             // villages into kingdoms and recount memberships so later systems
             // read a settled political map.
-            KingdomSystem.update(villages, kingdoms, kingdomRelations, random, (int) tickCount);
+            KingdomSystem.update(villages, kingdoms, kingdomRelations, units, random, (int) tickCount);
             // Once villages have moved and their territories have settled,
             // let them build. Buildings first so a fresh house has ground
             // reserved before roads try to reach it.

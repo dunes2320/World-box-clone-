@@ -4,8 +4,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.game.sim.Features;
-import com.game.sim.TileType;
+import com.game.sim.Kingdoms;
 import com.game.sim.Species;
+import com.game.sim.TileType;
+import com.game.sim.Traits;
+import com.game.sim.UnitLore;
 import com.game.sim.Units;
 import com.game.sim.Villages;
 import com.game.sim.World;
@@ -34,6 +37,16 @@ public final class InspectorPanel extends Table {
     private final Label gold;
     private final Label jobs;
 
+    // Unit lore lives in a third block, shown when the selected tile has
+    // any live unit on it: whoever is oldest wins the panel, since the
+    // veterans are the ones with the story worth reading.
+    private final Label unitHeader;
+    private final Label unitName;
+    private final Label unitAge;
+    private final Label unitTraits;
+    private final Label unitDeeds;
+    private final Label unitTitle;
+
     private boolean hasSelection;
     private int selectedX = -1;
     private int selectedZ = -1;
@@ -61,6 +74,15 @@ public final class InspectorPanel extends Table {
         stone = addRow(skin, "Stone");
         gold = addRow(skin, "Gold");
         jobs = addRow(skin, "Jobs");
+
+        unitHeader = new Label("UNIT", skin, "accent");
+        add(unitHeader).colspan(2).left().padTop(6f);
+        row();
+        unitName = addRow(skin, "Name");
+        unitAge = addRow(skin, "Age");
+        unitTraits = addRow(skin, "Traits");
+        unitDeeds = addRow(skin, "Deeds");
+        unitTitle = addRow(skin, "Title");
 
         setVisible(false);
     }
@@ -104,7 +126,9 @@ public final class InspectorPanel extends Table {
      * player is actively terraforming updates live rather than showing a
      * snapshot from whenever it was clicked.
      */
-    public void refresh(World world, Units units, Villages villages, Features features) {
+    /** Phase 11-aware refresh: also renders unit lore and king status. */
+    public void refresh(World world, Units units, Villages villages, Features features,
+                        UnitLore lore, Kingdoms kingdoms) {
         if (!hasSelection || !world.inBounds(selectedX, selectedZ)) {
             return;
         }
@@ -135,6 +159,55 @@ public final class InspectorPanel extends Table {
             gold.setText(String.valueOf(villages.gold[village]));
             jobs.setText(jobsSummary(features, village));
         }
+
+        int unitIndex = oldestUnitOnTile(units);
+        boolean showUnit = unitIndex >= 0 && lore != null;
+        setUnitVisible(showUnit);
+        if (showUnit) {
+            unitName.setText(lore.nameOf(unitIndex) + " (" + Species.shortName(units.species[unitIndex]) + ")");
+            unitAge.setText(String.valueOf(units.age[unitIndex]));
+            String traitStr = Traits.describe(lore.traits[unitIndex]);
+            unitTraits.setText(traitStr.isEmpty() ? "-" : traitStr);
+            unitDeeds.setText(String.valueOf(lore.deeds[unitIndex]));
+            unitTitle.setText(titleFor(unitIndex, kingdoms));
+        }
+    }
+
+    private void setUnitVisible(boolean visible) {
+        unitHeader.setVisible(visible);
+        unitName.setVisible(visible);
+        unitAge.setVisible(visible);
+        unitTraits.setVisible(visible);
+        unitDeeds.setVisible(visible);
+        unitTitle.setVisible(visible);
+    }
+
+    /** Oldest live unit on the selected tile, or -1 if the ground is empty. */
+    private int oldestUnitOnTile(Units units) {
+        int best = -1;
+        int bestAge = -1;
+        int end = units.getHighWater();
+        for (int i = 0; i < end; i++) {
+            if (!units.alive[i]) continue;
+            if ((int) Math.floor(units.x[i]) != selectedX
+                || (int) Math.floor(units.z[i]) != selectedZ) continue;
+            if (units.age[i] > bestAge) {
+                bestAge = units.age[i];
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** "King of Orc1" if this unit rules a kingdom; empty otherwise. */
+    private static String titleFor(int unitIndex, Kingdoms kingdoms) {
+        if (kingdoms == null) return "-";
+        for (int k = 0; k < kingdoms.getHighWater(); k++) {
+            if (kingdoms.isAlive(k) && kingdoms.king[k] == (short) unitIndex) {
+                return "King of " + kingdoms.nameOf(k);
+            }
+        }
+        return "-";
     }
 
     private void setVillageVisible(boolean visible) {

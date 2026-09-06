@@ -71,8 +71,13 @@ public final class DisasterSystem {
 
     /** Advances every ongoing disaster by one tick. */
     public void update(World world, Units units, Random random) {
+        update(world, units, /* lore */ null, random);
+    }
+
+    /** Phase 11 overload: {@link Traits#SICKLY} biases infection susceptibility. */
+    public void update(World world, Units units, UnitLore lore, Random random) {
         advanceFire(world, units, random);
-        advancePlague(units, random);
+        advancePlague(units, lore, random);
     }
 
     // ---- fire ----
@@ -200,6 +205,11 @@ public final class DisasterSystem {
      * is a good enough answer to "near".
      */
     private void advancePlague(Units units, Random random) {
+        advancePlague(units, /* lore */ null, random);
+    }
+
+    /** Overload that reads {@link Traits#SICKLY} to raise a unit's susceptibility. */
+    void advancePlague(Units units, UnitLore lore, Random random) {
         if (infectedUnits == 0) {
             return;
         }
@@ -247,7 +257,11 @@ public final class DisasterSystem {
             if (cell < 0 || infectedPerCell[cell] == 0) {
                 continue;
             }
-            if (random.nextDouble() < infectedPerCell[cell] * SimConfig.DISEASE_SPREAD_CHANCE) {
+            double susceptibility = infectedPerCell[cell] * SimConfig.DISEASE_SPREAD_CHANCE;
+            if (lore != null && Traits.has(lore.traits[i], Traits.SICKLY)) {
+                susceptibility *= SimConfig.TRAIT_SICKLY_MULT;
+            }
+            if (random.nextDouble() < susceptibility) {
                 units.disease[i] = (byte) SimConfig.DISEASE_DURATION;
                 stillSick++;
             }

@@ -27,10 +27,53 @@ public final class KingdomSystem {
      */
     public static void update(Villages villages, Kingdoms kingdoms,
                               KingdomRelations relations, Random random, int tick) {
+        update(villages, kingdoms, relations, /* units */ null, random, tick);
+    }
+
+    /**
+     * Phase 11 overload: also picks a king per kingdom, if the {@link Units}
+     * pool is available. The oldest live subject of the ruling species wins
+     * the title. Kingdoms without a candidate simply have no king that
+     * pass.
+     */
+    public static void update(Villages villages, Kingdoms kingdoms,
+                              KingdomRelations relations, Units units, Random random, int tick) {
         assignFreshVillages(villages, kingdoms, tick);
         recountKingdoms(villages, kingdoms);
         dissolveEmpty(villages, kingdoms, relations, tick);
         checkRebellion(villages, kingdoms, relations, tick);
+        if (units != null) {
+            pickKings(villages, kingdoms, units);
+        }
+    }
+
+    /**
+     * Picks the oldest resident of each kingdom as its king. Runs once per
+     * kingdom pass so a coup - old king dies of age, older successor
+     * inherits - happens on the next pass rather than mid-tick.
+     */
+    private static void pickKings(Villages villages, Kingdoms kingdoms, Units units) {
+        int kEnd = kingdoms.getHighWater();
+        for (int k = 0; k < kEnd; k++) {
+            if (!kingdoms.alive[k]) continue;
+            kingdoms.king[k] = Kingdoms.NO_KING;
+        }
+        int uEnd = units.getHighWater();
+        // One pass. For each subject, if they're older than the current
+        // king of their kingdom, they take the crown.
+        for (int u = 0; u < uEnd; u++) {
+            if (!units.alive[u]) continue;
+            short home = units.homeVillage[u];
+            if (home == Units.NO_VILLAGE || !villages.isAlive(home)) continue;
+            short k = villages.kingdom[home];
+            if (k == Villages.NO_KINGDOM || !kingdoms.isAlive(k)) continue;
+            if (units.species[u] != kingdoms.species[k]) continue;
+            short currentKing = kingdoms.king[k];
+            if (currentKing == Kingdoms.NO_KING || !units.isAlive(currentKing)
+                || units.age[u] > units.age[currentKing]) {
+                kingdoms.king[k] = (short) u;
+            }
+        }
     }
 
     /**

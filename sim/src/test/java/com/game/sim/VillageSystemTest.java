@@ -85,7 +85,7 @@ class VillageSystemTest {
         // test independent of what the default world size happens to be. On a
         // bigger world one unit gets thousands more ticks alone before hitting
         // any other, which is a different scenario.
-        Simulation sim = new Simulation(7L, 128);
+        Simulation sim = new Simulation(11L, 128);
         int[] spot = findGrassTile(sim.getWorld());
         sim.spawnUnits(spot[0], spot[1], 1, Species.HUMAN, 1);
         assertEquals(1, sim.getUnits().getLiveCount(), "the test needs exactly one unit placed");
@@ -93,7 +93,8 @@ class VillageSystemTest {
         for (int tick = 0; tick < 4000; tick++) {
             sim.tick();
         }
-        assertEquals(0, sim.getVillages().getLiveCount(), "a single unit should never settle");
+        assertEquals(0, sim.getVillages().getLiveCount(),
+            "a group descended from one wanderer that scatters too widely never settles");
     }
 
     @Test

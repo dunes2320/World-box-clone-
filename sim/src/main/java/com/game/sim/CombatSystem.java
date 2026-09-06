@@ -24,6 +24,14 @@ public final class CombatSystem {
     public static int update(World world, Units units, Villages villages,
                              Relations relations, DensityGrid density, Random random) {
         return update(world, units, villages, /* armies */ null, /* kingdoms */ null,
+            /* lore */ null, relations, density, random);
+    }
+
+    /** Pre-lore overload retained for tests that do not touch traits. */
+    public static int update(World world, Units units, Villages villages,
+                             Armies armies, Kingdoms kingdoms,
+                             Relations relations, DensityGrid density, Random random) {
+        return update(world, units, villages, armies, kingdoms, /* lore */ null,
             relations, density, random);
     }
 
@@ -33,7 +41,7 @@ public final class CombatSystem {
      * @return civilians killed
      */
     public static int update(World world, Units units, Villages villages,
-                             Armies armies, Kingdoms kingdoms,
+                             Armies armies, Kingdoms kingdoms, UnitLore lore,
                              Relations relations, DensityGrid density, Random random) {
         if (armies == null || armies.getLiveCount() == 0) {
             return 0;
@@ -59,12 +67,17 @@ public final class CombatSystem {
                 float dz = units.z[i] - az;
                 if (dx * dx + dz * dz > rSq) continue;
                 units.state[i] = Units.STATE_FIGHT;
-                if (random.nextDouble() >= SimConfig.ARMY_COLLATERAL_CHANCE) continue;
+                double hitChance = SimConfig.ARMY_COLLATERAL_CHANCE;
+                if (lore != null && Traits.has(lore.traits[i], Traits.STRONG)) {
+                    hitChance *= SimConfig.TRAIT_STRONG_COLLATERAL_MULT;
+                }
+                if (random.nextDouble() >= hitChance) continue;
                 units.health[i] -= SimConfig.COMBAT_DAMAGE;
                 if (units.health[i] <= 0) {
                     if (attackerSpecies >= 0 && relations != null) {
                         relations.recordCasualty(units.species[i], attackerSpecies);
                     }
+                    if (lore != null) lore.clear(i);
                     units.kill(i);
                     casualties++;
                 }
