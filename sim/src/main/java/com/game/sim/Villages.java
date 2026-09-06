@@ -41,6 +41,13 @@ public final class Villages {
     /** Sentinel for {@link #kingdom} - a village that has not yet joined one. */
     public static final short NO_KINGDOM = -1;
 
+    /**
+     * Religion followed by this village - a {@link Religions} index, or
+     * {@link Religions#NO_RELIGION} while nothing has spread here. Set by
+     * {@link ReligionSystem} on founding or conversion.
+     */
+    public final short[] religion;
+
     private final int[] freeList;
     private int freeCount;
     private int highWater;
@@ -65,6 +72,7 @@ public final class Villages {
         stone = new int[capacity];
         gold = new int[capacity];
         kingdom = new short[capacity];
+        religion = new short[capacity];
 
         freeList = new int[capacity];
         for (int i = 0; i < capacity; i++) {
@@ -113,6 +121,7 @@ public final class Villages {
         // it up on its next pass and either sorts it into an existing kingdom
         // or founds a new one around it.
         kingdom[index] = NO_KINGDOM;
+        religion[index] = Religions.NO_RELIGION;
 
         liveCount++;
         if (index >= highWater) {

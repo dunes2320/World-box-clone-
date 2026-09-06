@@ -535,6 +535,44 @@ public final class SimConfig {
     /** Multiplier on collateral hit chance for a strong unit (below 1 = fewer hits). */
     public static final double TRAIT_STRONG_COLLATERAL_MULT = 0.5;
 
+    // ---- culture and tech ----
+
+    /** People required per point of knowledge each pass. Bigger kingdoms learn faster. */
+    public static final int CULTURE_PEOPLE_PER_POINT = 6;
+    /** Bonus knowledge per completed temple per pass. */
+    public static final int CULTURE_PER_TEMPLE = 4;
+    /** Bonus knowledge per completed market per pass. */
+    public static final int CULTURE_PER_MARKET = 3;
+    /** Trickle - even a poor kingdom advances eventually. */
+    public static final int CULTURE_BASE_TRICKLE = 1;
+
+    /** Knowledge to reach bronze from stone. */
+    public static final int ERA_KNOWLEDGE_BRONZE = 400;
+    /** Knowledge to reach iron from bronze. */
+    public static final int ERA_KNOWLEDGE_IRON = 1600;
+    /** Knowledge to reach medieval from iron. */
+    public static final int ERA_KNOWLEDGE_MEDIEVAL = 4000;
+
+    // ---- religion ----
+
+    /**
+     * Religions pool cap - modest since one per kingdom plus a handful of
+     * splits is plenty. Sized off the kingdom cap directly.
+     */
+    public static int religionsCapacityFor(int worldSize) {
+        return Math.max(24, kingdomsCapacityFor(worldSize) * 2);
+    }
+    /** Per-village-pass chance an eligible temple founds a religion. */
+    public static final double RELIGION_FOUND_CHANCE = 0.15;
+    /** Squared-distance-free range for road-neighbour conversion, tiles. */
+    public static final float RELIGION_SPREAD_RANGE = 60f;
+    /** Per-pass chance a road-connected neighbour village converts to your faith. */
+    public static final double RELIGION_SPREAD_CHANCE = 0.05;
+    /** How old a religion must be before a village can split off from it. */
+    public static final int RELIGION_SPLIT_MIN_AGE = 4000;
+    /** Per-religion per-pass chance one of its distant followers splits away. */
+    public static final double RELIGION_SPLIT_CHANCE = 0.006;
+
     // ---- terraform brush ----
 
     public static final int MIN_BRUSH_RADIUS = 1;

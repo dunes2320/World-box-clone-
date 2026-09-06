@@ -28,6 +28,7 @@ public final class Simulation {
     private final KingdomRelations kingdomRelations;
     private final Armies armies;
     private final UnitLore unitLore;
+    private final Religions religions;
     private final Random random;
 
     private final int populationCap;
@@ -78,6 +79,7 @@ public final class Simulation {
         // Lore mirrors the units pool: one entry per slot, so a unit's
         // index is also the index into its story.
         this.unitLore = new UnitLore(this.units.capacity);
+        this.religions = new Religions(SimConfig.religionsCapacityFor(worldSize));
     }
 
     /** Population ceiling for this world's size, above which breeding stops. */
@@ -131,6 +133,10 @@ public final class Simulation {
 
     public UnitLore getUnitLore() {
         return unitLore;
+    }
+
+    public Religions getReligions() {
+        return religions;
     }
 
     /** Units killed in war since the world began. */
@@ -222,13 +228,19 @@ public final class Simulation {
             // Once villages have moved and their territories have settled,
             // let them build. Buildings first so a fresh house has ground
             // reserved before roads try to reach it.
-            BuildingSystem.update(world, villages, features, random, (int) tickCount);
+            BuildingSystem.update(world, villages, kingdoms, features, random, (int) tickCount);
             roadSystem.update(world, villages, features, roads);
             // Economy runs after buildings and roads: production reads what
             // BuildingSystem just placed, and trade reads the roads
             // RoadSystem just laid.
             Economy.update(world, villages, units, features);
             Trade.update(world, villages, roads);
+            // Culture and religion read the finished map: markets and
+            // temples that Economy just produced feed knowledge, and
+            // religions spread through the roads Trade just used.
+            CultureSystem.update(villages, kingdoms, features);
+            ReligionSystem.update(world, villages, kingdoms, religions, roads, features,
+                random, (int) tickCount, seed);
             // Armies march on the village clock too - so a war between two
             // neighbouring kingdoms produces visible campaigns rather than a
             // frozen border.

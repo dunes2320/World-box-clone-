@@ -36,19 +36,34 @@ public final class BuildingSystem {
      */
     public static int update(World world, Villages villages, Features features,
                              Random random, int tick) {
+        return update(world, villages, /* kingdoms */ null, features, random, tick);
+    }
+
+    /** Phase 12 overload: kingdom era gates which building kinds are legal. */
+    public static int update(World world, Villages villages, Kingdoms kingdoms,
+                             Features features, Random random, int tick) {
         int placed = 0;
         int villagesEnd = villages.getHighWater();
         for (int v = 0; v < villagesEnd; v++) {
             if (!villages.alive[v]) {
                 continue;
             }
-            placed += buildForVillage(world, villages, features, random, v, tick);
+            placed += buildForVillage(world, villages, kingdoms, features, random, v, tick);
         }
         return placed;
     }
 
-    private static int buildForVillage(World world, Villages villages, Features features,
-                                       Random random, int v, int tick) {
+    private static int buildForVillage(World world, Villages villages, Kingdoms kingdoms,
+                                       Features features, Random random, int v, int tick) {
+        // Ask the kingdom's era what is buildable this pass. A kingdomless
+        // village (rare, one-tick gap after founding) defaults to stone.
+        byte era = Era.STONE;
+        if (kingdoms != null) {
+            short k = villages.kingdom[v];
+            if (k != Villages.NO_KINGDOM && kingdoms.isAlive(k)) {
+                era = kingdoms.era[k];
+            }
+        }
         int placed = 0;
         // First few residents build shelter; later ones diversify. This keeps
         // a young village looking like homes clustered around the centre
@@ -65,29 +80,33 @@ public final class BuildingSystem {
         int[] have = countInFootprint(features, world, villages, v);
 
         // Order of attempts sets the priority when the pool is tight: houses
-        // then farms then economy then civic then military.
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_HOUSE,
+        // then farms then economy then civic then military. Era-locked kinds
+        // silently skip until the kingdom advances.
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_HOUSE,
             have[Features.KIND_HOUSE], wantHouses, tick, ATTEMPTS_PER_VILLAGE);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_FARM,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_FARM,
             have[Features.KIND_FARM], wantFarms, tick, ATTEMPTS_PER_VILLAGE);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_LUMBER_CAMP,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_LUMBER_CAMP,
             have[Features.KIND_LUMBER_CAMP], wantLumberCamps, tick, 2);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_MINE,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_MINE,
             have[Features.KIND_MINE], wantMines, tick, 2);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_DOCK,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_DOCK,
             have[Features.KIND_DOCK], wantDocks, tick, 2);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_MARKET,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_MARKET,
             have[Features.KIND_MARKET], wantMarkets, tick, 1);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_TEMPLE,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_TEMPLE,
             have[Features.KIND_TEMPLE], wantTemples, tick, 1);
-        placed += tryBuild(world, villages, features, random, v, Features.KIND_BARRACKS,
+        placed += tryBuild(era, world, villages, features, random, v, Features.KIND_BARRACKS,
             have[Features.KIND_BARRACKS], wantBarracks, tick, 1);
         return placed;
     }
 
-    private static int tryBuild(World world, Villages villages, Features features,
+    private static int tryBuild(byte era, World world, Villages villages, Features features,
                                 Random random, int v, byte kind, int have, int want,
                                 int tick, int attempts) {
+        if (!Era.unlocks(era, kind)) {
+            return 0;
+        }
         if (have >= want || features.isFull()) {
             return 0;
         }

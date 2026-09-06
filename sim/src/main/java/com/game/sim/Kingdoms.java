@@ -36,6 +36,25 @@ public final class Kingdoms {
      */
     public final short[] king;
     public static final short NO_KING = -1;
+
+    /**
+     * Cumulative culture points for this kingdom, accrued by
+     * {@link CultureSystem} each pass. Kingdoms with more people, more
+     * markets and more temples learn faster.
+     */
+    public final int[] knowledge;
+    /**
+     * Current era, one of the {@link Era} bytes. Advances one-way as
+     * {@link #knowledge} crosses thresholds.
+     */
+    public final byte[] era;
+    /**
+     * The state religion of this kingdom - a {@link Religions} index, or
+     * {@link Religions#NO_RELIGION} while nothing has taken root here yet.
+     * Set by {@link ReligionSystem} the first time a temple in a member
+     * village founds one, or when a stronger neighbour converts.
+     */
+    public final short[] religion;
     /** Short display name, e.g. "H1" for Human kingdom in slot 1. */
     private final String[] name;
 
@@ -60,6 +79,9 @@ public final class Kingdoms {
         color = new int[capacity];
         king = new short[capacity];
         java.util.Arrays.fill(king, NO_KING);
+        knowledge = new int[capacity];
+        era = new byte[capacity];
+        religion = new short[capacity];
         name = new String[capacity];
 
         freeList = new int[capacity];
@@ -104,6 +126,12 @@ public final class Kingdoms {
         foundedTick[index] = tick;
         color[index] = deriveColor(speciesId, index);
         king[index] = NO_KING;
+        knowledge[index] = 0;
+        era[index] = Era.STONE;
+        // Religion is not inherited from a previous occupant of the slot.
+        // Kingdoms open irreligious; a temple in a member village will
+        // found something eventually, or a neighbour will convert them.
+        religion[index] = -1;
         name[index] = Species.shortName(speciesId) + (index + 1);
 
         liveCount++;
